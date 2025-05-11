@@ -162,12 +162,19 @@ class RadicalExecutionBackend(BaseExecutionBackend):
             self.masters.append(master)
 
             for worker_description in workers:
-                wd = rp.TaskDescription(worker_description)
-                wd.uid = ru.generate_id('flow.worker.%(item_counter)06d', ru.ID_CUSTOM,
-                                        ns=self.session.uid)
-                wd.raptor_id = md.uid
-                wd.mode = rp.RAPTOR_WORKER
-                worker = master.submit_workers(wd)
+                # Set default worker class and override if specified
+                raptor_class = worker_description.pop('worker_type', 'DefaultWorker')
+
+                # Create and configure worker
+                worker = master.submit_workers(
+                    rp.TaskDescription({
+                        **worker_description,
+                        'raptor_id': md.uid,
+                        'mode': rp.RAPTOR_WORKER,
+                        'raptor_class': raptor_class,
+                        'uid': ru.generate_id('flow.worker.%(item_counter)06d', 
+                                              ru.ID_CUSTOM, ns=self.session.uid)}))
+
                 self.workers.append(worker)
 
     def select_master(self):
@@ -198,7 +205,7 @@ class RadicalExecutionBackend(BaseExecutionBackend):
             rp_task.mode = rp.TASK_FUNCTION
             rp_task.function = rp.PythonTask(task_desc['function'],
                                              task_desc['args'],
-                                             task_desc['kwargs'])    
+                                             task_desc['kwargs'])
 
         if rp_task.mode in [rp.TASK_FUNCTION, rp.TASK_EVAL,
                             rp.TASK_PROC, rp.TASK_METHOD]:
