@@ -79,7 +79,7 @@ class DaskExecutionBackend(BaseExecutionBackend):
                                                (ConcurrentFuture, asyncio.Future)))
 
             try:
-                if task['async']:
+                if asyncio.iscoroutinefunction(task['function']):
                     self._submit_async_function(task)
                     print(f"Successfully submitted async task {task['uid']}")
                 else:
@@ -100,7 +100,8 @@ class DaskExecutionBackend(BaseExecutionBackend):
                 task['exception'] = str(e)
                 self._callback(task, 'FAILED')
 
-        dask_future = self._client.submit(fn, *args, pure=False)
+        dask_future = self._client.submit(fn, *args,
+                                          **task['task_backend_specific_kwargs'])
         dask_future.add_done_callback(on_done)
 
     def _submit_async_function(self, task: Dict[str, Any]) -> None:

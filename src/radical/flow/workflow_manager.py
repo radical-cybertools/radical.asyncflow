@@ -56,9 +56,9 @@ class WorkflowEngine:
             Starts asynchronous tasks for the workflow engine.
         _register_decorator(comp_type, task_type=None):
             Creates a decorator for registering tasks or blocks.
-        _handle_flow_component_registration(func, comp_type, task_type, task_resource_kwargs):
+        _handle_flow_component_registration(func, comp_type, task_type, task_backend_specific_kwargs):
             Handles the registration of tasks or blocks as flow components.
-        _register_component(comp_fut, comp_type, comp_desc, task_type=None, task_resource_kwargs=None):
+        _register_component(comp_fut, comp_type, comp_desc, task_type=None, task_backend_specific_kwargs=None):
             Registers a task or block as a flow component.
         shutdown_on_failure(func):
             Decorator that shuts down the execution backend if an exception occurs in the decorated function.
@@ -206,17 +206,17 @@ class WorkflowEngine:
 
     @staticmethod
     def _register_decorator(comp_type: str, task_type: str = None):
-        def decorator(self, function: Optional[Callable] = None, **task_resource_kwargs) -> Callable:
-            def register(func: Callable) -> Callable:
-                return self._handle_flow_component_registration(func,
-                                                                comp_type=comp_type,
-                                                                task_type=task_type,
-                                                                task_resource_kwargs=task_resource_kwargs)
-
-            if function is not None:
-                return register(function)
-            return register
-
+        def decorator(self, func: Callable) -> Callable:
+            @wraps(func)
+            def wrapped(*args, **kwargs):
+                task_config = kwargs.pop("task_config", {}) or {}
+                registered_func = self._handle_flow_component_registration(
+                    func,
+                    comp_type=comp_type,
+                    task_type=task_type,
+                    task_backend_specific_kwargs=task_config)
+                return registered_func(*args, **kwargs)
+            return wrapped
         return decorator
 
     # Define specific decorators
@@ -228,7 +228,7 @@ class WorkflowEngine:
                                             func: Callable,
                                             comp_type: str,
                                             task_type: str,
-                                            task_resource_kwargs: dict = None):
+                                            task_backend_specific_kwargs: dict = None):
         """Universal decorator logic for both tasks and blocks."""
         @wraps(func)
         def wrapper(*args, **kwargs):
@@ -238,8 +238,7 @@ class WorkflowEngine:
             comp_desc['args'] = args
             comp_desc['function'] = func
             comp_desc['kwargs'] = kwargs
-            comp_desc['async'] = is_async
-            comp_desc['task_resource_kwargs'] = task_resource_kwargs
+            comp_desc['task_backend_specific_kwargs'] = task_backend_specific_kwargs
 
             if is_async:
                 comp_fut = AsyncFuture()
