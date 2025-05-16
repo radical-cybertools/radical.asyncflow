@@ -56,9 +56,8 @@ class ThreadExecutionBackend(BaseExecutionBackend):
                 func = task['function']
                 args = task.get('args', [])
                 kwargs = task.get('kwargs', {})
-                is_async = task.get('async', False)
 
-                if is_async:
+                if asyncio.iscoroutinefunction(task['function']):
                     return_value = self.run_async_func(lambda: func(*args, **kwargs))
                 else:
                     return_value = func(*args, **kwargs)
@@ -91,7 +90,8 @@ class ThreadExecutionBackend(BaseExecutionBackend):
     def submit_tasks(self, tasks: list):
         for task in tasks:
             # Submit task to thread pool
-            fut = self.executor.submit(self._task_wrapper, task)
+            fut = self.executor.submit(self._task_wrapper, task,
+                                       **task['task_backend_specific_kwargs'])
             fut.add_done_callback(lambda f, task=task: self._callback_func(*f.result()))
 
     def shutdown(self) -> None:
