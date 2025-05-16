@@ -14,21 +14,20 @@ radical_backend = RadicalExecutionBackend({'resource': 'local.localhost'})
 flow = WorkflowManager(backend=radical_backend)
 
 @flow.executable_task
-def task1(*args):
-    return 'python task1.py'
+def task1():
+    return "echo $RANDOM"
 
 @flow.function_task
-def task2(*args):
-    return 2 * 2
+def task2(t1_result):
+    return t1_result * 2 * 2
 
 
 # create the workflow
+t1_result = task1().result()
+t2_future = task2(t1_result) # t2 depends on t1 (waits for it)
 
-t1_future = task1()
-t2_future = task2(t2_future) # t2 depends on t1 (waits for it)
+t2_result = t2_future.result()
 
-t2_result = t2.result()
-print(t2_result)
-
+# shutdown the execution backend
 radical_backend.shutdown()
 ```
