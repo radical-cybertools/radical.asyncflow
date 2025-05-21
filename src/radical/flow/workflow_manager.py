@@ -206,15 +206,49 @@ class WorkflowEngine:
 
     @staticmethod
     def _register_decorator(comp_type: str, task_type: str = None):
+        """
+        A decorator factory for registering workflow components with optional task descriptions.
+
+        Args:
+            comp_type (str): The type of the workflow component (e.g., 'task', 'stage', etc.).
+            task_type (str, optional): The specific type of task, if applicable. Defaults to None.
+
+        Returns:
+            Callable: A decorator that wraps the target function, capturing and merging
+            task descriptions provided at definition and invocation time, and registers
+            the function as a workflow component using the manager's registration logic.
+
+        The decorator:
+            - Captures a `task_description` from the function's default arguments at
+              definition time.
+            - Allows overriding or extending the `task_description` at invocation time
+              via keyword arguments.
+            - Merges both descriptions, with invocation-time values taking precedence.
+            - Registers the function as a workflow component using the manager's internal
+              registration method.
+        """
         def decorator(self, func: Callable) -> Callable:
+            # Capture and store definition-time `task_description` if available
+            task_description_def = func.__defaults__[0] if func.__defaults__ else {}
+            setattr(func, '__task_description__', task_description_def)
+
             @wraps(func)
             def wrapped(*args, **kwargs):
-                task_config = kwargs.pop("task_config", {}) or {}
+                # Invocation-time `task_description` (if provided)
+                task_description_call = kwargs.pop("task_description", {}) or {}
+
+                # Merge with definition-time `task_description`
+                task_description_final = {
+                    **getattr(func, '__task_description__', {}),
+                    **task_description_call
+                }
+
                 registered_func = self._handle_flow_component_registration(
                     func,
                     comp_type=comp_type,
                     task_type=task_type,
-                    task_backend_specific_kwargs=task_config)
+                    task_backend_specific_kwargs=task_description_final
+                )
                 return registered_func(*args, **kwargs)
             return wrapped
         return decorator
@@ -229,7 +263,27 @@ class WorkflowEngine:
                                             comp_type: str,
                                             task_type: str,
                                             task_backend_specific_kwargs: dict = None):
-        """Universal decorator logic for both tasks and blocks."""
+        """
+        Universal decorator logic for registering both tasks and blocks as flow components.
+
+        This method returns a decorator that wraps the given function (`func`) and handles
+        its registration as a flow component. It supports both synchronous and asynchronous
+        functions, and manages the creation of appropriate future objects (`SyncFuture` or
+        `AsyncFuture`) for tracking the component's execution and registration.
+
+        Args:
+            func (Callable): The function to be registered as a flow component.
+            comp_type (str): The type of the component (e.g., "task", "block").
+            task_type (str): The type of the task, used to determine how to handle the
+            function's result.
+            task_backend_specific_kwargs (dict, optional): Additional backend-specific
+            keyword arguments for the task.
+
+        Returns:
+            Callable: A decorator that wraps the original function, registers it as a
+            flow component, and returns a future object representing the component's
+            execution.
+        """
         @wraps(func)
         def wrapper(*args, **kwargs):
             is_async = asyncio.iscoroutinefunction(func)
@@ -260,7 +314,18 @@ class WorkflowEngine:
     def _register_component(self, comp_fut, comp_type: str,
                             comp_desc: dict, task_type: str = None):
         """
-        Shared task/block registration logic.
+        Register a workflow component (task or block) with shared logic.
+        This method assigns a unique identifier to the component, sets up its metadata,
+        detects dependencies, and stores the component's future and description for later use.
+        Args:
+            comp_fut: The future object associated with the component.
+            comp_type (str): The type of the component (e.g., 'task', 'block').
+            comp_desc (dict): The component's description, including function, arguments, etc.
+            task_type (str, optional): The type of task, used to distinguish between function and executable tasks.
+        Raises:
+            ValueError: If an executable task does not return a string.
+        Returns:
+            The updated future object with assigned id and component description.
         """
         # make sure not to specify both func and executable at the same time
         comp_desc['name'] = comp_desc['function'].__name__
