@@ -19,15 +19,19 @@ def main():
         backend = backend(resource)
         flow = WorkflowEngine(backend=backend)
 
-        @flow.executable_task
+        task = flow.executable_task
+        if isinstance(backend, DaskExecutionBackend):
+            task = flow.function_task
+        
+        @task
         def task1(*args):
             return '/bin/date'
 
-        @flow.executable_task
+        @task
         def task2(*args):
             return '/bin/date'
 
-        @flow.executable_task
+        @task
         def task3(*args):
             return '/bin/date'
 

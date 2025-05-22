@@ -348,7 +348,8 @@ class WorkflowEngine:
         setattr(comp_fut, comp_type, comp_desc)
 
         # prepare the task package that will be sent to the backend
-        self.components[comp_desc['uid']] = {'future': comp_fut,
+        self.components[comp_desc['uid']] = {'type': comp_type,
+                                             'future': comp_fut,
                                              'description': comp_desc}
 
         self.dependencies[comp_desc['uid']] = comp_deps
@@ -499,23 +500,27 @@ class WorkflowEngine:
 
                     files_to_stage = []
 
-                    for dep in dependencies:
-                        dep_desc = self.components[dep['uid']]['description']
+                    # we do not link or manager implicit or explicit data
+                    #  dependencies if the component is a block.
+                    if self.components[comp_uid]['type'] == TASK:
 
-                        if not dep_desc['metadata'].get('output_files'):
-                            self.backend.link_implicit_data_deps(dep_desc)
+                        for dep in dependencies:
+                            dep_desc = self.components[dep['uid']]['description']
 
-                        for output_file in dep_desc['metadata']['output_files']:
-                            if output_file in comp_desc['metadata']['input_files']:
-                                to_stage = self.backend.link_explicit_data_deps(dep_desc['uid'], output_file)
+                            if not dep_desc['metadata'].get('output_files'):
+                                self.backend.link_implicit_data_deps(dep_desc)
+
+                            for output_file in dep_desc['metadata']['output_files']:
+                                if output_file in comp_desc['metadata']['input_files']:
+                                    to_stage = self.backend.link_explicit_data_deps(dep_desc['uid'], output_file)
+                                    files_to_stage.append(to_stage)
+
+                        for input_file in comp_desc['metadata']['input_files']:
+                            _data_target = [item['target'].split('/')[-1] for item in files_to_stage]
+                            if input_file not in _data_target:
+                                file_name = input_file.split('/')[-1]
+                                to_stage = self.backend.link_explicit_data_deps(file_name, input_file)
                                 files_to_stage.append(to_stage)
-
-                    for input_file in comp_desc['metadata']['input_files']:
-                        _data_target = [item['target'].split('/')[-1] for item in files_to_stage]
-                        if input_file not in _data_target:
-                            file_name = input_file.split('/')[-1]
-                            to_stage = self.backend.link_explicit_data_deps(file_name, input_file)
-                            files_to_stage.append(to_stage)
 
                     to_submit.append(comp_desc)
 
