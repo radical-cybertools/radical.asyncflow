@@ -501,8 +501,9 @@ class WorkflowEngine:
 
                     explicit_files_to_stage = []
 
-                    # we do not link or manager implicit or explicit data
-                    #  dependencies if the component is a block.
+                    # NOTE: We do not link or manage implicit or explicit
+                    # data dependencies if the component is a block.
+                    # TODO: We should consider this in the future.
                     if self.components[comp_uid]['type'] == TASK:
 
                         for dep in dependencies:
