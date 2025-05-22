@@ -1,12 +1,11 @@
-from radical.flow import Task
 from radical.flow import WorkflowEngine
-from radical.flow import RadicalExecutionBackend, DaskExecutionBackend
-from radical.flow import ThreadExecutionBackend, ProcessExecutionBackend
+from radical.flow import RadicalExecutionBackend
+from radical.flow import DaskExecutionBackend
+from radical.flow import ThreadExecutionBackend
 
-backends= {ThreadExecutionBackend: {},
-           ProcessExecutionBackend: {},
+backends= {ThreadExecutionBackend : {'max_workers': 4},
            RadicalExecutionBackend: {'resource': 'local.localhost'},
-           DaskExecutionBackend: {'n_workers': 2, 'threads_per_worker': 1}}
+           DaskExecutionBackend   : {'n_workers': 2, 'threads_per_worker': 1}}
 
 
 print('Running 1-layer funnel DAG workflow with each backend\n')
@@ -20,17 +19,21 @@ def main():
         backend = backend(resource)
         flow = WorkflowEngine(backend=backend)
 
-        @flow
+        task = flow.executable_task
+        if isinstance(backend, DaskExecutionBackend):
+            task = flow.function_task
+        
+        @task
         def task1(*args):
-            return Task(executable='/bin/date')
+            return '/bin/date'
 
-        @flow
+        @task
         def task2(*args):
-            return Task(executable='/bin/date')
+            return '/bin/date'
 
-        @flow
+        @task
         def task3(*args):
-            return Task(executable='/bin/date')
+            return '/bin/date'
 
         t3 = task3(task1(), task2())
 

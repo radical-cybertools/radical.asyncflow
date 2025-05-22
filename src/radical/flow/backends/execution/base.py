@@ -25,6 +25,18 @@ class BaseExecutionBackend(ABC):
     def register_callback(cls, func) -> None:
         pass
 
+    @abstractmethod
+    def build_task(cls, task: dict) -> None:
+        pass
+    
+    @abstractmethod
+    def link_implicit_data_deps(self, src_task):
+        pass
+
+    @abstractmethod
+    def link_explicit_data_deps(self, task_id, file_name=None):
+        pass
+
 
 class Session():
     def __init__(self):

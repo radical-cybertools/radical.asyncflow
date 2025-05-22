@@ -1,19 +1,18 @@
 import time
 
-from radical.flow import Task
 from radical.flow import WorkflowEngine
 from radical.flow import RadicalExecutionBackend
 
 backend = RadicalExecutionBackend({'resource': 'local.localhost'})
 flow = WorkflowEngine(backend=backend)
 
-@flow
+@flow.executable_task
 def task1(*args):
-    return Task(executable='/bin/echo "I got executed at" && /bin/date') 
+    return '/bin/echo "I got executed at" && /bin/date'
 
-@flow
+@flow.executable_task
 def task2(*args):
-    return Task(executable='/bin/echo "I got executed at" && /bin/date')
+    return '/bin/echo "I got executed at" && /bin/date'
 
 
 @flow.block

@@ -1,7 +1,6 @@
 import time
 import asyncio
 
-from radical.flow import Task
 from radical.flow import WorkflowEngine
 from radical.flow import RadicalExecutionBackend
 
@@ -10,25 +9,25 @@ async def main():
     backend = RadicalExecutionBackend({'resource': 'local.localhost'})
     flow = WorkflowEngine(backend=backend)
 
-    @flow
+    @flow.executable_task
     async def task1(*args):
-        return Task(executable='/bin/echo "I got executed at" && /bin/date') 
+        return '/bin/echo "I got executed at" && /bin/date'
 
-    @flow
+    @flow.executable_task
     async def task2(*args):
-        return Task(executable='/bin/echo "I got executed at" && /bin/date') 
+        return '/bin/echo "I got executed at" && /bin/date' 
 
-    @flow
+    @flow.executable_task
     async def task3(*args):
-        return Task(executable='/bin/echo "I got executed at" && /bin/date') 
+        return '/bin/echo "I got executed at" && /bin/date'
 
-    @flow
+    @flow.executable_task
     async def task4(*args):
-        return Task(executable='/bin/echo "I got executed at" && /bin/date') 
+        return '/bin/echo "I got executed at" && /bin/date'
 
-    @flow
+    @flow.executable_task
     async def task5(*args):
-        return Task(executable='/bin/echo "I got executed at" && /bin/date') 
+        return '/bin/echo "I got executed at" && /bin/date'
 
 
     @flow.block

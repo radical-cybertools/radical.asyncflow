@@ -69,6 +69,7 @@ class RadicalExecutionBackend(BaseExecutionBackend):
         """
         raptor_config = raptor_config or {}
         try:
+            self.tasks = {}
             self.raptor_mode = False
             self.session = rp.Session(uid=ru.generate_id('flow.session',
                                                           mode=ru.ID_PRIVATE))
@@ -161,12 +162,19 @@ class RadicalExecutionBackend(BaseExecutionBackend):
             self.masters.append(master)
 
             for worker_description in workers:
-                wd = rp.TaskDescription(worker_description)
-                wd.uid = ru.generate_id('flow.worker.%(item_counter)06d', ru.ID_CUSTOM,
-                                        ns=self.session.uid)
-                wd.raptor_id = md.uid
-                wd.mode = rp.RAPTOR_WORKER
-                worker = master.submit_workers(wd)
+                # Set default worker class and override if specified
+                raptor_class = worker_description.pop('worker_type', 'DefaultWorker')
+
+                # Create and configure worker
+                worker = master.submit_workers(
+                    rp.TaskDescription({
+                        **worker_description,
+                        'raptor_id': md.uid,
+                        'mode': rp.RAPTOR_WORKER,
+                        'raptor_class': raptor_class,
+                        'uid': ru.generate_id('flow.worker.%(item_counter)06d', 
+                                              ru.ID_CUSTOM, ns=self.session.uid)}))
+
                 self.workers.append(worker)
 
     def select_master(self):
@@ -186,11 +194,114 @@ class RadicalExecutionBackend(BaseExecutionBackend):
     def register_callback(self, func):
         return self.task_manager.register_callback(func)
 
-    def submit_tasks(self, tasks):
-        if self.raptor_mode:
-            for t in tasks:
-                t.raptor_id = next(self.master_selector)
-        return self.task_manager.submit_tasks(tasks)
+    def build_task(self, uid, task_desc, task_backend_specific_kwargs) -> rp.TaskDescription:
+
+        rp_task = rp.TaskDescription(from_dict=task_backend_specific_kwargs)
+        rp_task.uid = uid
+
+        if task_desc['executable']:
+            rp_task.executable = task_desc['executable']
+        elif task_desc['function']:
+            rp_task.mode = rp.TASK_FUNCTION
+            rp_task.function = rp.PythonTask(task_desc['function'],
+                                             task_desc['args'],
+                                             task_desc['kwargs'])
+
+        if rp_task.mode in [rp.TASK_FUNCTION, rp.TASK_EVAL,
+                            rp.TASK_PROC, rp.TASK_METHOD]:
+            if not self.raptor_mode:
+                error_msg = f'Raptor mode is not enabled, cannot register {rp_task.mode}'
+                raise RuntimeError(error_msg)
+
+            rp_task.raptor_id = next(self.master_selector)
+
+        self.tasks[uid] = rp_task
+
+        return rp_task
+
+    def link_explicit_data_deps(self, src_task=None, dst_task=None, file_name=None, file_path=None):
+        """Links explicit data dependencies by adding an input_staging entry to the destination task.
+
+        Args:
+            src_task: Source task dict (where file comes from). None for external paths.
+            dst_task: Destination task dict (where file goes).
+            file_name: Name of the file. Defaults to src_task UID if from task, or basename if from path.
+            file_path: External path to stage in (alternative to task-sourced files).
+
+        Returns:
+            dict: The data dependency dict that was staged.
+        """
+        if not file_name and not file_path:
+            raise ValueError('Either file_name or file_path must be provided')
+
+        dst_kwargs = dst_task['task_backend_specific_kwargs']
+        
+        # Determine the filename if not provided
+        if not file_name:
+            if file_path:
+                file_name = file_path.split('/')[-1]  # Use basename from path
+            elif src_task:
+                file_name = src_task['uid']  # Fallback to task UID
+            else:
+                raise ValueError("Must provide either file_name, file_path, or src_task")
+
+        # Create the appropriate data dependency
+        if file_path:
+            data_dep = {
+                'source': file_path,
+                'target': f"task:///{file_name}",
+                'action': rp.TRANSFER}
+        else:
+            if not src_task:
+                raise ValueError("src_task must be provided when file_path is not specified")
+            data_dep = {
+                'source': f"pilot:///{src_task['uid']}/{file_name}",
+                'target': f"task:///{file_name}",
+                'action': rp.LINK}
+
+        # Add to input staging
+        if 'input_staging' not in dst_kwargs:
+            dst_kwargs['input_staging'] = [data_dep]
+        else:
+            dst_kwargs['input_staging'].append(data_dep)
+
+        return data_dep
+
+    def link_implicit_data_deps(self, src_task, dst_task):
+        """
+        Adds pre_exec commands to dst_task that symlink files from src_task's sandbox.
+
+        This is used to simulate implicit data dependencies.
+        """
+
+        dst_kwargs = dst_task['task_backend_specific_kwargs']
+        src_uid = src_task['uid']
+
+        cmd1 = f'export SRC_TASK_ID={src_uid}'
+        cmd2 = f'export SRC_TASK_SANDBOX="$RP_PILOT_SANDBOX/$SRC_TASK_ID"'
+
+        cmd3 = '''files=$(cd "$SRC_TASK_SANDBOX" && ls | grep -ve "^$SRC_TASK_ID")
+                for f in $files
+                do 
+                    ln -sf "$SRC_TASK_SANDBOX/$f" "$RP_TASK_SANDBOX"
+                done'''
+
+        commands = [cmd1, cmd2, cmd3]
+
+        if dst_kwargs.get('pre_exec'):
+            dst_kwargs['pre_exec'].extend(commands)
+        else:
+            dst_kwargs['pre_exec'] = commands
+
+
+    def submit_tasks(self, tasks: list):
+
+        _tasks = []
+        for task in tasks:
+            _tasks.append(self.build_task(task['uid'],
+                          task, task['task_backend_specific_kwargs']))
+
+        return self.task_manager.submit_tasks(_tasks)
 
     def state(self):
         """
