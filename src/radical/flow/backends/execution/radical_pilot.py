@@ -219,70 +219,80 @@ class RadicalExecutionBackend(BaseExecutionBackend):
 
         return rp_task
 
-    def link_explicit_data_deps(self, task_id, file_name=None, file_path=None):
-        """
-        Creates a dictionary linking explicit data dependencies between tasks.
-
-        This method defines the source and target for data transfer between tasks, 
-        using the provided task ID and optional file name. If no file name is provided, 
-        the task ID is used as the file name.
+    def link_explicit_data_deps(self, src_task=None, dst_task=None, file_name=None, file_path=None):
+        """Links explicit data dependencies by adding an input_staging entry to the destination task.
 
         Args:
-            task_id (str): The task ID to link data dependencies from.
-            file_name (str, optional): The file name to be used in the data dependency. 
-                                        Defaults to None, in which case the task_id is used.
+            src_task: Source task dict (where file comes from). None for external paths.
+            dst_task: Destination task dict (where file goes).
+            file_name: Name of the file. Defaults to src_task UID if from task, or basename if from path.
+            file_path: External path to stage in (alternative to task-sourced files).
 
         Returns:
-            dict: A dictionary containing the data dependencies, including source, 
-                target, and transfer action.
+            dict: The data dependency dict that was staged.
         """
         if not file_name and not file_path:
             raise ValueError('Either file_name or file_path must be provided')
 
-        task = self.tasks[task_id]
-
+        dst_kwargs = dst_task['task_backend_specific_kwargs']
+        
+        # Determine the filename if not provided
         if not file_name:
-            file_name = task_id
+            if file_path:
+                file_name = file_path.split('/')[-1]  # Use basename from path
+            elif src_task:
+                file_name = src_task['uid']  # Fallback to task UID
+            else:
+                raise ValueError("Must provide either file_name, file_path, or src_task")
 
-        if file_name:
-            data_deps = {'source': f"pilot:///{task_id}/{file_name}",
-                        'target': f"task:///{file_name}", 'action': rp.LINK}
+        # Create the appropriate data dependency
+        if file_path:
+            data_dep = {
+                'source': file_path,
+                'target': f"task:///{file_name}",
+                'action': rp.TRANSFER}
+        else:
+            if not src_task:
+                raise ValueError("src_task must be provided when file_path is not specified")
+            data_dep = {
+                'source': f"pilot:///{src_task['uid']}/{file_name}",
+                'target': f"task:///{file_name}",
+                'action': rp.LINK}
 
-        if file_path and file_name:
-            data_deps = {'source': file_path,
-                         'target': f"task:///{file_name}", 'action': rp.TRANSFER}
+        # Add to input staging
+        if 'input_staging' not in dst_kwargs:
+            dst_kwargs['input_staging'] = [data_dep]
+        else:
+            dst_kwargs['input_staging'].append(data_dep)
 
-        task.input_staging.append(data_deps)
+        return data_dep
 
-        return data_deps
-
-    def link_implicit_data_deps(self, src_task):
+    def link_implicit_data_deps(self, src_task, dst_task):
         """
-        Generates commands to link implicit data dependencies for a source task.
+        Adds pre_exec commands to dst_task that symlink files from src_task's sandbox.
 
-        This method creates shell commands to copy files from the source task's sandbox
-        to the current task's sandbox, excluding task-related files. The commands are 
-        returned as a list of Python shell commands to execute in the task environment.
-
-        Args:
-            src_task (Task): The source task whose files are to be copied.
-
-        Returns:
-            list: A list of shell commands to link implicit data dependencies between tasks.
+        This is used to simulate implicit data dependencies.
         """
-        task = self.tasks[src_task['uid']]
-        cmd1 = f'export SRC_TASK_ID={src_task['uid']}'
+
+        dst_kwargs = dst_task['task_backend_specific_kwargs']
+        src_uid = src_task['uid']
+
+        cmd1 = f'export SRC_TASK_ID={src_uid}'
         cmd2 = f'export SRC_TASK_SANDBOX="$RP_PILOT_SANDBOX/$SRC_TASK_ID"'
 
         cmd3 = '''files=$(cd "$SRC_TASK_SANDBOX" && ls | grep -ve "^$SRC_TASK_ID")
-                  for f in $files
-                  do 
-                     ln -sf "$SRC_TASK_SANDBOX/$f" "$RP_TASK_SANDBOX"
-                  done'''
+                for f in $files
+                do 
+                    ln -sf "$SRC_TASK_SANDBOX/$f" "$RP_TASK_SANDBOX"
+                done'''
 
         commands = [cmd1, cmd2, cmd3]
 
-        task.pre_exec.extend(commands)
+        if dst_kwargs.get('pre_exec'):
+            dst_kwargs['pre_exec'].extend(commands)
+        else:
+            dst_kwargs['pre_exec'] = commands
+
 
     def submit_tasks(self, tasks: list):
 

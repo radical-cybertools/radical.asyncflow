@@ -80,7 +80,7 @@ class WorkflowEngine:
 
     @typeguard.typechecked
     def __init__(self, backend: Optional[BaseExecutionBackend] = None,
-                 dry_run: bool = False, jupyter_async=None) -> None:
+                 dry_run: bool = False, jupyter_async=None, implicit_data=True) -> None:
 
         self.loop = None
         self.running = []
@@ -91,7 +91,8 @@ class WorkflowEngine:
         self.dry_run = dry_run
         self.unresolved = set()
         self.queue = asyncio.Queue()
-        
+        self.implicit_data = implicit_data
+
         self._setup_execution_backend()
         
         # FIXME: session should always have a valid path
@@ -498,7 +499,7 @@ class WorkflowEngine:
                 if all(dep['uid'] in self.resolved and self.components[dep['uid']]['future'].done() for dep in dependencies):
                     comp_desc = self.components[comp_uid]['description']
 
-                    files_to_stage = []
+                    explicit_files_to_stage = []
 
                     # we do not link or manager implicit or explicit data
                     #  dependencies if the component is a block.
@@ -507,20 +508,31 @@ class WorkflowEngine:
                         for dep in dependencies:
                             dep_desc = self.components[dep['uid']]['description']
 
-                            if not dep_desc['metadata'].get('output_files'):
-                                self.backend.link_implicit_data_deps(dep_desc)
+                            # link implicit data dependencies
+                            if self.implicit_data and not dep_desc['metadata'].get('output_files'):
+                                self.log.debug(f'Linking implicit file(s): from {dep_desc['name']} to {comp_desc["name"]}')
+                                self.backend.link_implicit_data_deps(dep_desc, comp_desc)
 
+                            # link explicit data dependencies
                             for output_file in dep_desc['metadata']['output_files']:
                                 if output_file in comp_desc['metadata']['input_files']:
-                                    to_stage = self.backend.link_explicit_data_deps(dep_desc['uid'], output_file)
-                                    files_to_stage.append(to_stage)
+                                    self.log.debug(f'Linking explicit file ({output_file}) from {dep_desc['name']} to {comp_desc["name"]}')
+                                    data_dep = self.backend.link_explicit_data_deps(src_task=dep_desc,
+                                                                                    dst_task=comp_desc,
+                                                                                    file_name=output_file)
+                                    explicit_files_to_stage.append(data_dep)
 
+                        # input staging data dependencies
+                        staged_targets = [item['target'].split('/')[-1] for item in explicit_files_to_stage]
                         for input_file in comp_desc['metadata']['input_files']:
-                            _data_target = [item['target'].split('/')[-1] for item in files_to_stage]
-                            if input_file not in _data_target:
-                                file_name = input_file.split('/')[-1]
-                                to_stage = self.backend.link_explicit_data_deps(file_name, input_file)
-                                files_to_stage.append(to_stage)
+                            input_basename = input_file.split('/')[-1]
+                            if input_basename not in staged_targets:
+                                self.log.debug(f'Staging input file: {input_file} to {comp_desc["name"]}')
+                                data_dep = self.backend.link_explicit_data_deps(src_task=None,
+                                                                                dst_task=comp_desc,
+                                                                                file_name=input_basename,
+                                                                                file_path=input_file)
+                                explicit_files_to_stage.append(data_dep)
 
                     to_submit.append(comp_desc)
 
