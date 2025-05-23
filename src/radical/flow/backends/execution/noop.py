@@ -1,6 +1,7 @@
 import os
 from typing import Dict, Callable
 
+from ...constants import StateMapper
 from .base import Session, BaseExecutionBackend
 
 
@@ -9,6 +10,7 @@ class NoopExecutionBackend(BaseExecutionBackend):
         self.tasks = {}
         self.session = Session()
         self._callback_func: Callable = lambda task, state: None  # default no-op
+        StateMapper.register_backend_states_with_defaults(backend=self)
         print('Noop execution backend started successfully')
 
     def state(self):
@@ -16,6 +18,9 @@ class NoopExecutionBackend(BaseExecutionBackend):
 
     def task_state_cb(self):
         pass
+
+    def get_task_states_map(self):
+        return StateMapper(backend=self)
 
     def register_callback(self, func: Callable):
         self._callback_func = func

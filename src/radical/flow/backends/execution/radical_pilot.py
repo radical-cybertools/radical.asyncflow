@@ -4,7 +4,9 @@ from typing import Dict, Optional
 import radical.utils as ru
 import radical.pilot as rp
 
+from ...constants import StateMapper
 from .base import BaseExecutionBackend
+
 
 class RadicalExecutionBackend(BaseExecutionBackend):
     """
@@ -82,6 +84,13 @@ class RadicalExecutionBackend(BaseExecutionBackend):
                 self.raptor_mode = True
                 print('Enabling Raptor mode for RadicalExecutionBackend')
                 self.setup_raptor_mode(raptor_config)
+            
+            # register the backend task states to the global state manager
+            StateMapper.register_backend_states(backend=self, 
+                                                done_state=rp.DONE,
+                                                failed_state=rp.FAILED,
+                                                canceled_state=rp.CANCELED,
+                                                running_state=rp.AGENT_EXECUTING)
 
             print('RadicalPilot execution backend started successfully\n')
 
@@ -98,6 +107,9 @@ class RadicalExecutionBackend(BaseExecutionBackend):
             exception_msg += f' internally, please check {self.session.path}'
             
             raise SystemExit(exception_msg) from e
+    
+    def get_task_states_map(self):
+        return StateMapper(backend=self)
 
     def setup_raptor_mode(self, raptor_config):
         """

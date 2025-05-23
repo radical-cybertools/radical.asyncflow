@@ -22,12 +22,6 @@ BLOCK = 'block'
 FUNCTION = 'function'
 EXECUTABLE = 'executable'
 
-# Task States
-DONE = 'DONE'
-FAILED = 'FAILED'
-CANCELED = 'CANCELED'
-
-
 class WorkflowEngine:
     """
     WorkflowEngine is an asynchronous workflow manager that uses asyncio event loops 
@@ -92,6 +86,7 @@ class WorkflowEngine:
         self.unresolved = set()
         self.queue = asyncio.Queue()
         self.implicit_data = implicit_data
+        self.task_states_map = self.backend.get_task_states_map()
 
         self._setup_execution_backend()
         
@@ -633,12 +628,15 @@ class WorkflowEngine:
             self.log.warning(f'Received an unknown task and will skip it: {task["uid"]}')
             return
 
-        if state in [DONE, FAILED, CANCELED]:
+
+        if state in self.task_states_map.terminal_states:
             self.log.info(f'{task["uid"]} is in {state} state')
             task_fut = self.components[task['uid']]['future']
-            if state == DONE:
-                if not task_fut.done():
-                    self.handle_task_success(task, task_fut)
+            if state == self.task_states_map.DONE:
+                self.handle_task_success(task, task_fut)
+            elif state == self.task_states_map.CANCELED:
+                task_fut.cancel()
+            elif state == self.task_states_map.RUNNING:
+                task_fut.set_running_or_notify_cancel()
             else:
-                if not task_fut.done():
-                    self.handle_task_failure(task, task_fut)
+                self.handle_task_failure(task, task_fut)

@@ -6,6 +6,7 @@ import radical.utils as ru
 from typing import Dict, Callable
 from concurrent.futures import ThreadPoolExecutor, Future
 
+from ...constants import StateMapper
 from .base import Session, BaseExecutionBackend
 
 
@@ -14,9 +15,13 @@ class ThreadExecutionBackend(BaseExecutionBackend):
     def __init__(self, resources: Dict):
         self.tasks = {}
         self.session = Session()
-        self.executor = ThreadPoolExecutor()
+        self.executor = ThreadPoolExecutor(**resources)
         self._callback_func: Callable[[Future], None] = lambda f: None
+        StateMapper.register_backend_states_with_defaults(backend=self)
         print('ThreadPool execution backend started successfully')
+
+    def get_task_states_map(self):
+        return StateMapper(backend=self)
 
     def state(self):
         pass
@@ -30,10 +35,10 @@ class ThreadExecutionBackend(BaseExecutionBackend):
     def build_task(self, uid, task_desc, task_specific_kwargs):
         self.tasks[uid] = task_desc
     
-    def link_explicit_data_deps(self, task_id, file_name=None):
+    def link_explicit_data_deps(self, src_task=None, dst_task=None, file_name=None, file_path=None):
         pass
 
-    def link_implicit_data_deps(self, src_task):
+    def link_implicit_data_deps(self, src_task, dst_task):
         pass
 
     def run_async_func(self, coroutine_func):
