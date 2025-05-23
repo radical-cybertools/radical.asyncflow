@@ -86,10 +86,11 @@ class WorkflowEngine:
         self.unresolved = set()
         self.queue = asyncio.Queue()
         self.implicit_data = implicit_data
-        self.task_states_map = self.backend.get_task_states_map()
 
         self._setup_execution_backend()
-        
+
+        self.task_states_map = self.backend.get_task_states_map()
+
         # FIXME: session should always have a valid path
         self.work_dir = self.backend.session.path or os.getcwd()
 
