@@ -208,12 +208,17 @@ class RadicalExecutionBackend(BaseExecutionBackend):
 
     def build_task(self, uid, task_desc, task_backend_specific_kwargs) -> rp.TaskDescription:
 
+        is_service = task_desc.get('service', False)
         rp_task = rp.TaskDescription(from_dict=task_backend_specific_kwargs)
         rp_task.uid = uid
 
         if task_desc['executable']:
+            rp_task.mode = rp.TASK_SERVICE if is_service else rp.TASK_EXECUTABLE
             rp_task.executable = task_desc['executable']
         elif task_desc['function']:
+            if is_service:
+                raise RuntimeError('RadicalExecutionBackend does not support function service tasks')
+
             rp_task.mode = rp.TASK_FUNCTION
             rp_task.function = rp.PythonTask(task_desc['function'],
                                              task_desc['args'],
