@@ -620,6 +620,48 @@ class WorkflowEngine:
     @typeguard.typechecked
     def task_callbacks(self, task, state: str,
                        service_callback: Optional[Callable] = None):
+
+        """
+        Handle callbacks for task state changes and invoke appropriate handlers.
+        This method processes state changes for a given task, updates its future,
+        and calls relevant handlers based on the new state. Optionally, a service-specific
+        callback can be provided for additional handling.
+        Args:
+            task: The task object or dictionary representing the task whose state has changed.
+            state (str): The new state of the task.
+            service_callback (Optional[Callable], optional): A callback function for service tasks,
+                which is invoked with the task's future, the task object, and the new state.
+                service_callback must be a **daemon-thread** function to avoid blocking the event
+                loop.
+                example:
+                ```
+                def service_ready_callback(future, task, state):
+                    def wait_and_set():
+                        try:
+                            wait_for_something_to_happen_here  # synchronous call
+                            future.set_result(info)
+                        except Exception as e:
+                            future.set_exception(e)
+
+                    threading.Thread(target=wait_and_set, daemon=True).start()
+                ```
+        Returns:
+            None
+        Logs:
+            - Debug message if the state is not relevant.
+            - Info message when a task changes state.
+            - Warning if an unknown task is received.
+        State Handling:
+            - StateMapper.DONE: Calls `handle_task_success`.
+            - StateMapper.RUNNING: Marks the future as running.
+            - StateMapper.CANCELED: Cancels the future.
+            - StateMapper.FAILED: Calls `handle_task_failure`.
+        """
+        if state not in self.task_states_map.terminal_states and \
+             state != self.task_states_map.RUNNING:
+             self.log.debug(f"Non-relevant task state received: {state}. Skipping state.")
+             return
+
         task_obj = task
 
         if not isinstance(task, dict):
