@@ -535,7 +535,8 @@ class WorkflowEngine:
                         for input_file in comp_desc['metadata']['input_files']:
                             input_basename = input_file.split('/')[-1]
                             if input_basename not in staged_targets:
-                                self.log.debug(f'Staging input file: {input_file} to {comp_desc["name"]}')
+                                msg = f'Staging {input_file} to {comp_desc["name"]} work dir'
+                                self.log.debug(msg)
                                 data_dep = self.backend.link_explicit_data_deps(src_task=None,
                                                                                 dst_task=comp_desc,
                                                                                 file_name=input_basename,
