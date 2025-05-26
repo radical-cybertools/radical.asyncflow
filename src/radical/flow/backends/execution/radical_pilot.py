@@ -1,4 +1,5 @@
 import copy
+import threading
 import typeguard
 from typing import Dict, Optional
 import radical.utils as ru
@@ -6,6 +7,17 @@ import radical.pilot as rp
 
 from ...constants import StateMapper
 from .base import BaseExecutionBackend
+
+
+def service_ready_callback(future, task, state):
+    def wait_and_set():
+        try:
+            info = task.wait_info()  # synchronous call
+            future.set_result(info)
+        except Exception as e:
+            future.set_exception(e)
+
+    threading.Thread(target=wait_and_set, daemon=True).start()
 
 
 class RadicalExecutionBackend(BaseExecutionBackend):
@@ -204,11 +216,20 @@ class RadicalExecutionBackend(BaseExecutionBackend):
             current_master = (current_master + 1) % len(self.masters)
 
     def register_callback(self, func):
-        return self.task_manager.register_callback(func)
+        def backend_callback(task, state):
+            service_callback = None
+            # Attach backend-specific done_callback for service tasks
+            if task.mode == rp.TASK_SERVICE and state == rp.AGENT_EXECUTING:
+                service_callback = service_ready_callback
+
+            # Forward to workflow manager's standard callback
+            func(task, state, service_callback=service_callback)
+
+        self.task_manager.register_callback(backend_callback)
 
     def build_task(self, uid, task_desc, task_backend_specific_kwargs) -> rp.TaskDescription:
 
-        is_service = task_desc.get('service', False)
+        is_service = task_desc.get('is_service', False)
         rp_task = rp.TaskDescription(from_dict=task_backend_specific_kwargs)
         rp_task.uid = uid
 

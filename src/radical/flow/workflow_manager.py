@@ -617,48 +617,35 @@ class WorkflowEngine:
         else:
             task_fut.set_result(task['stdout'])
 
-    def handle_task_failure(self, task, task_fut):
-        """
-        Handle task failure by setting the exception in the future.
-        """
-        internal_task = self.components[task['uid']]['description']
+    @typeguard.typechecked
+    def task_callbacks(self, task, state: str,
+                       service_callback: Optional[Callable] = None):
+        task_obj = task
 
-        if internal_task[FUNCTION]:
-            task_fut.set_exception(Exception(task['exception']))
-        else:
-            task_fut.set_exception(Exception(task['stderr']))
-
-    def task_callbacks(self, task, state):
-        """
-        Callback function to handle task state changes using asyncio.Future.
-        """
-        # we assume that the task object is a dictionary or a dict-like object
         if not isinstance(task, dict):
-            task = task.as_dict()
+            task_dct = task.as_dict()
 
-        if task['uid'] not in self.components:
-            self.log.warning(f'Received an unknown task and will skip it: {task["uid"]}')
+        task_fut = self.components[task_dct['uid']]['future']
+
+        self.log.info(f'{task_dct["uid"]} is in {state} state')
+
+        if task_dct['uid'] not in self.components:
+            self.log.warning(f'Received an unknown task and will skip it: {task_dct["uid"]}')
             return
 
-        if state in self.task_states_map.terminal_states or self.task_states_map.RUNNING:
-            self.log.info(f'{task["uid"]} is in {state} state')
-            task_fut = self.components[task['uid']]['future']
-            # case-1 - task is done
-            if state == self.task_states_map.DONE:
-                self.handle_task_success(task, task_fut)
-            # case-2 - task is running
-            elif state == self.task_states_map.RUNNING:
-                # case-2.1 - task is a service and will set to done
-                # FIXME: backend should handle the addition "done_callback" for services
-                # but how?
-                if self.components[task['uid']]['description']['is_service']:
-                    task_fut.set_result('Service is Running')
-                # case-2.2 - task is not a service and will set to running
-                else:
-                    task_fut.set_running_or_notify_cancel()
-            # case-3 - task is canceled
-            elif state == self.task_states_map.CANCELED:
-                task_fut.cancel()
-            # case-4 - task is failed
-            elif state == self.task_states_map.FAILED:
-                self.handle_task_failure(task, task_fut)
+        if service_callback:
+            # service tasks are marked done by a backend specific
+            # mechanism that are provided during the callbacks only
+            service_callback(task_fut, task_obj, state)
+
+        if state == self.task_states_map.DONE:
+            self.handle_task_success(task_dct, task_fut)
+
+        elif state == self.task_states_map.RUNNING:
+            task_fut.set_running_or_notify_cancel()
+
+        elif state == self.task_states_map.CANCELED:
+            task_fut.cancel()
+
+        elif state == self.task_states_map.FAILED:
+            self.handle_task_failure(task_dct, task_fut)
