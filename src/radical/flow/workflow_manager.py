@@ -85,7 +85,7 @@ class WorkflowEngine:
         self.dry_run = dry_run
         self.unresolved = set()
         self.queue = asyncio.Queue()
-        self.implicit_data = implicit_data
+        self.implicit_data_mode = implicit_data
 
         self._setup_execution_backend()
 
@@ -517,7 +517,7 @@ class WorkflowEngine:
                             dep_desc = self.components[dep['uid']]['description']
 
                             # link implicit data dependencies
-                            if self.implicit_data and not dep_desc['metadata'].get('output_files'):
+                            if self.implicit_data_mode and not dep_desc['metadata'].get('output_files'):
                                 self.log.debug(f'Linking implicit file(s): from {dep_desc['name']} to {comp_desc["name"]}')
                                 self.backend.link_implicit_data_deps(dep_desc, comp_desc)
 
