@@ -24,17 +24,21 @@ class BaseExecutionBackend(ABC):
     @abstractmethod
     def register_callback(cls, func) -> None:
         pass
+    
+    @abstractmethod
+    def get_task_states_map(self) -> None:
+        pass
 
     @abstractmethod
     def build_task(cls, task: dict) -> None:
         pass
-    
+
     @abstractmethod
-    def link_implicit_data_deps(self, src_task):
+    def link_implicit_data_deps(self, src_task, dst_task):
         pass
 
     @abstractmethod
-    def link_explicit_data_deps(self, task_id, file_name=None):
+    def link_explicit_data_deps(self, src_task=None, dst_task=None, file_name=None, file_path=None):
         pass
 
 

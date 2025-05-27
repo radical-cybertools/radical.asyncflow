@@ -3,7 +3,7 @@ import os
 import asyncio
 import logging
 import threading
-from typing import Callable, Dict, Optional
+from typing import Callable, Optional, Union
 
 import radical.utils as ru
 
@@ -21,12 +21,6 @@ TASK = 'task'
 BLOCK = 'block'
 FUNCTION = 'function'
 EXECUTABLE = 'executable'
-
-# Task States
-DONE = 'DONE'
-FAILED = 'FAILED'
-CANCELED = 'CANCELED'
-
 
 class WorkflowEngine:
     """
@@ -91,10 +85,12 @@ class WorkflowEngine:
         self.dry_run = dry_run
         self.unresolved = set()
         self.queue = asyncio.Queue()
-        self.implicit_data = implicit_data
+        self.implicit_data_mode = implicit_data
 
         self._setup_execution_backend()
-        
+
+        self.task_states_map = self.backend.get_task_states_map()
+
         # FIXME: session should always have a valid path
         self.work_dir = self.backend.session.path or os.getcwd()
 
@@ -111,6 +107,12 @@ class WorkflowEngine:
 
         self._set_loop() # detect and set the event-loop 
         self._start_async_tasks() # start the solver and submitter
+
+
+        # Define specific decorators
+        self.block = self._register_decorator(comp_type=BLOCK)
+        self.function_task = self._register_decorator(comp_type=TASK, task_type=FUNCTION)
+        self.executable_task = self._register_decorator(comp_type=TASK, task_type=EXECUTABLE)
 
     def _setup_execution_backend(self):
         if self.backend is None:
@@ -205,20 +207,18 @@ class WorkflowEngine:
             thread = threading.Thread(target=_start, daemon=True)
             thread.start()
 
-    @staticmethod
-    def _register_decorator(comp_type: str, task_type: str = None):
+    def _register_decorator(self, comp_type: str, task_type: Optional[str] = None):
         """
-        A decorator factory for registering workflow components with optional task descriptions.
-
+        A decorator factory for registering workflow components with optional task
+        descriptions.
         Args:
-            comp_type (str): The type of the workflow component (e.g., 'task', 'stage', etc.).
-            task_type (str, optional): The specific type of task, if applicable. Defaults to None.
-
+            - comp_type (str): The type of the workflow component (e.g., 'task', 'stage', etc.).
+            - task_type (str, optional): The specific type of task, if applicable. Defaults to None.
         Returns:
             Callable: A decorator that wraps the target function, capturing and merging
             task descriptions provided at definition and invocation time, and registers
             the function as a workflow component using the manager's registration logic.
-
+ 
         The decorator:
             - Captures a `task_description` from the function's default arguments at
               definition time.
@@ -227,40 +227,46 @@ class WorkflowEngine:
             - Merges both descriptions, with invocation-time values taking precedence.
             - Registers the function as a workflow component using the manager's internal
               registration method.
+
         """
-        def decorator(self, func: Callable) -> Callable:
-            # Capture and store definition-time `task_description` if available
-            task_description_def = func.__defaults__[0] if func.__defaults__ else {}
-            setattr(func, '__task_description__', task_description_def)
+        def outer(possible_func: Union[Callable, None] = None, service: bool = False):
+            def actual_decorator(func: Callable) -> Callable:
+                # Capture definition-time task_description from default args
+                task_description_def = func.__defaults__[0] if func.__defaults__ else {}
+                setattr(func, '__task_description__', task_description_def)
 
-            @wraps(func)
-            def wrapped(*args, **kwargs):
-                # Invocation-time `task_description` (if provided)
-                task_description_call = kwargs.pop("task_description", {}) or {}
+                @wraps(func)
+                def wrapped(*args, **kwargs):
+                    task_description_call = kwargs.pop("task_description", {}) or {}
 
-                # Merge with definition-time `task_description`
-                task_description_final = {
-                    **getattr(func, '__task_description__', {}),
-                    **task_description_call
-                }
+                    task_description_final = {
+                        **getattr(func, '__task_description__', {}),
+                        **task_description_call}
 
-                registered_func = self._handle_flow_component_registration(
-                    func,
-                    comp_type=comp_type,
-                    task_type=task_type,
-                    task_backend_specific_kwargs=task_description_final
-                )
-                return registered_func(*args, **kwargs)
-            return wrapped
-        return decorator
+                    registered_func = self._handle_flow_component_registration(
+                        func,
+                        is_service=service,
+                        comp_type=comp_type,
+                        task_type=task_type,
+                        task_backend_specific_kwargs=task_description_final)
 
-    # Define specific decorators
-    block = _register_decorator(comp_type=BLOCK)
-    function_task = _register_decorator(comp_type=TASK, task_type=FUNCTION)
-    executable_task = _register_decorator(comp_type=TASK, task_type=EXECUTABLE)
+                    return registered_func(*args, **kwargs)
+
+                return wrapped
+
+            # If used as @decorator
+            if callable(possible_func):
+                return actual_decorator(possible_func)
+
+            # If used as @decorator(...)
+            return actual_decorator
+
+        return outer
+
 
     def _handle_flow_component_registration(self,
                                             func: Callable,
+                                            is_service:bool,
                                             comp_type: str,
                                             task_type: str,
                                             task_backend_specific_kwargs: dict = None):
@@ -293,6 +299,7 @@ class WorkflowEngine:
             comp_desc['args'] = args
             comp_desc['function'] = func
             comp_desc['kwargs'] = kwargs
+            comp_desc['is_service'] = is_service
             comp_desc['task_backend_specific_kwargs'] = task_backend_specific_kwargs
 
             if is_async:
@@ -510,7 +517,7 @@ class WorkflowEngine:
                             dep_desc = self.components[dep['uid']]['description']
 
                             # link implicit data dependencies
-                            if self.implicit_data and not dep_desc['metadata'].get('output_files'):
+                            if self.implicit_data_mode and not dep_desc['metadata'].get('output_files'):
                                 self.log.debug(f'Linking implicit file(s): from {dep_desc['name']} to {comp_desc["name"]}')
                                 self.backend.link_implicit_data_deps(dep_desc, comp_desc)
 
@@ -528,7 +535,8 @@ class WorkflowEngine:
                         for input_file in comp_desc['metadata']['input_files']:
                             input_basename = input_file.split('/')[-1]
                             if input_basename not in staged_targets:
-                                self.log.debug(f'Staging input file: {input_file} to {comp_desc["name"]}')
+                                msg = f'Staging {input_file} to {comp_desc["name"]} work dir'
+                                self.log.debug(msg)
                                 data_dep = self.backend.link_explicit_data_deps(src_task=None,
                                                                                 dst_task=comp_desc,
                                                                                 file_name=input_basename,
@@ -556,7 +564,7 @@ class WorkflowEngine:
             try:
                 objects = await asyncio.wait_for(self.queue.get(), timeout=1)
 
-                # pass only the id of the resolved tasks to the backend
+                # pass the resolved tasks to the backend
                 tasks = [t for t in objects if t and BLOCK not in t['uid']]
                 blocks = [b for b in objects if b and TASK not in b['uid']]
 
@@ -610,35 +618,77 @@ class WorkflowEngine:
         else:
             task_fut.set_result(task['stdout'])
 
-    def handle_task_failure(self, task, task_fut):
-        """
-        Handle task failure by setting the exception in the future.
-        """
-        internal_task = self.components[task['uid']]['description']
+    @typeguard.typechecked
+    def task_callbacks(self, task, state: str,
+                       service_callback: Optional[Callable] = None):
 
-        if internal_task[FUNCTION]:
-            task_fut.set_exception(Exception(task['exception']))
-        else:
-            task_fut.set_exception(Exception(task['stderr']))
+        """
+        Handle callbacks for task state changes and invoke appropriate handlers.
+        This method processes state changes for a given task, updates its future,
+        and calls relevant handlers based on the new state. Optionally, a service-specific
+        callback can be provided for additional handling.
+        Args:
+            task: The task object or dictionary representing the task whose state has changed.
+            state (str): The new state of the task.
+            service_callback (Optional[Callable], optional): A callback function for service tasks,
+                which is invoked with the task's future, the task object, and the new state.
+                service_callback must be a **daemon-thread** function to avoid blocking the event
+                loop.
+                example:
+                ```
+                def service_ready_callback(future, task, state):
+                    def wait_and_set():
+                        try:
+                            wait_for_something_to_happen_here  # synchronous call
+                            future.set_result(info)
+                        except Exception as e:
+                            future.set_exception(e)
 
-    def task_callbacks(self, task, state):
+                    threading.Thread(target=wait_and_set, daemon=True).start()
+                ```
+        Returns:
+            None
+        Logs:
+            - Debug message if the state is not relevant.
+            - Info message when a task changes state.
+            - Warning if an unknown task is received.
+        State Handling:
+            - StateMapper.DONE: Calls `handle_task_success`.
+            - StateMapper.RUNNING: Marks the future as running.
+            - StateMapper.CANCELED: Cancels the future.
+            - StateMapper.FAILED: Calls `handle_task_failure`.
         """
-        Callback function to handle task state changes using asyncio.Future.
-        """
-        # we assume that the task object is a dictionary or a dict-like object
+        if state not in self.task_states_map.terminal_states and \
+             state != self.task_states_map.RUNNING:
+             self.log.debug(f"Non-relevant task state received: {state}. Skipping state.")
+             return
+
+        task_obj = task
+
         if not isinstance(task, dict):
-            task = task.as_dict()
+            task_dct = task.as_dict()
 
-        if task['uid'] not in self.components:
-            self.log.warning(f'Received an unknown task and will skip it: {task["uid"]}')
+        task_fut = self.components[task_dct['uid']]['future']
+
+        self.log.info(f'{task_dct["uid"]} is in {state} state')
+
+        if task_dct['uid'] not in self.components:
+            self.log.warning(f'Received an unknown task and will skip it: {task_dct["uid"]}')
             return
 
-        if state in [DONE, FAILED, CANCELED]:
-            self.log.info(f'{task["uid"]} is in {state} state')
-            task_fut = self.components[task['uid']]['future']
-            if state == DONE:
-                if not task_fut.done():
-                    self.handle_task_success(task, task_fut)
-            else:
-                if not task_fut.done():
-                    self.handle_task_failure(task, task_fut)
+        if service_callback:
+            # service tasks are marked done by a backend specific
+            # mechanism that are provided during the callbacks only
+            service_callback(task_fut, task_obj, state)
+
+        if state == self.task_states_map.DONE:
+            self.handle_task_success(task_dct, task_fut)
+
+        elif state == self.task_states_map.RUNNING:
+            task_fut.set_running_or_notify_cancel()
+
+        elif state == self.task_states_map.CANCELED:
+            task_fut.cancel()
+
+        elif state == self.task_states_map.FAILED:
+            self.handle_task_failure(task_dct, task_fut)

@@ -1,10 +1,24 @@
 import copy
+import threading
 import typeguard
 from typing import Dict, Optional
 import radical.utils as ru
 import radical.pilot as rp
 
+from ...constants import StateMapper
 from .base import BaseExecutionBackend
+
+
+def service_ready_callback(future, task, state):
+    def wait_and_set():
+        try:
+            info = task.wait_info()  # synchronous call
+            future.set_result(info)
+        except Exception as e:
+            future.set_exception(e)
+
+    threading.Thread(target=wait_and_set, daemon=True).start()
+
 
 class RadicalExecutionBackend(BaseExecutionBackend):
     """
@@ -82,6 +96,13 @@ class RadicalExecutionBackend(BaseExecutionBackend):
                 self.raptor_mode = True
                 print('Enabling Raptor mode for RadicalExecutionBackend')
                 self.setup_raptor_mode(raptor_config)
+            
+            # register the backend task states to the global state manager
+            StateMapper.register_backend_states(backend=self, 
+                                                done_state=rp.DONE,
+                                                failed_state=rp.FAILED,
+                                                canceled_state=rp.CANCELED,
+                                                running_state=rp.AGENT_EXECUTING)
 
             print('RadicalPilot execution backend started successfully\n')
 
@@ -98,6 +119,9 @@ class RadicalExecutionBackend(BaseExecutionBackend):
             exception_msg += f' internally, please check {self.session.path}'
             
             raise SystemExit(exception_msg) from e
+    
+    def get_task_states_map(self):
+        return StateMapper(backend=self)
 
     def setup_raptor_mode(self, raptor_config):
         """
@@ -192,16 +216,30 @@ class RadicalExecutionBackend(BaseExecutionBackend):
             current_master = (current_master + 1) % len(self.masters)
 
     def register_callback(self, func):
-        return self.task_manager.register_callback(func)
+        def backend_callback(task, state):
+            service_callback = None
+            # Attach backend-specific done_callback for service tasks
+            if task.mode == rp.TASK_SERVICE and state == rp.AGENT_EXECUTING:
+                service_callback = service_ready_callback
+
+            # Forward to workflow manager's standard callback
+            func(task, state, service_callback=service_callback)
+
+        self.task_manager.register_callback(backend_callback)
 
     def build_task(self, uid, task_desc, task_backend_specific_kwargs) -> rp.TaskDescription:
 
+        is_service = task_desc.get('is_service', False)
         rp_task = rp.TaskDescription(from_dict=task_backend_specific_kwargs)
         rp_task.uid = uid
 
         if task_desc['executable']:
+            rp_task.mode = rp.TASK_SERVICE if is_service else rp.TASK_EXECUTABLE
             rp_task.executable = task_desc['executable']
         elif task_desc['function']:
+            if is_service:
+                raise RuntimeError('RadicalExecutionBackend does not support function service tasks')
+
             rp_task.mode = rp.TASK_FUNCTION
             rp_task.function = rp.PythonTask(task_desc['function'],
                                              task_desc['args'],

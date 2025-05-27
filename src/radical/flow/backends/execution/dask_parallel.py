@@ -5,6 +5,8 @@ import typeguard
 from functools import wraps
 from dask.distributed import Client, Future as DaskFuture
 from concurrent.futures import Future as ConcurrentFuture
+
+from ...constants import StateMapper
 from radical.flow.backends.execution.base import BaseExecutionBackend, Session
 
 
@@ -27,6 +29,8 @@ class DaskExecutionBackend(BaseExecutionBackend):
         self._callback = None
         self.session = Session()
         self.initialize(resources)
+        StateMapper.register_backend_states_with_defaults(backend=self)
+
 
     def initialize(self, resources) -> None:
         """Initialize the Dask client and set up worker environments."""
@@ -42,6 +46,9 @@ class DaskExecutionBackend(BaseExecutionBackend):
     def register_callback(self, callback: Callable) -> None:
         """Register a callback for task state changes."""
         self._callback = callback
+
+    def get_task_states_map(self):
+        return StateMapper(backend=self)
 
     def shutdown(self) -> None:
         """Shutdown the Dask client and clean up resources."""
