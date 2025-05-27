@@ -618,10 +618,20 @@ class WorkflowEngine:
         else:
             task_fut.set_result(task['stdout'])
 
+    def handle_task_failure(self, task, task_fut):
+        """
+        Handle task failure by setting the exception in the future.
+        """
+        internal_task = self.components[task['uid']]['description']
+
+        if internal_task[FUNCTION]:
+            task_fut.set_exception(Exception(task['exception']))
+        else:
+            task_fut.set_exception(Exception(task['stderr']))
+
     @typeguard.typechecked
     def task_callbacks(self, task, state: str,
-                       service_callback: Optional[Callable] = None):
-
+                    service_callback: Optional[Callable] = None):
         """
         Handle callbacks for task state changes and invoke appropriate handlers.
         This method processes state changes for a given task, updates its future,
@@ -659,22 +669,25 @@ class WorkflowEngine:
             - StateMapper.FAILED: Calls `handle_task_failure`.
         """
         if state not in self.task_states_map.terminal_states and \
-             state != self.task_states_map.RUNNING:
-             self.log.debug(f"Non-relevant task state received: {state}. Skipping state.")
-             return
+            state != self.task_states_map.RUNNING:
+            self.log.debug(f"Non-relevant task state received: {state}. Skipping state.")
+            return
 
         task_obj = task
 
-        if not isinstance(task, dict):
+        if isinstance(task, dict):
+            task_dct = task
+        else:
             task_dct = task.as_dict()
 
-        task_fut = self.components[task_dct['uid']]['future']
-
-        self.log.info(f'{task_dct["uid"]} is in {state} state')
 
         if task_dct['uid'] not in self.components:
             self.log.warning(f'Received an unknown task and will skip it: {task_dct["uid"]}')
             return
+
+        task_fut = self.components[task_dct['uid']]['future']
+
+        self.log.info(f'{task_dct["uid"]} is in {state} state')
 
         if service_callback:
             # service tasks are marked done by a backend specific

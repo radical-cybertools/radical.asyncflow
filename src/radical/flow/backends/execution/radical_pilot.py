@@ -341,6 +341,21 @@ class RadicalExecutionBackend(BaseExecutionBackend):
 
         return self.task_manager.submit_tasks(_tasks)
 
+    def get_nodelist(self):
+        """
+        Get the information about allocated nodes.
+
+        Returns:
+            `rp.NodeList` object, which holds the information about allocated
+            nodes, where each node from `nodelist.nodes` is of the type
+            `rp.NodeResource`.
+        """
+        nodelist = None
+        if self.resource_pilot.state == rp.PMGR_ACTIVE:
+            nodelist = self.resource_pilot.nodelist
+
+        return nodelist
+
     def state(self):
         """
         Retrieve the current state of the resource pilot.
