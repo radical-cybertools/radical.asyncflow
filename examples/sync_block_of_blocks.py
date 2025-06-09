@@ -50,4 +50,4 @@ bob1 = block1_of_blocks()
 bob2 = block2_of_blocks(bob1)
 bob2.result()
 
-backend.shutdown()
+flow.shutdown()

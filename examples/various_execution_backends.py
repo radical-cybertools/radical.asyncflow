@@ -39,7 +39,7 @@ def main():
 
         print(t3.result())
 
-        backend.shutdown()
+        flow.shutdown()
 
 if __name__ == "__main__":
     main()

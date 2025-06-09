@@ -54,7 +54,7 @@ async def main():
 
     await asyncio.gather(*[run_block_of_blocks(i) for i in range(2)])
 
-    backend.shutdown()
+    flow.shutdown()
 
 
 if __name__ == '__main__':

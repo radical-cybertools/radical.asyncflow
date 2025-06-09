@@ -48,7 +48,7 @@ async def main():
     for result in results:
         print(result)
 
-    backend.shutdown()
+    flow.shutdown()
 
 if __name__ == '__main__':
     asyncio.run(main())
