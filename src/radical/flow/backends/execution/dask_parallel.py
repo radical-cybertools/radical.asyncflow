@@ -131,11 +131,11 @@ class DaskExecutionBackend(BaseExecutionBackend):
 
         self._submit_to_dask(task, sync_wrapper, task['function'], task['args'], task['kwargs'])
 
-    def link_explicit_data_deps(self, source: str, target: str) -> Dict[str, str]:
+    def link_explicit_data_deps(self, src_task=None, dst_task=None, file_name=None, file_path=None):
         """Handle explicit data dependencies between tasks."""
         pass
 
-    def link_implicit_data_deps(self, task_desc: Dict[str, Any]) -> None:
+    def link_implicit_data_deps(self, src_task, dst_task):
         """Handle implicit data dependencies for a task."""
         pass
 
