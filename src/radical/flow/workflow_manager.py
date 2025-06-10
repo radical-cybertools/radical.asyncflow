@@ -749,14 +749,13 @@ class WorkflowEngine:
 
         # Wait for tasks to complete
         try:
-            await asyncio.wait_for(
-                asyncio.gather(
-                    *(t for t in [getattr(self, "_run_task", None),
-                                  getattr(self, "_submit_task", None)] if t),
-                    return_exceptions=True
-                ),
-                timeout=5.0
-            )
+            tasks = [t for t in (getattr(self, "_run_task", None),
+                                 getattr(self, "_submit_task", None)) if t]
+    
+            for t in tasks: t.cancel()
+            await asyncio.wait_for(asyncio.gather(*tasks,
+                                                  return_exceptions=True), timeout=5.0)
+
         except asyncio.TimeoutError:
             self.log.warning("Timeout waiting for tasks to shutdown")
 
@@ -799,19 +798,14 @@ class WorkflowEngine:
                 )
                 return future.result()
 
-        # Case 2: Not in Jupyter - check if we're in async context
+
+        # Case 2: Not in Jupyter - detect async context
         try:
             asyncio.get_running_loop()
-            # We're in async context - return the coroutine
             return self._async_shutdown_internal()
         except RuntimeError:
-            # We're in sync context - create new loop if needed
-            if not self.loop.is_running():
-                return self.loop.run_until_complete(self._async_shutdown_internal())
-            else:
-                # This should theoretically never happen in regular Python
-                future = asyncio.run_coroutine_threadsafe(
-                    self._async_shutdown_internal(),
-                    self.loop
-                )
-                return future.result()
+            future = asyncio.run_coroutine_threadsafe(
+                self._async_shutdown_internal(),
+                self.loop
+            )
+            return future.result()
