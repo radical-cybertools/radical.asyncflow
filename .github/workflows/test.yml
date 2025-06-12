@@ -18,7 +18,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v3
       with:
-        path: .
+        path: radical.flow
 
     - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v4
@@ -35,5 +35,6 @@ jobs:
 
     - name: Run tests
       run: |
+        cd radical.flow
         pytest -v tests/
 
