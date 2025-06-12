@@ -75,7 +75,7 @@ async def test_flow_function_tasks():
 
 
 @pytest.mark.asyncio
-async def test_executable_task_chain_file_tracking(tmp_path):
+async def test_flow_executable_tasks(tmp_path):
     """
     Integration test using `executable_task`. Each task appends to a workflow-local file.
     Final task output is used to validate execution order.
@@ -133,6 +133,85 @@ async def test_executable_task_chain_file_tracking(tmp_path):
                 lines = [line.strip() for line in f.readlines()]
                 assert lines == ["task1", "task2", "task3", "task4", "task5"], \
                                  f"Unexpected task sequence in {path}: {lines}"
+
+    finally:
+        await flow.shutdown()
+        print("Workflow engine shutdown complete.")
+
+
+@pytest.mark.asyncio
+async def test_flow_mixed_function_and_executable_tasks(tmp_path):
+    """
+    Integration test mixing `function_task` and `executable_task`.
+    Function tasks modify state, while executable tasks log their invocation.
+    """
+    backend = ThreadExecutionBackend({})
+    flow = WorkflowEngine(backend=backend)
+
+    # Function tasks
+    @flow.function_task
+    async def f_task1():
+        return {"steps": ["f_task1"], "value": 1}
+
+    @flow.function_task
+    async def f_task2(state):
+        state["steps"].append("f_task2")
+        state["value"] += 2
+        return state
+
+    # Executable tasks
+    @flow.executable_task
+    async def e_task1(wf_file, state):
+        return f'echo "e_task1:{state["value"]}" >> {wf_file}'
+
+    @flow.executable_task
+    async def e_task2(wf_file, t1):
+        return f'echo "e_task2" >> {wf_file}'
+
+    @flow.function_task
+    async def f_task3(state):
+        state["steps"].append("f_task3")
+        state["value"] *= 3
+        return state
+
+    @flow.executable_task
+    async def e_task3(wf_file, t2):
+        return f'echo "e_task3" >> {wf_file}'
+
+    async def run_wf(wf_id):
+        """
+        Mixed function and executable tasks within one workflow.
+        """
+        wf_file = tmp_path / f"wf_{wf_id}.log"
+        wf_file_path = str(wf_file)
+
+        print(f'\n[WF {wf_id}] Start: {time.time():.2f}')
+
+        s1 = await f_task1()
+        s2 = await f_task2(s1)
+        t1 = e_task1(wf_file_path, s2)
+        t2 = e_task2(wf_file_path, t1)
+        s3 = await f_task3(s2)
+        t3 = e_task3(wf_file_path, t2)
+        await t3
+
+        print(f'[WF {wf_id}] Done: {time.time():.2f} — Final state: {s3}')
+        return s3, wf_file
+
+    try:
+        num_workflows = 2
+        results = await asyncio.gather(*[run_wf(i) for i in range(num_workflows)])
+
+        for state, log_file in results:
+            # Validate function task state
+            assert state["steps"] == ["f_task1", "f_task2", "f_task3"]
+            assert state["value"] == 9  # (1 + 2) * 3
+
+            # Validate log output
+            lines = log_file.read_text().strip().splitlines()
+            assert lines[0].startswith("e_task1:3")
+            assert lines[1] == "e_task2"
+            assert lines[2] == "e_task3"
 
     finally:
         await flow.shutdown()
