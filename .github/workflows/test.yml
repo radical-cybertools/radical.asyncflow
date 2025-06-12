@@ -28,10 +28,10 @@ jobs:
         python -m venv testenv
         . testenv/bin/activate
         python -m pip install --upgrade pip setuptools wheel
+        python -m pip install -r requirements-ci.txt
 
     - name: Run pytest
       run: |
         . testenv/bin/activate
         radical-stack
         pytest -v tests/
-
