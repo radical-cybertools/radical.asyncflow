@@ -76,11 +76,17 @@ class DaskExecutionBackend(BaseExecutionBackend):
                 - async: Boolean indicating if function is async
         """
         for task in tasks:
-            if not task['function'] and task['executable']:
-                raise RuntimeError('DaskBackend is optimized for task functions only')
+            is_func_task = bool(task.get('function'))
+            is_exec_task = bool(task.get('executable'))
+
+            if not is_func_task and is_exec_task:
+                error_msg = 'DaskExecutionBackend supports only function tasks'
+                task['stderr'] = RuntimeError(error_msg)
+                self._callback(task, 'FAILED')
+                continue
 
             self.tasks[task['uid']] = task
-            
+
             # make sure we do not pass future object to Dask as it is not picklable
             task['args'] = tuple(arg for arg in task['args'] if not isinstance(arg,
                                                (ConcurrentFuture, asyncio.Future)))
