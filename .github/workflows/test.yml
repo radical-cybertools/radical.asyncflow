@@ -12,11 +12,15 @@ jobs:
 
     strategy:
       matrix:
-        python-version: [3.12]  # Adjust to your version
+        python-version: [3.12]
 
     steps:
     - name: Checkout code
       uses: actions/checkout@v3
+
+    - name: Symlink VERSION into source tree
+      run: ln -s ../../../../VERSION src/radical/flow/VERSION
+
 
     - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v4
