@@ -739,27 +739,29 @@ class WorkflowEngine:
         Raises:
             asyncio.TimeoutError: If the background tasks do not complete
             within the timeout period.
+            asyncio.CancelledError: If the shutdown is cancelled before
+            completion.
         """
 
-        # Cancel background tasks
-        for task in [getattr(self, "_run_task", None),
-                     getattr(self, "_submit_task", None)]:
+        internal_component_to_shutdown = [t for t in (self._run_task, self._submit_task) if t]
 
-            task.cancel()
+        # Cancel background tasks
+        for internal_component in internal_component_to_shutdown:
+            if internal_component and not internal_component.done():
+                self.log.debug(f"Cancelling {internal_component.get_name()}")
+                internal_component.cancel()
 
         # Wait for tasks to complete
         try:
-            tasks = [t for t in (getattr(self, "_run_task", None),
-                                 getattr(self, "_submit_task", None)) if t]
-    
-            for t in tasks: t.cancel()
-            await asyncio.wait_for(asyncio.gather(*tasks,
+            await asyncio.wait_for(asyncio.gather(*internal_component_to_shutdown,
                                                   return_exceptions=True), timeout=5.0)
 
         except asyncio.TimeoutError:
             self.log.warning("Timeout waiting for tasks to shutdown")
+        except asyncio.CancelledError:
+            self.log.warning("Shutdown cancelled")
 
-        # Shutdown the backend
+        # Shutdown the execution backend
         await self.loop.run_in_executor(None, self.backend.shutdown)
 
     def shutdown(self):
