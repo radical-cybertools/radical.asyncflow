@@ -29,5 +29,5 @@ t2_future = task2(t1_result) # t2 depends on t1 (waits for it)
 t2_result = t2_future.result()
 
 # shutdown the execution backend
-radical_backend.shutdown()
+flow.shutdown()
 ```

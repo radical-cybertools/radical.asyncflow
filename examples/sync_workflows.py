@@ -29,4 +29,4 @@ def run_wf(wf_id):
 for i in range(5):
     run_wf(i)
 
-backend.shutdown()
+flow.shutdown()

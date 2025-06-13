@@ -46,8 +46,8 @@ class WorkflowEngine:
             Checks if the engine is running in a Jupyter environment.
         _set_loop():
             Configures and sets the asyncio event loop for the current context.
-        _start_async_tasks():
-            Starts asynchronous tasks for the workflow engine.
+        _start_async_internal_comps():
+            Starts asynchronous internal components for the workflow engine.
         _register_decorator(comp_type, task_type=None):
             Creates a decorator for registering tasks or blocks.
         _handle_flow_component_registration(func, comp_type, task_type, task_backend_specific_kwargs):
@@ -106,7 +106,7 @@ class WorkflowEngine:
                              os.environ.get('FLOW_JUPYTER_ASYNC', None)
 
         self._set_loop() # detect and set the event-loop 
-        self._start_async_tasks() # start the solver and submitter
+        self._start_async_internal_comps() # start the solver and submitter
 
 
         # Define specific decorators
@@ -190,20 +190,35 @@ class WorkflowEngine:
         asyncio.set_event_loop(self.loop)
         self.log.debug('Event-Loop is set successfully')
 
-    def _start_async_tasks(self):
-        """Starts async tasks in both sync and async contexts."""
-        def _start():
-            self.loop.create_task(self.submit())  # let's schedule submit() in loop
-            self.loop.create_task(self.run())     # let's schedule run() in loop
-            if not self.loop.is_running():
-                self.loop.run_forever()  # keep the event loop alive
+    def _start_async_internal_comps(self):
+        """
+        Starts asynchronous internal components for the workflow manager in
+        both synchronous and asynchronous contexts.
 
-        # case1: called from an async namespace
+        This method ensures that the `submit` and `run` coroutine tasks are
+        started and tracked, regardless of whether the current event loop is
+        already running (async context) or not (sync context).
+        In an async context, it uses `asyncio.create_task` to schedule the tasks.
+        In a sync context, it creates a background thread to start the event loop
+        and schedule the tasks.
+
+        Tracks the created tasks as instance attributes (`_submit_task` and `_run_task`).
+        """
+
+        def _start():
+            # Sync context: run loop in background thread
+            self._run_task = self.loop.create_task(self.run())
+            self._submit_task = self.loop.create_task(self.submit())
+
+            if not self.loop.is_running():
+                self.loop.run_forever()
+
         if self.loop.is_running():
-            asyncio.create_task(self.submit())
-            asyncio.create_task(self.run())
+            # Async context
+            self._run_task = asyncio.create_task(self.run())
+            self._submit_task = asyncio.create_task(self.submit())
         else:
-            # case2: called from a sync namespace
+            # Sync context
             thread = threading.Thread(target=_start, daemon=True)
             thread.start()
 
@@ -705,3 +720,94 @@ class WorkflowEngine:
 
         elif state == self.task_states_map.FAILED:
             self.handle_task_failure(task_dct, task_fut)
+
+    async def _async_shutdown_internal(self):
+        """
+        Internal implementation of asynchronous shutdown for
+        the workflow manager.
+
+        This method performs the following steps:
+        1. Cancels background tasks responsible for running and
+           submitting workflows.
+        2. Waits for the cancellation and completion of these tasks,
+           with a timeout of 5 seconds.
+        3. Logs a warning if the tasks do not complete within the timeout
+           period.
+        4. Shuts down the backend using an executor to avoid blocking the
+           event loop.
+
+        Raises:
+            asyncio.TimeoutError: If the background tasks do not complete
+            within the timeout period.
+            asyncio.CancelledError: If the shutdown is cancelled before
+            completion.
+        """
+
+        internal_component_to_shutdown = [t for t in (self._run_task, self._submit_task) if t]
+
+        # Cancel background tasks
+        for internal_component in internal_component_to_shutdown:
+            if internal_component and not internal_component.done():
+                self.log.debug(f"Cancelling {internal_component.get_name()}")
+                internal_component.cancel()
+
+        # Wait for tasks to complete
+        try:
+            await asyncio.wait_for(asyncio.gather(*internal_component_to_shutdown,
+                                                  return_exceptions=True), timeout=5.0)
+
+        except asyncio.TimeoutError:
+            self.log.warning("Timeout waiting for tasks to shutdown")
+        except asyncio.CancelledError:
+            self.log.warning("Shutdown cancelled")
+
+        # Shutdown the execution backend
+        await self.loop.run_in_executor(None, self.backend.shutdown)
+
+    def shutdown(self):
+        """
+        Shuts down the workflow manager in a universal way, handling different
+        execution environments:
+
+        - In Jupyter Notebook (sync or async mode), it either returns the
+          coroutine for async mode or runs it in a thread for sync mode.
+        - Outside Jupyter, it detects if running in an async context and 
+          returns the coroutine, or runs it synchronously if not.
+        - Ensures proper shutdown regardless of whether the environment is
+          synchronous or asynchronous, and whether it's running in Jupyter
+          or standard Python.
+
+        Returns:
+            The result of the asynchronous shutdown operation, either as a
+            coroutine (for async contexts) or the actual result (for sync contexts).
+        Modes:
+        - Regular sync Python
+        - Jupyter sync mode
+        - Jupyter async mode
+        - Regular async Python
+
+        """
+        # Case 1: We're in Jupyter
+        if self._is_in_jupyter():
+            if self.jupyter_async:
+                # Jupyter async mode - return the coroutine
+                return self._async_shutdown_internal()
+            else:
+                # Jupyter sync mode - run in thread
+                future = asyncio.run_coroutine_threadsafe(
+                    self._async_shutdown_internal(),
+                    self.loop
+                )
+                return future.result()
+
+
+        # Case 2: Not in Jupyter - detect async context
+        try:
+            asyncio.get_running_loop()
+            return self._async_shutdown_internal()
+        except RuntimeError:
+            future = asyncio.run_coroutine_threadsafe(
+                self._async_shutdown_internal(),
+                self.loop
+            )
+            return future.result()
