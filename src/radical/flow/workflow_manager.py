@@ -762,12 +762,12 @@ class WorkflowEngine:
             self.log.warning("Shutdown cancelled")
 
         # Shutdown the execution backend
-        if skip_execution_backend and self.backend:
+        if not skip_execution_backend and self.backend:
             await self.loop.run_in_executor(None, self.backend.shutdown)
         else:
             self.log.warning("Skipping execution backend shutdown as requested")
 
-    def shutdown(self, skip_execution_backend: bool = True):
+    def shutdown(self, skip_execution_backend: bool = False):
         """
         Shuts down the workflow manager in a universal way, handling different
         execution environments:

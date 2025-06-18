@@ -26,7 +26,7 @@ def test_sync_bag_of_tasks():
         assert result is not None, f"Task {i} returned None"
         assert isinstance(result, str) or isinstance(result, bytes)
 
-    flow.shutdown(skip_execution_backend=False)
+    flow.shutdown(skip_execution_backend=True)
 
 
 @pytest.mark.asyncio
@@ -49,7 +49,7 @@ async def test_async_bag_of_tasks():
         assert result is not None, f"Task {i} returned None"
         assert isinstance(result, str) or isinstance(result, bytes)
 
-    await flow.shutdown(skip_execution_backend=False)
+    await flow.shutdown(skip_execution_backend=True)
 
 def test_radical_backend_reject_service_task_function():
     flow = WorkflowEngine(backend=backend)
@@ -62,7 +62,7 @@ def test_radical_backend_reject_service_task_function():
         not_supported_task2 = bad_task2()
         not_supported_task2.result()
 
-    flow.shutdown(skip_execution_backend=False)
+    flow.shutdown(skip_execution_backend=True)
 
 def test_radical_backend_reject_function_task_with_raptor_off():
     flow = WorkflowEngine(backend=backend)
