@@ -5,8 +5,9 @@ import time
 from radical.flow import WorkflowEngine
 from radical.flow import RadicalExecutionBackend
 
+backend = RadicalExecutionBackend({'resource': 'local.localhost'})
+
 def test_sync_bag_of_tasks():
-    backend = RadicalExecutionBackend({'resource': 'local.localhost'})
     flow = WorkflowEngine(backend=backend)
 
     @flow.executable_task
@@ -25,12 +26,11 @@ def test_sync_bag_of_tasks():
         assert result is not None, f"Task {i} returned None"
         assert isinstance(result, str) or isinstance(result, bytes)
 
-    flow.shutdown()
+    flow.shutdown(skip_execution_backend=False)
 
 
 @pytest.mark.asyncio
 async def test_async_bag_of_tasks():
-    backend = RadicalExecutionBackend({'resource': 'local.localhost'})
     flow = WorkflowEngine(backend=backend)
 
     @flow.executable_task
@@ -49,11 +49,9 @@ async def test_async_bag_of_tasks():
         assert result is not None, f"Task {i} returned None"
         assert isinstance(result, str) or isinstance(result, bytes)
 
-    await flow.shutdown()
+    await flow.shutdown(skip_execution_backend=False)
 
 def test_radical_backend_reject_service_task_function():
-    backend = RadicalExecutionBackend({'resource': 'local.localhost'})
-
     flow = WorkflowEngine(backend=backend)
 
     with pytest.raises(ValueError, match="RadicalExecutionBackend does not support function service tasks"):
@@ -64,11 +62,9 @@ def test_radical_backend_reject_service_task_function():
         not_supported_task2 = bad_task2()
         not_supported_task2.result()
 
-    flow.shutdown()
+    flow.shutdown(skip_execution_backend=False)
 
 def test_radical_backend_reject_function_task_with_raptor_off():
-    backend = RadicalExecutionBackend({'resource': 'local.localhost'})
-
     flow = WorkflowEngine(backend=backend)
 
     with pytest.raises(RuntimeError):
@@ -78,5 +74,6 @@ def test_radical_backend_reject_function_task_with_raptor_off():
 
         not_supported_task3 = bad_task3()
         not_supported_task3.result()
-    
+
+    # the last test will shutdown everything
     flow.shutdown()

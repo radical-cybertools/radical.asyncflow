@@ -721,7 +721,7 @@ class WorkflowEngine:
         elif state == self.task_states_map.FAILED:
             self.handle_task_failure(task_dct, task_fut)
 
-    async def _async_shutdown_internal(self):
+    async def _async_shutdown_internal(self, skip_execution_backend):
         """
         Internal implementation of asynchronous shutdown for
         the workflow manager.
@@ -762,9 +762,12 @@ class WorkflowEngine:
             self.log.warning("Shutdown cancelled")
 
         # Shutdown the execution backend
-        await self.loop.run_in_executor(None, self.backend.shutdown)
+        if skip_execution_backend and self.backend:
+            await self.loop.run_in_executor(None, self.backend.shutdown)
+        else:
+            self.log.warning("Skipping execution backend shutdown as requested")
 
-    def shutdown(self):
+    def shutdown(self, skip_execution_backend: bool = True):
         """
         Shuts down the workflow manager in a universal way, handling different
         execution environments:
@@ -776,6 +779,12 @@ class WorkflowEngine:
         - Ensures proper shutdown regardless of whether the environment is
           synchronous or asynchronous, and whether it's running in Jupyter
           or standard Python.
+        
+        args:
+            skip_execution_backend (bool): If True, skips the shutdown of the
+            execution backend. This is useful for cases where the backend
+            should not be shut down, such as in testing or when the backend
+            is managed externally.
 
         Returns:
             The result of the asynchronous shutdown operation, either as a
@@ -791,11 +800,11 @@ class WorkflowEngine:
         if self._is_in_jupyter():
             if self.jupyter_async:
                 # Jupyter async mode - return the coroutine
-                return self._async_shutdown_internal()
+                return self._async_shutdown_internal(skip_execution_backend)
             else:
                 # Jupyter sync mode - run in thread
                 future = asyncio.run_coroutine_threadsafe(
-                    self._async_shutdown_internal(),
+                    self._async_shutdown_internal(skip_execution_backend),
                     self.loop
                 )
                 return future.result()
@@ -804,10 +813,10 @@ class WorkflowEngine:
         # Case 2: Not in Jupyter - detect async context
         try:
             asyncio.get_running_loop()
-            return self._async_shutdown_internal()
+            return self._async_shutdown_internal(skip_execution_backend)
         except RuntimeError:
             future = asyncio.run_coroutine_threadsafe(
-                self._async_shutdown_internal(),
+                self._async_shutdown_internal(skip_execution_backend),
                 self.loop
             )
             return future.result()
