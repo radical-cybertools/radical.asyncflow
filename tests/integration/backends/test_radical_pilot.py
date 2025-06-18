@@ -50,3 +50,33 @@ async def test_async_bag_of_tasks():
         assert isinstance(result, str) or isinstance(result, bytes)
 
     await flow.shutdown()
+
+def test_radical_backend_reject_service_task_function():
+    backend = RadicalExecutionBackend({'resource': 'local.localhost'})
+
+    flow = WorkflowEngine(backend=backend)
+
+    with pytest.raises(ValueError, match="RadicalExecutionBackend does not support function service tasks"):
+        @flow.function_task(service=True)
+        def bad_task2():
+            return True
+    
+        not_supported_task2 = bad_task2()
+        not_supported_task2.result()
+
+    flow.shutdown()
+
+def test_radical_backend_reject_function_task_with_raptor_off():
+    backend = RadicalExecutionBackend({'resource': 'local.localhost'})
+
+    flow = WorkflowEngine(backend=backend)
+
+    with pytest.raises(RuntimeError):
+        @flow.function_task
+        def bad_task3():
+            return True
+
+        not_supported_task3 = bad_task3()
+        not_supported_task3.result()
+    
+    flow.shutdown()

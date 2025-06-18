@@ -91,6 +91,7 @@ class RadicalExecutionBackend(BaseExecutionBackend):
             self.pilot_manager = rp.PilotManager(self.session)
             self.resource_pilot = self.pilot_manager.submit_pilots(rp.PilotDescription(resources))
             self.task_manager.add_pilots(self.resource_pilot)
+            self._callback_func: Callable[[Future], None] = lambda f: None
 
             if raptor_config:
                 self.raptor_mode = True
@@ -216,6 +217,9 @@ class RadicalExecutionBackend(BaseExecutionBackend):
             current_master = (current_master + 1) % len(self.masters)
 
     def register_callback(self, func):
+
+        self._callback_func = func
+
         def backend_callback(task, state):
             service_callback = None
             # Attach backend-specific done_callback for service tasks
@@ -238,7 +242,10 @@ class RadicalExecutionBackend(BaseExecutionBackend):
             rp_task.executable = task_desc['executable']
         elif task_desc['function']:
             if is_service:
-                raise RuntimeError('RadicalExecutionBackend does not support function service tasks')
+                error_msg = 'RadicalExecutionBackend does not support function service tasks'
+                rp_task['exception'] = ValueError(error_msg)
+                self._callback_func(rp_task, rp.FAILED)
+                return
 
             rp_task.mode = rp.TASK_FUNCTION
             rp_task.function = rp.PythonTask(task_desc['function'],
@@ -249,7 +256,9 @@ class RadicalExecutionBackend(BaseExecutionBackend):
                             rp.TASK_PROC, rp.TASK_METHOD]:
             if not self.raptor_mode:
                 error_msg = f'Raptor mode is not enabled, cannot register {rp_task.mode}'
-                raise RuntimeError(error_msg)
+                rp_task['exception'] =  RuntimeError(error_msg)
+                self._callback_func(rp_task, rp.FAILED)
+                return
 
             rp_task.raptor_id = next(self.master_selector)
 
@@ -273,7 +282,7 @@ class RadicalExecutionBackend(BaseExecutionBackend):
             raise ValueError('Either file_name or file_path must be provided')
 
         dst_kwargs = dst_task['task_backend_specific_kwargs']
-        
+
         # Determine the filename if not provided
         if not file_name:
             if file_path:
@@ -336,8 +345,13 @@ class RadicalExecutionBackend(BaseExecutionBackend):
 
         _tasks = []
         for task in tasks:
-            _tasks.append(self.build_task(task['uid'],
-                          task, task['task_backend_specific_kwargs']))
+            task_to_submit = self.build_task(task['uid'],
+                          task, task['task_backend_specific_kwargs'])
+            
+            if not task_to_submit:
+                continue
+
+            _tasks.append(task_to_submit)
 
         return self.task_manager.submit_tasks(_tasks)
 

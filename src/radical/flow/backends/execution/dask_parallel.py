@@ -80,8 +80,8 @@ class DaskExecutionBackend(BaseExecutionBackend):
             is_exec_task = bool(task.get('executable'))
 
             if not is_func_task and is_exec_task:
-                error_msg = 'DaskExecutionBackend supports only function tasks'
-                task['stderr'] = RuntimeError(error_msg)
+                error_msg = 'DaskExecutionBackend does not support executable tasks'
+                task['stderr'] = ValueError(error_msg)
                 self._callback(task, 'FAILED')
                 continue
 
@@ -110,7 +110,7 @@ class DaskExecutionBackend(BaseExecutionBackend):
                 task['return_value'] = result
                 self._callback(task, 'DONE')
             except Exception as e:
-                task['exception'] = str(e)
+                task['exception'] = e
                 self._callback(task, 'FAILED')
 
         dask_future = self._client.submit(fn, *args,

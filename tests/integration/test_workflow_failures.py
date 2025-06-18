@@ -32,7 +32,7 @@ async def test_task_failure_handling():
 
     @flow.function_task
     async def failing_task():
-        raise Exception("Simulated failure")
+        raise RuntimeError("Simulated failure")
 
     @flow.function_task
     async def dependent_task(prev_result):
@@ -43,7 +43,7 @@ async def test_task_failure_handling():
         res = await good_task()
         assert res == "success"
 
-        with pytest.raises(Exception, match="Simulated failure"):
+        with pytest.raises(RuntimeError, match="Simulated failure"):
             await failing_task()
     finally:
         await flow.shutdown()
@@ -67,7 +67,7 @@ async def test_awaiting_failed_task_propagates_exception():
 
     @flow.function_task
     async def task1():
-        raise Exception("Intentional failure in task1")
+        raise ValueError("Intentional failure in task1")
 
     @flow.function_task
     async def task2(x):
@@ -75,7 +75,7 @@ async def test_awaiting_failed_task_propagates_exception():
 
     try:
         # The test will fail at await task1(), so task2 should never run
-        with pytest.raises(Exception, match="Intentional failure in task1"):
+        with pytest.raises(ValueError, match="Intentional failure in task1"):
             await task2(await task1())
     
     finally:

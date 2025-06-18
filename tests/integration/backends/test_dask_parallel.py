@@ -77,12 +77,29 @@ def test_dask_backend_rejects_executable_task():
 
     flow = WorkflowEngine(backend=backend)
 
-    with pytest.raises(Exception):
+    with pytest.raises(ValueError, match="DaskExecutionBackend does not support executable tasks"):
         @flow.executable_task
-        def bad_task():
+        def bad_task1():
             return '/bin/date'
 
-        not_supported_task = bad_task()
-        not_supported_task.result()
+        not_supported_task1 = bad_task1()
+        not_supported_task1.result()
 
+    flow.shutdown()
+
+def test_dask_backend_regular_task_failure():
+    backend = DaskExecutionBackend({'n_workers': 2,
+                                    'threads_per_worker': 1})
+
+    flow = WorkflowEngine(backend=backend)
+
+    with pytest.raises(RuntimeError, match="Some error"):
+        @flow.function_task
+        def bad_task2():
+            raise RuntimeError('Some error')
+    
+
+        not_supported_task2 = bad_task2()
+        not_supported_task2.result()
+    
     flow.shutdown()

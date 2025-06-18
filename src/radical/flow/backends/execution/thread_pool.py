@@ -83,12 +83,12 @@ class ThreadExecutionBackend(BaseExecutionBackend):
                 task['exit_code'] = result.returncode
                 state = 'DONE' if result.returncode == 0 else 'FAILED'
         except Exception as e:
-            task['return_value'] = None
-            task['stdout'] = ''
-            task['stderr'] = str(e)
-            task['exit_code'] = 1
-            task['exception'] = str(e)
             state = 'FAILED'
+            task['stderr'] = None
+            task['stdout'] = None
+            task['exit_code'] = 1
+            task['exception'] = e            
+            task['return_value'] = None
 
         return task, state
 

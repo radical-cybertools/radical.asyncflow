@@ -640,9 +640,9 @@ class WorkflowEngine:
         internal_task = self.components[task['uid']]['description']
 
         if internal_task[FUNCTION]:
-            task_fut.set_exception(Exception(task['exception']))
+            task_fut.set_exception(task['exception'])
         else:
-            task_fut.set_exception(Exception(task['stderr']))
+            task_fut.set_exception(task['stderr'])
 
     @typeguard.typechecked
     def task_callbacks(self, task, state: str,
