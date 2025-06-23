@@ -2,8 +2,8 @@ import os as _os
 import radical.utils as _ru
 
 from radical.asyncflow.task import Task
-from radical.asyncflow.workflow.data import InputFile
-from radical.asyncflow.workflow.data import OutputFile
+from radical.asyncflow.data import InputFile
+from radical.asyncflow.data import OutputFile
 from radical.asyncflow.workflow_manager import WorkflowEngine
 from radical.asyncflow.backends.execution.noop import NoopExecutionBackend
 from radical.asyncflow.backends.execution.thread_pool import ThreadExecutionBackend
