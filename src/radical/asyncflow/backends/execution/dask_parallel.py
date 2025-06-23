@@ -7,7 +7,7 @@ from dask.distributed import Client, Future as DaskFuture
 from concurrent.futures import Future as ConcurrentFuture
 
 from ...constants import StateMapper
-from radical.asyncflow.backends.execution.base import BaseExecutionBackend, Session
+from .base import BaseExecutionBackend, Session
 
 
 class DaskExecutionBackend(BaseExecutionBackend):

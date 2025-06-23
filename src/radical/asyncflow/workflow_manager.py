@@ -14,8 +14,8 @@ from concurrent.futures import Future as SyncFuture
 import typeguard
 from .data import InputFile, OutputFile
 
-from radical.asyncflow.backends.execution.noop import NoopExecutionBackend
-from radical.asyncflow.backends.execution.base import BaseExecutionBackend
+from .backends.execution.noop import NoopExecutionBackend
+from .backends.execution.base import BaseExecutionBackend
 
 TASK = 'task'
 BLOCK = 'block'
