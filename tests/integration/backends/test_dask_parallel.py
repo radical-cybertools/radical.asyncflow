@@ -2,8 +2,8 @@
 
 import pytest
 import asyncio
-from radical.flow import WorkflowEngine
-from radical.flow import DaskExecutionBackend
+from radical.asyncflow import WorkflowEngine
+from radical.asyncflow import DaskExecutionBackend
 
 
 def test_funnel_dag_with_dask_backend():

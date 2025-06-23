@@ -1,7 +1,7 @@
-from radical.flow import WorkflowEngine
-from radical.flow import RadicalExecutionBackend
-from radical.flow import DaskExecutionBackend
-from radical.flow import ThreadExecutionBackend
+from radical.asyncflow import WorkflowEngine
+from radical.asyncflow import RadicalExecutionBackend
+from radical.asyncflow import DaskExecutionBackend
+from radical.asyncflow import ThreadExecutionBackend
 
 backends= {ThreadExecutionBackend : {'max_workers': 4},
            RadicalExecutionBackend: {'resource': 'local.localhost'},

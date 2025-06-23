@@ -6,9 +6,9 @@ RF supports different execution backends such is `Radical.Pilot`,
 
 ## Basic Usage (sync)
 ```python
-from radical.flow import Task
-from radical.flow import WorkflowManager
-from radical.flow import RadicalExecutionBackend
+from radical.asyncflow import Task
+from radical.asyncflow import WorkflowManager
+from radical.asyncflow import RadicalExecutionBackend
 
 radical_backend = RadicalExecutionBackend({'resource': 'local.localhost'})
 flow = WorkflowManager(backend=radical_backend)

@@ -18,7 +18,7 @@ from setuptools import setup, Command, find_namespace_packages
 
 # ------------------------------------------------------------------------------
 #
-base     = 'flow'
+base     = 'asyncflow'
 name     = 'radical.%s'      % base
 mod_root = 'src/radical/%s/' % base
 
@@ -26,7 +26,7 @@ scripts  = list(glob('bin/*'))
 root     = os.path.dirname(__file__) or '.'
 readme   = open("%s/README.md" % root, encoding='utf-8').read()
 descr    = "RADICAL-Cybertools Flow Workflow Manager"
-keywords = ['radical', 'cybertools', 'flow workflow']
+keywords = ['radical', 'cybertools', 'asyncflow workflow']
 
 share    = 'share/%s' % name
 data     = []

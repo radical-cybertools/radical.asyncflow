@@ -1,8 +1,8 @@
 import pytest
 
-from radical.flow import WorkflowEngine
-from radical.flow import NoopExecutionBackend
-from radical.flow.workflow_manager import TASK, FUNCTION, BLOCK
+from radical.asyncflow import WorkflowEngine
+from radical.asyncflow import NoopExecutionBackend
+from radical.asyncflow.workflow_manager import TASK, FUNCTION, BLOCK
 
 @pytest.mark.asyncio
 async def test_register_function_task():

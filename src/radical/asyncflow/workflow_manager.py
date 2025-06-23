@@ -14,8 +14,8 @@ from concurrent.futures import Future as SyncFuture
 import typeguard
 from .data import InputFile, OutputFile
 
-from radical.flow.backends.execution.noop import NoopExecutionBackend
-from radical.flow.backends.execution.base import BaseExecutionBackend
+from radical.asyncflow.backends.execution.noop import NoopExecutionBackend
+from radical.asyncflow.backends.execution.base import BaseExecutionBackend
 
 TASK = 'task'
 BLOCK = 'block'
@@ -96,9 +96,9 @@ class WorkflowEngine:
 
         # always set the logger and profiler **before** setting the async loop
         self.log = ru.Logger(name='workflow_manager',
-                             ns='radical.flow', path=self.work_dir)
+                             ns='radical.asyncflow', path=self.work_dir)
         self.prof = ru.Profiler(name='workflow_manager',
-                                ns='radical.flow', path=self.work_dir)
+                                ns='radical.asyncflow', path=self.work_dir)
 
         self.backend.register_callback(self.task_callbacks)
 

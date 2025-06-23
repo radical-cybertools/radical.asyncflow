@@ -1,8 +1,8 @@
 import time
 import asyncio
 
-from radical.flow import WorkflowEngine
-from radical.flow import RadicalExecutionBackend
+from radical.asyncflow import WorkflowEngine
+from radical.asyncflow import RadicalExecutionBackend
 
 async def main():
     # Create backend and workflow
