@@ -6,11 +6,11 @@ RAF supports different execution backends such is `Radical.Pilot`,
 
 ## Basic Usage (sync)
 ```python
-from radical.asyncflow import WorkflowManager
+from radical.asyncflow import WorkflowEngine
 from radical.asyncflow import RadicalExecutionBackend
 
 radical_backend = RadicalExecutionBackend({'resource': 'local.localhost'})
-flow = WorkflowManager(backend=radical_backend)
+flow = WorkflowEngine(backend=radical_backend)
 
 @flow.executable_task
 def task1():
