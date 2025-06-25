@@ -1,8 +1,8 @@
 import pytest
 import asyncio
-import time
 
 from radical.asyncflow import WorkflowEngine
+from radical.asyncflow import OutputFile, InputFile
 from radical.asyncflow import RadicalExecutionBackend
 
 backend = RadicalExecutionBackend({'resource': 'local.localhost'})
@@ -76,4 +76,59 @@ def test_radical_backend_reject_function_task_with_raptor_off():
         not_supported_task3.result()
 
     # the last test will shutdown everything
+    flow.shutdown(skip_execution_backend=True)
+
+
+def test_radical_backend_implicit_data():
+    flow = WorkflowEngine(backend=backend)
+
+    @flow.executable_task
+    def task1(*args):
+        return 'echo "This is a file from task1" > t1_output.txt'
+
+    @flow.executable_task
+    def task2(*args):
+        return '/bin/cat t1_output.txt'
+
+    t1 = task1()
+    t2 = task2(t1)
+
+    assert t2.result() == 'This is a file from task1\n'
+
+    flow.shutdown(skip_execution_backend=True)
+
+
+def test_radical_backend_explicit_data():
+    flow = WorkflowEngine(backend=backend)
+
+    @flow.executable_task
+    def task1(*args):
+        return 'echo "This is a file from task1" > t1_output.txt'
+
+    @flow.executable_task
+    def task2(*args):
+        return '/bin/cat t1_output.txt'
+
+    t1 = task1(OutputFile('t1_output.txt'))
+    t2 = task2(t1, InputFile('t1_output.txt'))
+
+    assert t2.result() == 'This is a file from task1\n'
+
+    flow.shutdown(skip_execution_backend=True)
+
+
+def test_radical_backend_input_data_staging():
+    flow = WorkflowEngine(backend=backend)
+
+    with open('t1_input.txt', 'w') as f:
+        f.write('This is a file staged in to task1\n')
+
+    @flow.executable_task
+    def task1(*args):
+        return '/bin/cat t1_input.txt'
+
+    t1 = task1(InputFile('t1_input.txt'))
+
+    assert t1.result() == 'This is a file staged in to task1\n'
+
     flow.shutdown()
