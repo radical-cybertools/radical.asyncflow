@@ -1,8 +1,9 @@
 # flake8: noqa
 import os
 import asyncio
-import logging
 import threading
+
+from pathlib import Path
 from typing import Callable, Optional, Union
 
 import radical.utils as ru
@@ -546,9 +547,9 @@ class WorkflowEngine:
                                     explicit_files_to_stage.append(data_dep)
 
                         # input staging data dependencies
-                        staged_targets = [item['target'].split('/')[-1] for item in explicit_files_to_stage]
+                        staged_targets = {Path(item['target']).name for item in explicit_files_to_stage}
                         for input_file in comp_desc['metadata']['input_files']:
-                            input_basename = input_file.split('/')[-1]
+                            input_basename = Path(input_file).name
                             if input_basename not in staged_targets:
                                 msg = f'Staging {input_file} to {comp_desc["name"]} work dir'
                                 self.log.debug(msg)

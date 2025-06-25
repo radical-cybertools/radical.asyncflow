@@ -1,7 +1,10 @@
 import copy
 import threading
 import typeguard
-from typing import Dict, Optional
+
+from concurrent.futures import Future
+from typing import Dict, Optional, Callable
+
 import radical.utils as ru
 import radical.pilot as rp
 
@@ -85,7 +88,7 @@ class RadicalExecutionBackend(BaseExecutionBackend):
         try:
             self.tasks = {}
             self.raptor_mode = False
-            self.session = rp.Session(uid=ru.generate_id('flow.session',
+            self.session = rp.Session(uid=ru.generate_id('asyncflow.session',
                                                           mode=ru.ID_PRIVATE))
             self.task_manager = rp.TaskManager(self.session)
             self.pilot_manager = rp.PilotManager(self.session)
