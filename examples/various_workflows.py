@@ -1,5 +1,5 @@
-from radical.flow import WorkflowEngine
-from radical.flow import RadicalExecutionBackend
+from radical.asyncflow import WorkflowEngine
+from radical.asyncflow import RadicalExecutionBackend
 
 backend = RadicalExecutionBackend({'resource': 'local.localhost'})
 flow = WorkflowEngine(backend=backend)

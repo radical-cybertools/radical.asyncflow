@@ -1,8 +1,8 @@
 import pytest
 import asyncio
 
-from radical.flow import WorkflowEngine
-from radical.flow import ThreadExecutionBackend
+from radical.asyncflow import WorkflowEngine
+from radical.asyncflow import ThreadExecutionBackend
 
 @pytest.mark.asyncio
 async def test_task_failure_handling():

@@ -3,7 +3,7 @@ import asyncio
 import time
 from pathlib import Path
 
-from radical.flow import WorkflowEngine, ThreadExecutionBackend
+from radical.asyncflow import WorkflowEngine, ThreadExecutionBackend
 
 @pytest.mark.asyncio
 async def test_flow_function_tasks():

@@ -1,17 +1,16 @@
-RADICAL Flow (RF) is a synchronous and asynchronous workflow management layer. RF supports the management and execution of tasks, set of tasks with dependencies (workflows), sets of workflows with dependencies on other workflows (blocks). RF flows
+RADICAL AsyncFLow (RAF) is a synchronous and asynchronous workflow management layer. RAF supports the management and execution of tasks, set of tasks with dependencies (workflows), sets of workflows with dependencies on other workflows (blocks). RAF flows
 the best practice of Python by enabling asynchronous behavior on the task, workflow, and blocks with adaptive execution behavior.
-RF supports different execution backends such is `Radical.Pilot`,
-`Dask.Parallel` and more. RF is agnostic to these execution backends meaning the user can easily extend it with their own custom execution mechanism.
+RAF supports different execution backends such is `Radical.Pilot`,
+`Dask.Parallel` and more. RAF is agnostic to these execution backends meaning the user can easily extend it with their own custom execution mechanism.
 
 
 ## Basic Usage (sync)
 ```python
-from radical.flow import Task
-from radical.flow import WorkflowManager
-from radical.flow import RadicalExecutionBackend
+from radical.asyncflow import WorkflowEngine
+from radical.asyncflow import RadicalExecutionBackend
 
 radical_backend = RadicalExecutionBackend({'resource': 'local.localhost'})
-flow = WorkflowManager(backend=radical_backend)
+flow = WorkflowEngine(backend=radical_backend)
 
 @flow.executable_task
 def task1():

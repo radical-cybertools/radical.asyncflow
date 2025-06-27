@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import MagicMock
 
-from radical.flow import WorkflowEngine, ThreadExecutionBackend
+from radical.asyncflow import WorkflowEngine, ThreadExecutionBackend
 
 @pytest.mark.asyncio
 async def test_async_shutdown():

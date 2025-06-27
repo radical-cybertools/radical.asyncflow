@@ -1,8 +1,9 @@
 # flake8: noqa
 import os
 import asyncio
-import logging
 import threading
+
+from pathlib import Path
 from typing import Callable, Optional, Union
 
 import radical.utils as ru
@@ -14,8 +15,8 @@ from concurrent.futures import Future as SyncFuture
 import typeguard
 from .data import InputFile, OutputFile
 
-from radical.flow.backends.execution.noop import NoopExecutionBackend
-from radical.flow.backends.execution.base import BaseExecutionBackend
+from .backends.execution.noop import NoopExecutionBackend
+from .backends.execution.base import BaseExecutionBackend
 
 TASK = 'task'
 BLOCK = 'block'
@@ -96,9 +97,9 @@ class WorkflowEngine:
 
         # always set the logger and profiler **before** setting the async loop
         self.log = ru.Logger(name='workflow_manager',
-                             ns='radical.flow', path=self.work_dir)
+                             ns='radical.asyncflow', path=self.work_dir)
         self.prof = ru.Profiler(name='workflow_manager',
-                                ns='radical.flow', path=self.work_dir)
+                                ns='radical.asyncflow', path=self.work_dir)
 
         self.backend.register_callback(self.task_callbacks)
 
@@ -546,9 +547,9 @@ class WorkflowEngine:
                                     explicit_files_to_stage.append(data_dep)
 
                         # input staging data dependencies
-                        staged_targets = [item['target'].split('/')[-1] for item in explicit_files_to_stage]
+                        staged_targets = {Path(item['target']).name for item in explicit_files_to_stage}
                         for input_file in comp_desc['metadata']['input_files']:
-                            input_basename = input_file.split('/')[-1]
+                            input_basename = Path(input_file).name
                             if input_basename not in staged_targets:
                                 msg = f'Staging {input_file} to {comp_desc["name"]} work dir'
                                 self.log.debug(msg)

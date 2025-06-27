@@ -1,6 +1,6 @@
-from radical.flow import WorkflowEngine
-from radical.flow import NoopExecutionBackend
-from radical.flow.data import InputFile, OutputFile
+from radical.asyncflow import WorkflowEngine
+from radical.asyncflow import NoopExecutionBackend
+from radical.asyncflow.data import InputFile, OutputFile
 
 
 def test_detect_data_dependencies():
