@@ -25,7 +25,7 @@ mod_root = 'src/radical/%s/' % base
 scripts  = list(glob('bin/*'))
 root     = os.path.dirname(__file__) or '.'
 readme   = open("%s/README.md" % root, encoding='utf-8').read()
-descr    = "RADICAL-Cybertools Flow Workflow Manager"
+descr    = "RADICAL Asynchronous Workflow library"
 keywords = ['radical', 'cybertools', 'asyncflow workflow']
 
 share    = 'share/%s' % name

@@ -1,14 +1,14 @@
 import os as _os
 import radical.utils as _ru
 
-from radical.asyncflow.task import Task
-from radical.asyncflow.data import InputFile
-from radical.asyncflow.data import OutputFile
-from radical.asyncflow.workflow_manager import WorkflowEngine
-from radical.asyncflow.backends.execution.noop import NoopExecutionBackend
-from radical.asyncflow.backends.execution.thread_pool import ThreadExecutionBackend
-from radical.asyncflow.backends.execution.dask_parallel import DaskExecutionBackend
-from radical.asyncflow.backends.execution.radical_pilot import RadicalExecutionBackend
+from .task import Task
+from .data import InputFile
+from .data import OutputFile
+from .workflow_manager import WorkflowEngine
+from .backends.execution.noop import NoopExecutionBackend
+from .backends.execution.thread_pool import ThreadExecutionBackend
+from .backends.execution.dask_parallel import DaskExecutionBackend
+from .backends.execution.radical_pilot import RadicalExecutionBackend
 
 
 # ------------------------------------------------------------------------------
