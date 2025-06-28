@@ -519,8 +519,27 @@ class WorkflowEngine:
                         continue
 
                 dependencies = self.dependencies[comp_uid]
+
                 if all(dep['uid'] in self.resolved and self.components[dep['uid']]['future'].done() for dep in dependencies):
+
                     comp_desc = self.components[comp_uid]['description']
+
+                    dep_futures = [self.components[dep['uid']]['future'] for dep in dependencies]
+
+                    failed_deps = [fut.exception() for fut in dep_futures if fut.exception() is not None]
+
+                    if failed_deps:
+
+                        error_message = f"Cannot submit {comp_desc['name']} due to dependencies failure"
+
+                        self.log.error(error_message)
+
+                        # fail this component as well                        
+                        self.handle_task_failure(comp_desc, self.components[comp_uid]['future'], error_message)
+
+                        self.resolved.add(comp_uid)
+                        self.unresolved.remove(comp_uid)
+                        continue
 
                     explicit_files_to_stage = []
 
@@ -629,21 +648,41 @@ class WorkflowEngine:
         """
         internal_task = self.components[task['uid']]['description']
 
-        if internal_task[FUNCTION]:
-            task_fut.set_result(task['return_value'])
+        if not task_fut.done():
+            if internal_task[FUNCTION]:
+                task_fut.set_result(task['return_value'])
+            else:
+                task_fut.set_result(task['stdout'])
         else:
-            task_fut.set_result(task['stdout'])
+            raise RuntimeError('Can not handle an already resolved future')
 
-    def handle_task_failure(self, task, task_fut):
+    def handle_task_failure(self, task: dict, task_fut: Union[SyncFuture, AsyncFuture], 
+                            override_error_message: str = None) -> None:
         """
         Handle task failure by setting the exception in the future.
+        
+        Args:
+            task: Dictionary containing task details including 'uid' and exception information.
+            task_fut: Future object associated with the task that needs to be marked as failed.
+            override_error_message: Optional custom error message to use instead of the task's error.
+            
+        Raises:
+            RuntimeError: If attempting to handle an already resolved future.
+            KeyError: If required task components are missing.
         """
+        if task_fut.done():
+            raise RuntimeError('Cannot handle an already resolved future')
+
         internal_task = self.components[task['uid']]['description']
 
-        if internal_task[FUNCTION]:
-            task_fut.set_exception(task['exception'])
-        else:
-            task_fut.set_exception(task['stderr'])
+        # Determine the appropriate error message
+        error_message = override_error_message or (
+            task['exception'] if internal_task.get(FUNCTION) else task['stderr'])
+
+        # Create an appropriate exception if the error isn't already one
+        error_message = RuntimeError(str(error_message))
+
+        task_fut.set_exception(error_message)
 
     @typeguard.typechecked
     def task_callbacks(self, task, state: str,
@@ -749,7 +788,8 @@ class WorkflowEngine:
         # Cancel background tasks
         for internal_component in internal_component_to_shutdown:
             if internal_component and not internal_component.done():
-                self.log.debug(f"Cancelling {internal_component.get_name()}")
+                internal_comp_name = internal_component.get_coro().__name__
+                self.log.debug(f"Shutting down {internal_comp_name} component")
                 internal_component.cancel()
 
         # Wait for tasks to complete
@@ -765,6 +805,7 @@ class WorkflowEngine:
         # Shutdown the execution backend
         if not skip_execution_backend and self.backend:
             await self.loop.run_in_executor(None, self.backend.shutdown)
+            self.log.debug(f"Shutting down execution backend")
         else:
             self.log.warning("Skipping execution backend shutdown as requested")
 
