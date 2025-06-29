@@ -537,6 +537,23 @@ class WorkflowEngine:
 
         return chained_exception
 
+    def _get_dependency_output_files(self, dependencies):
+        """
+        Helper method to get all output files from dependencies.
+        
+        Args:
+            dependencies: List of dependency descriptions
+            
+        Returns:
+            set: Set of output file names from all dependencies
+        """
+        dependency_output_files = set()
+        for dep in dependencies:
+            dep_desc = self.components[dep['uid']]['description']
+            for output_file in dep_desc['metadata']['output_files']:
+                dependency_output_files.add(Path(output_file).name)
+        return dependency_output_files
+
     async def run(self):
         """
         Optimized async method to manage the execution of workflow components.
@@ -619,10 +636,14 @@ class WorkflowEngine:
                                     explicit_files_to_stage.append(data_dep)
 
                         # Input staging data dependencies
+                        # Get all output files from dependencies to avoid staging files that are already linked
+                        dependency_output_files = self._get_dependency_output_files(dependencies)
                         staged_targets = {Path(item['target']).name for item in explicit_files_to_stage}
+                        
                         for input_file in comp_desc['metadata']['input_files']:
                             input_basename = Path(input_file).name
-                            if input_basename not in staged_targets:
+                            # Only stage if the file is not already staged AND not an output from a dependency
+                            if input_basename not in staged_targets and input_basename not in dependency_output_files:
                                 self.log.debug(f'Staging {input_file} to {comp_desc["name"]} work dir')
                                 data_dep = self.backend.link_explicit_data_deps(
                                     src_task=None,
