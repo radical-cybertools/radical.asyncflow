@@ -502,23 +502,52 @@ class WorkflowEngine:
                 self._dependency_count[dependent_uid] -= 1
                 if self._dependency_count[dependent_uid] == 0:
                     self._ready_queue.append(dependent_uid)
-        
+
         # Clean up
         del self._dependents_map[comp_uid]
         if comp_uid in self._dependency_count:
             del self._dependency_count[comp_uid]
 
+    def _create_dependency_failure_exception(self, comp_desc, failed_deps):
+        """
+        Create a comprehensive exception that shows both the immediate failure
+        and the root cause from failed dependencies.
+        """
+        # Get the first failed dependency's exception
+        root_exception = failed_deps[0]
+
+        # Create a descriptive error message
+        error_message = f"Cannot submit {comp_desc['name']} due to dependency failure"
+
+        # Get the names of the failed dependencies for better context
+        failed_dep_names = []
+        dependencies = self.dependencies[comp_desc['uid']]
+        dep_futures = [self.components[dep['uid']]['future'] for dep in dependencies]
+
+        for dep, dep_future in zip(dependencies, dep_futures):
+            if dep_future.exception() is not None:
+                failed_dep_names.append(dep['name'])
+
+        detailed_message = f"{error_message}. Failed dependencies: {', '.join(failed_dep_names)}."
+        detailed_message += f" Root cause: {type(root_exception).__name__}: {str(root_exception)}"
+
+        # Create exception with full context
+        chained_exception = RuntimeError(detailed_message)
+        chained_exception.__cause__ = root_exception
+
+        return chained_exception
+
     async def run(self):
         """
         Optimized async method to manage the execution of workflow components.
-        
+
         This method uses an event-driven approach with dependency tracking for
         efficient DAG resolution. Key optimizations:
-        
-        1. O(1) dependency resolution using counters
+
+        1. Dependency resolution using counters
         2. Event-driven updates to avoid busy waiting
         3. Ready queue for components with resolved dependencies
-        
+
         The method maintains several data structures:
         - _ready_queue: Components ready for execution
         - _dependents_map: Reverse dependency mapping
@@ -529,51 +558,55 @@ class WorkflowEngine:
             try:
                 # Process ready components first
                 to_submit = []
-                
+
                 while self._ready_queue:
                     comp_uid = self._ready_queue.popleft()
-                    
+
                     # Skip if already processed
                     if comp_uid in self.resolved or comp_uid in self.running:
                         continue
-                    
+
                     # Check if future is already done (could be cancelled/failed)
                     if self.components[comp_uid]['future'].done():
                         self.resolved.add(comp_uid)
                         self._notify_dependents(comp_uid)
                         continue
-                    
+
                     # Verify dependencies are still met
                     dependencies = self.dependencies[comp_uid]
                     dep_futures = [self.components[dep['uid']]['future'] for dep in dependencies]
                     failed_deps = [fut.exception() for fut in dep_futures if fut.exception() is not None]
-                    
+
                     if failed_deps:
                         comp_desc = self.components[comp_uid]['description']
-                        error_message = f"Cannot submit {comp_desc['name']} due to dependencies failure"
-                        self.log.error(error_message)
                         
-                        # Fail this component
-                        self.handle_task_failure(comp_desc, self.components[comp_uid]['future'], error_message)
+                        # Create a comprehensive chained exception
+                        chained_exception = self._create_dependency_failure_exception(comp_desc, failed_deps)
+                        
+                        self.log.error(f"Dependency failure for {comp_desc['name']}: {chained_exception}")
+
+                        # Fail this component with the chained exception
+                        self.handle_task_failure(comp_desc, self.components[comp_uid]['future'], chained_exception)
+
                         self.resolved.add(comp_uid)
                         self._notify_dependents(comp_uid)
                         continue
-                    
+
                     # Prepare component for submission
                     comp_desc = self.components[comp_uid]['description']
-                    
+
                     # Handle data dependencies for tasks
                     if self.components[comp_uid]['type'] == TASK:
                         explicit_files_to_stage = []
-                        
+
                         for dep in dependencies:
                             dep_desc = self.components[dep['uid']]['description']
-                            
+
                             # Link implicit data dependencies
                             if self.implicit_data_mode and not dep_desc['metadata'].get('output_files'):
                                 self.log.debug(f'Linking implicit file(s): from {dep_desc["name"]} to {comp_desc["name"]}')
                                 self.backend.link_implicit_data_deps(dep_desc, comp_desc)
-                            
+
                             # Link explicit data dependencies
                             for output_file in dep_desc['metadata']['output_files']:
                                 if output_file in comp_desc['metadata']['input_files']:
@@ -584,7 +617,7 @@ class WorkflowEngine:
                                         file_name=output_file
                                     )
                                     explicit_files_to_stage.append(data_dep)
-                        
+
                         # Input staging data dependencies
                         staged_targets = {Path(item['target']).name for item in explicit_files_to_stage}
                         for input_file in comp_desc['metadata']['input_files']:
@@ -598,12 +631,12 @@ class WorkflowEngine:
                                     file_path=input_file
                                 )
                                 explicit_files_to_stage.append(data_dep)
-                    
+
                     to_submit.append(comp_desc)
                     msg = f"Ready to submit: {comp_desc['name']}"
                     msg += f" with resolved dependencies: {[dep['name'] for dep in dependencies]}"
                     self.log.debug(msg)
-                
+
                 # Submit ready components
                 if to_submit:
                     await self.queue.put(to_submit)
@@ -611,20 +644,20 @@ class WorkflowEngine:
                         comp_uid = comp_desc['uid']
                         self.running.append(comp_uid)
                         self.resolved.add(comp_uid)
-                
+
                 # Check for completed components and update dependency tracking
                 completed_components = []
                 for comp_uid in list(self.running):
                     if self.components[comp_uid]['future'].done():
                         completed_components.append(comp_uid)
                         self.running.remove(comp_uid)
-                
+
                 # Notify dependents of completed components
                 for comp_uid in completed_components:
                     self._notify_dependents(comp_uid)
                     if completed_components:  # Signal that something changed
                         self._component_change_event.set()
-                
+
                 # If nothing is ready and nothing is running, wait for changes
                 if not self._ready_queue and not to_submit and not completed_components:
                     # Wait for new components or state changes, with a timeout
@@ -637,7 +670,7 @@ class WorkflowEngine:
                 else:
                     # Small delay to prevent tight loop when actively processing
                     await asyncio.sleep(0.01)
-                    
+
             except asyncio.CancelledError:
                 break
             except Exception as e:
