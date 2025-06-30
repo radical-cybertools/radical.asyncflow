@@ -17,6 +17,7 @@ from concurrent.futures import Future as SyncFuture
 import typeguard
 from .data import InputFile, OutputFile
 
+from .errors import DependencyFailure
 from .backends.execution.noop import NoopExecutionBackend
 from .backends.execution.base import BaseExecutionBackend
 
@@ -510,14 +511,21 @@ class WorkflowEngine:
 
     def _create_dependency_failure_exception(self, comp_desc, failed_deps):
         """
-        Create a comprehensive exception that shows both the immediate failure
+        Create a DependencyFailure exception that shows both the immediate failure
         and the root cause from failed dependencies.
+        
+        Args:
+            comp_desc (dict): Description of the component that cannot execute
+            failed_deps (list): List of exceptions from failed dependencies
+            
+        Returns:
+            DependencyFailure: Exception with detailed failure information
         """
-        # Get the first failed dependency's exception
+        # Get the first failed dependency's exception as root cause
         root_exception = failed_deps[0]
 
         # Create a descriptive error message
-        error_message = f"Cannot submit {comp_desc['name']} due to dependency failure"
+        error_message = f"Cannot execute '{comp_desc['name']}' due to dependency failure"
 
         # Get the names of the failed dependencies for better context
         failed_dep_names = []
@@ -528,14 +536,12 @@ class WorkflowEngine:
             if dep_future.exception() is not None:
                 failed_dep_names.append(dep['name'])
 
-        detailed_message = f"{error_message}. Failed dependencies: {', '.join(failed_dep_names)}."
-        detailed_message += f" Root cause: {type(root_exception).__name__}: {str(root_exception)}"
-
-        # Create exception with full context
-        chained_exception = RuntimeError(detailed_message)
-        chained_exception.__cause__ = root_exception
-
-        return chained_exception
+        # Create the DependencyFailure exception with all context
+        return DependencyFailure(
+            message=error_message,
+            failed_dependencies=failed_dep_names,
+            root_cause=root_exception
+        )
 
     def _get_dependency_output_files(self, dependencies):
         """
@@ -762,14 +768,15 @@ class WorkflowEngine:
             raise RuntimeError('Can not handle an already resolved future')
 
     def handle_task_failure(self, task: dict, task_fut: Union[SyncFuture, AsyncFuture], 
-                            override_error_message: str = None) -> None:
+                            override_error_message: Union[str, Exception] = None) -> None:
         """
         Handle task failure by setting the exception in the future.
         
         Args:
             task: Dictionary containing task details including 'uid' and exception information.
             task_fut: Future object associated with the task that needs to be marked as failed.
-            override_error_message: Optional custom error message to use instead of the task's error.
+            override_error_message: Optional custom error message/exception to use instead of the task's error.
+                                Can be a string or an Exception instance (like DependencyFailure).
             
         Raises:
             RuntimeError: If attempting to handle an already resolved future.
@@ -780,11 +787,16 @@ class WorkflowEngine:
 
         internal_task = self.components[task['uid']]['description']
 
-        # Determine the appropriate error message and
-        # Create an appropriate exception if the error isn't already one
+        # Determine the appropriate exception to set
         if override_error_message is not None:
-            exception = RuntimeError(str(override_error_message))
+            # If it's already an exception (like DependencyFailure), use it directly
+            if isinstance(override_error_message, Exception):
+                exception = override_error_message
+            else:
+                # If it's a string, wrap it in RuntimeError
+                exception = RuntimeError(str(override_error_message))
         else:
+            # Use the task's original exception or stderr
             exception = task['exception'] if internal_task.get(FUNCTION) else task['stderr']
 
         task_fut.set_exception(exception)
