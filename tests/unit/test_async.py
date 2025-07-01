@@ -9,7 +9,7 @@ from radical.asyncflow.backends.execution.noop import NoopExecutionBackend
 
 @pytest.mark.asyncio
 async def test_async_context_startup():
-    engine = WorkflowEngine(backend=NoopExecutionBackend(), dry_run=True)
+    engine = WorkflowEngine(dry_run=True)
     await asyncio.sleep(0.1)  # Give some time for the loop to process startup tasks
 
     # Check that tasks have been scheduled
@@ -20,7 +20,7 @@ async def test_async_context_startup():
 
 
 def test_sync_context_startup():
-    engine = WorkflowEngine(backend=NoopExecutionBackend(), dry_run=True)
+    engine = WorkflowEngine(dry_run=True)
 
     # Simulate sync context (event loop is not running)
     engine.loop = asyncio.new_event_loop()
