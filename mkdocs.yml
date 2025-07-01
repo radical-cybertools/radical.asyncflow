@@ -1,0 +1,28 @@
+site_name: radical.flow Docs
+theme:
+  name: material
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [src]
+          options:
+            show_source: true
+            merge_init_into_class: true
+            docstring_style: google
+  - mkdocs-jupyter:
+      include_source: True
+      execute: False  # or True if you want notebooks auto-run on build
+  - gen-files:
+      scripts:
+        - docs/src-mkdocs/gen_ref_pages.py
+  - literate-nav:
+      nav_file: SUMMARY.md
+
+nav:
+  - Home: index.md
+  - Tutorials:
+      - Introduction: tutorials/intro.ipynb
+  - API Reference: reference.md

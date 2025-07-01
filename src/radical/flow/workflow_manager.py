@@ -24,12 +24,14 @@ EXECUTABLE = 'executable'
 
 class WorkflowEngine:
     """
-    WorkflowEngine is an asynchronous workflow manager that uses asyncio event loops 
-    and coroutines to manage and execute workflow components (blocks and/or tasks) 
-    within Directed Acyclic Graph (DAG) or Chain Graph (CG) structures. It provides 
-    support for async/await operations and handles task dependencies, input/output 
-    data staging, and execution.
+    An asynchronous workflow manager that uses asyncio event loops
+    and coroutines to manage and execute workflow components (blocks and/or
+    tasks) within Directed Acyclic Graph (DAG) or Chain Graph (CG) structures.
 
+    This class provides support for async/await operations and handles task
+    dependencies, input/output data staging, and execution.
+
+    Attributes:
         loop (asyncio.AbstractEventLoop): The asyncio event loop used for managing asynchronous tasks.
         backend (BaseExecutionBackend): The execution backend used for task execution.
         dry_run (bool): Indicates whether the engine is in dry-run mode.
@@ -37,39 +39,6 @@ class WorkflowEngine:
         log (ru.Logger): Logger instance for logging workflow events.
         prof (ru.Profiler): Profiler instance for profiling workflow execution.
         jupyter_async (bool): Indicates whether the engine is running in Jupyter async mode.
-    Methods:
-        __init__(backend, dry_run, jupyter_async):
-            Initializes the WorkflowEngine with the specified backend, dry-run mode, and Jupyter async mode.
-        _setup_execution_backend():
-            Configures the execution backend based on the provided backend and dry-run mode.
-        _is_in_jupyter():
-            Checks if the engine is running in a Jupyter environment.
-        _set_loop():
-            Configures and sets the asyncio event loop for the current context.
-        _start_async_internal_comps():
-            Starts asynchronous internal components for the workflow engine.
-        _register_decorator(comp_type, task_type=None):
-            Creates a decorator for registering tasks or blocks.
-        _handle_flow_component_registration(func, comp_type, task_type, task_backend_specific_kwargs):
-            Handles the registration of tasks or blocks as flow components.
-        _register_component(comp_fut, comp_type, comp_desc, task_type=None, task_backend_specific_kwargs=None):
-            Registers a task or block as a flow component.
-        shutdown_on_failure(func):
-            Decorator that shuts down the execution backend if an exception occurs in the decorated function.
-        _assign_uid(prefix):
-        _detect_dependencies(possible_dependencies):
-            Detects and categorizes dependencies into tasks, input files, and output files.
-        _clear():
-            Clears workflow components and their dependencies.
-        run():
-            Async method to manage the execution of workflow components by resolving dependencies and submitting them for execution.
-        submit():
-            Async method to submit blocks or tasks from the queue for execution.
-        _submit_blocks(blocks):
-            Async method to submit blocks for execution.
-        execute_block(block_fut, func, *args, **kwargs):
-            Async method to execute a block function and update its asyncio future.
-        task_callbacks(task, state):
         """
 
     @typeguard.typechecked
@@ -105,7 +74,7 @@ class WorkflowEngine:
         self.jupyter_async = jupyter_async if jupyter_async is not None else \
                              os.environ.get('FLOW_JUPYTER_ASYNC', None)
 
-        self._set_loop() # detect and set the event-loop 
+        self._set_loop() # detect and set the event-loop
         self._start_async_internal_comps() # start the solver and submitter
 
 
@@ -115,6 +84,23 @@ class WorkflowEngine:
         self.executable_task = self._register_decorator(comp_type=TASK, task_type=EXECUTABLE)
 
     def _setup_execution_backend(self):
+        """Sets up and validates the execution backend for the workflow manager.
+
+        This method configures the execution backend based on the dry run mode
+        setting. If no backend is specified and dry run is enabled, it creates
+        a NoopExecutionBackend. Otherwise, it validates that the provided
+        backend is compatible with the current mode.
+
+        Args:
+            None
+
+        Returns:
+            None
+
+        Raises:
+            RuntimeError: If no execution backend is specified in normal mode
+            RuntimeError: If an incompatible backend is specified in dry run mode
+        """
         if self.backend is None:
             if self.dry_run:
                 self.backend = NoopExecutionBackend()
@@ -126,29 +112,45 @@ class WorkflowEngine:
                 raise RuntimeError('Dry-run only supports the "NoopExecutionBackend".')
 
     def _is_in_jupyter(self):
+        """Determines if the code is running within a Jupyter environment.
+
+        This method checks for the presence of the 'JPY_PARENT_PID' environment
+        variable, which is set when code is executed within a Jupyter notebook
+        or Jupyter lab environment.
+
+        Returns:
+            bool: True if running in a Jupyter environment, False otherwise.
+        """
         return "JPY_PARENT_PID" in os.environ
 
     def _set_loop(self):
-        """
-        Configure and set the asyncio event loop for the current context.
+        """Configures and sets the asyncio event loop for the current context.
 
-        This method determines the appropriate asyncio event loop to use based on
-        the execution environment (e.g., Jupyter, IPython, or standard Python).
-        It handles both synchronous and asynchronous execution modes and ensures
-        that a valid event loop is set.
+        Determines the appropriate asyncio event loop based on the execution
+        environment and handles both synchronous and asynchronous execution
+        modes. The behavior varies depending on whether code is running in
+        Jupyter, IPython, or standard Python environments.
+
+        The event loop configuration follows these rules:
+            - In Jupyter with jupyter_async=True: Reuses existing loop
+            - In Jupyter with jupyter_async=False: Creates new loop
+            - In IPython: Reuses existing loop
+            - In standard Python: Creates new loop if none exists
+
+        Args:
+            None
+
+        Returns:
+            None
 
         Raises:
-            ValueError: If running in a Jupyter environment and the `jupyter_async`
-                        parameter or the `FLOW_JUPYTER_ASYNC` environment variable
-                        is not set.
-            RuntimeError: If no event loop could be obtained or created.
+            ValueError: If in Jupyter and jupyter_async setting is not specified
+            RuntimeError: If no event loop can be obtained or created
 
         Notes:
-            - In Jupyter, the behavior depends on the `jupyter_async` parameter:
-              - If `True`, the existing loop is reused for asynchronous execution.
-              - If `False`, a new loop is created for synchronous execution.
-            - In IPython, the existing loop is reused.
-            - In standard Python, a new loop is created if none exists.
+            The jupyter_async setting can be specified either through the
+            constructor parameter or via the FLOW_JUPYTER_ASYNC environment
+            variable.
         """
         try:
             # get current loop if running
@@ -191,18 +193,31 @@ class WorkflowEngine:
         self.log.debug('Event-Loop is set successfully')
 
     def _start_async_internal_comps(self):
-        """
-        Starts asynchronous internal components for the workflow manager in
-        both synchronous and asynchronous contexts.
+        """Starts asynchronous internal components of the workflow manager.
 
-        This method ensures that the `submit` and `run` coroutine tasks are
-        started and tracked, regardless of whether the current event loop is
-        already running (async context) or not (sync context).
-        In an async context, it uses `asyncio.create_task` to schedule the tasks.
-        In a sync context, it creates a background thread to start the event loop
-        and schedule the tasks.
+        Initializes and starts the workflow manager's internal coroutine tasks
+        (submit and run) in both synchronous and asynchronous execution
+        contexts.
 
-        Tracks the created tasks as instance attributes (`_submit_task` and `_run_task`).
+        The method handles two scenarios:
+            - Async context: Creates tasks directly using asyncio.create_task
+            - Sync context: Creates a background thread to run the event loop
+                            and schedule tasks
+
+        Args:
+            None
+
+        Returns:
+            None
+
+        Attributes Modified:
+            _submit_task: Created coroutine task for handling submissions
+            _run_task: Created coroutine task for managing workflow execution
+
+        Notes:
+            In synchronous contexts, a daemon thread is created to run the event
+            loop in the background. This ensures the workflow can execute
+            without blocking the main thread.
         """
 
         def _start():
@@ -223,26 +238,33 @@ class WorkflowEngine:
             thread.start()
 
     def _register_decorator(self, comp_type: str, task_type: Optional[str] = None):
-        """
-        A decorator factory for registering workflow components with optional task
-        descriptions.
-        Args:
-            - comp_type (str): The type of the workflow component (e.g., 'task', 'stage', etc.).
-            - task_type (str, optional): The specific type of task, if applicable. Defaults to None.
-        Returns:
-            Callable: A decorator that wraps the target function, capturing and merging
-            task descriptions provided at definition and invocation time, and registers
-            the function as a workflow component using the manager's registration logic.
- 
-        The decorator:
-            - Captures a `task_description` from the function's default arguments at
-              definition time.
-            - Allows overriding or extending the `task_description` at invocation time
-              via keyword arguments.
-            - Merges both descriptions, with invocation-time values taking precedence.
-            - Registers the function as a workflow component using the manager's internal
-              registration method.
+        """Creates a decorator factory for registering workflow components.
 
+        This method generates decorators that handle registration of tasks and
+        blocks with optional task-specific descriptions. The generated
+        decorators support both definition-time and invocation-time task
+        descriptions.
+
+        Args:
+            comp_type (str): Type of workflow component (e.g., 'task', 'stage')
+            task_type (Optional[str], optional): Specific task type. Defaults to None
+
+        Returns:
+            Callable: A decorator factory that produces decorators for registering
+            workflow components
+
+        The decorator handles:
+            - Capturing task descriptions from default arguments at definition time
+            - Processing task descriptions from keyword arguments at invocation time
+            - Merging descriptions with invocation-time values taking precedence
+            - Registering components using internal registration methods
+
+        Example:
+            >>> @engine.function_task(task_description={'cores': 4})
+            ... def my_task():
+            ...     pass
+
+            >>> my_task(task_description={'memory': '2GB'})  # Merges descriptions
         """
         def outer(possible_func: Union[Callable, None] = None, service: bool = False):
             def actual_decorator(func: Callable) -> Callable:
@@ -281,30 +303,33 @@ class WorkflowEngine:
 
     def _handle_flow_component_registration(self,
                                             func: Callable,
-                                            is_service:bool,
+                                            is_service: bool,
                                             comp_type: str,
                                             task_type: str,
                                             task_backend_specific_kwargs: dict = None):
-        """
-        Universal decorator logic for registering both tasks and blocks as flow components.
+        """Handles registration of tasks and blocks as workflow components.
 
-        This method returns a decorator that wraps the given function (`func`) and handles
-        its registration as a flow component. It supports both synchronous and asynchronous
-        functions, and manages the creation of appropriate future objects (`SyncFuture` or
-        `AsyncFuture`) for tracking the component's execution and registration.
+        Creates a decorator that manages component registration, handling both
+        synchronous and asynchronous functions. The decorator creates
+        appropriate futures (SyncFuture or AsyncFuture) to track execution
+        state.
 
         Args:
-            func (Callable): The function to be registered as a flow component.
-            comp_type (str): The type of the component (e.g., "task", "block").
-            task_type (str): The type of the task, used to determine how to handle the
-            function's result.
-            task_backend_specific_kwargs (dict, optional): Additional backend-specific
-            keyword arguments for the task.
+            func (Callable): Function to be registered as a workflow component
+            is_service (bool): Whether the component is a service
+            comp_type (str): Component type (e.g., "task", "block")
+            task_type (str): Task type, determines result handling
+            task_backend_specific_kwargs (dict, optional): Backend-specific kwargs. Defaults to None.
 
         Returns:
-            Callable: A decorator that wraps the original function, registers it as a
-            flow component, and returns a future object representing the component's
-            execution.
+            Callable: A decorator that:
+                - Wraps the original function
+                - Registers it as a workflow component
+                - Returns a future tracking the component's execution
+
+        Note:
+            For executable tasks, the decorator handles awaiting async functions
+            and collecting their return values appropriately.
         """
         @wraps(func)
         def wrapper(*args, **kwargs):
@@ -336,26 +361,42 @@ class WorkflowEngine:
 
     def _register_component(self, comp_fut, comp_type: str,
                             comp_desc: dict, task_type: str = None):
-        """
-        Register a workflow component (task or block) with shared logic.
-        This method assigns a unique identifier to the component, sets up its metadata,
-        detects dependencies, and stores the component's future and description for later use.
+        """Registers a workflow component with shared registration logic.
+
+        Handles the core registration process for both tasks and blocks.
+        Assigns identifiers, sets up metadata, detects dependencies, and manages
+        component storage.
+
         Args:
-            comp_fut: The future object associated with the component.
-            comp_type (str): The type of the component (e.g., 'task', 'block').
-            comp_desc (dict): The component's description, including function, arguments, etc.
-            task_type (str, optional): The type of task, used to distinguish between function and executable tasks.
-        Raises:
-            ValueError: If an executable task does not return a string.
+            comp_fut (Union[AsyncFuture, SyncFuture]): Future object for tracking component execution
+            comp_type (str): Type of component ('task' or 'block')
+            comp_desc (dict): Component description containing:
+                - function: The callable to execute
+                - args: Function arguments
+                - kwargs: Function keyword arguments
+                - task_backend_specific_kwargs: Backend-specific parameters
+            task_type (str, optional): Specific task type for execution handling. Defaults to None.
+
         Returns:
-            The updated future object with assigned id and component description.
+            Union[AsyncFuture, SyncFuture]: The future object with:
+                - Assigned component ID
+                - Associated component description
+                - Registration in workflow tracking structures
+
+        Raises:
+            ValueError: If an executable task returns non-string output
+
+        Side Effects:
+            - Updates self.components with new component
+            - Updates self.dependencies with component dependencies
+            - Logs component registration
         """
         # make sure not to specify both func and executable at the same time
         comp_desc['name'] = comp_desc['function'].__name__
         comp_desc['uid'] = self._assign_uid(prefix=comp_type)
 
         comp_desc[FUNCTION] = None if task_type == EXECUTABLE else comp_desc[FUNCTION]
-        
+
         if comp_desc[EXECUTABLE] and not isinstance(comp_desc[EXECUTABLE], str):
             error_msg = f"Executable task must return a string, got {type(comp_desc[EXECUTABLE])}"
             raise ValueError(error_msg)
@@ -383,8 +424,26 @@ class WorkflowEngine:
 
     @staticmethod
     def shutdown_on_failure(func: Callable):
-        """
-        Decorator that calls `shutdown` if an exception occurs in the decorated function.
+        """Decorator that ensures backend shutdown on function failure.
+
+        Wraps a function to catch any exceptions, shut down the execution
+        backend, and re-raise the original exception. This ensures cleanup of
+        backend resources even when errors occur.
+
+        Args:
+            func (Callable): Function to be decorated
+
+        Returns:
+            Callable: Wrapped function that handles exceptions by shutting
+                down the backend before re-raising
+
+        Raises:
+            Exception: Re-raises any exception caught from the wrapped function
+                after shutting down the backend
+
+        Note:
+            The wrapped function must be an instance method with access to
+            self.backend and self.log
         """
         def wrapper(self, *args, **kwargs):
             try:
@@ -465,35 +524,40 @@ class WorkflowEngine:
         self.dependencies.clear()
 
     async def run(self):
-        """
-        Async method to manage the execution of workflow components by resolving
-        dependencies and submitting then for execution once they are resolved.
+        """Manages asynchronous execution of workflow components.
 
-        This method continuously checks for unresolved components, evaluates their
-        dependencies, and prepares them for submission if all dependencies are resolved.
-        It also handles input and output data staging for the components.
+        Continuously monitors and manages workflow components, handling their
+        dependencies and execution states. Performs dependency resolution and
+        prepares components for execution when their dependencies are satisfied.
 
-        Workflow:
-        - Identifies unresolved components.
-        - Checks if their dependencies are resolved and their associated tasks are completed.
-        - Prepares components for execution by setting up pre-execution commands and
-          input staging based on dependencies.
-        - Submits components that are ready for execution to the queue.
+        Workflow Process:
+            1. Monitors unresolved components
+            2. Checks dependency resolution status
+            3. Prepares resolved components for execution
+            4. Handles data staging between components
+            5. Submits ready components to execution queue
 
-        Attributes:
-            unresolved (set): A set of component UIDs that have unresolved dependencies.
-            resolved (set): A set of component UIDs whose dependencies are resolved.
-            running (list): A list of component UIDs that are currently running.
-            dependencies (dict): A mapping of component UIDs to their dependency information.
-            components (dict): A mapping of component UIDs to their descriptions and futures.
-            queue (asyncio.Queue): A queue to submit components ready for execution.
+        Args:
+            None
+
+        Returns:
+            None
 
         Raises:
-            asyncio.CancelledError: If the coroutine is cancelled during execution.
+            asyncio.CancelledError: If the coroutine is cancelled during execution
 
-        Notes:
-            - This method runs indefinitely until cancelled.
-            - It uses a sleep interval to avoid busy-waiting.
+        State Management:
+            - unresolved (set): Component UIDs with pending dependencies
+            - resolved (set): Component UIDs with satisfied dependencies
+            - running (list): Currently executing component UIDs
+            - dependencies (dict): Maps component UIDs to dependency info
+            - components (dict): Maps UIDs to component descriptions and futures
+            - queue (asyncio.Queue): Execution queue for ready components
+
+        Note:
+            - Runs indefinitely until cancelled
+            - Uses sleep intervals to prevent busy-waiting
+            - Handles both implicit and explicit data dependencies
         """
 
         while True:
@@ -647,41 +711,44 @@ class WorkflowEngine:
     @typeguard.typechecked
     def task_callbacks(self, task, state: str,
                     service_callback: Optional[Callable] = None):
-        """
-        Handle callbacks for task state changes and invoke appropriate handlers.
-        This method processes state changes for a given task, updates its future,
-        and calls relevant handlers based on the new state. Optionally, a service-specific
-        callback can be provided for additional handling.
+        """Processes task state changes and invokes appropriate handlers.
+
+        Handles state transitions for tasks, updates their futures, and triggers
+        relevant state-specific handlers. Supports optional service-specific
+        callbacks for extended functionality.
+
         Args:
-            task: The task object or dictionary representing the task whose state has changed.
-            state (str): The new state of the task.
-            service_callback (Optional[Callable], optional): A callback function for service tasks,
-                which is invoked with the task's future, the task object, and the new state.
-                service_callback must be a **daemon-thread** function to avoid blocking the event
-                loop.
-                example:
-                ```
+            task (Union[dict, object]): Task object or dictionary containing task state information.
+            state (str): New state of the task.
+            service_callback (Optional[Callable], optional): Callback function
+            for service tasks. Must be daemon-threaded to avoid blocking.
+            Defaults to None.
+
+        Returns:
+            None
+
+        State Transitions:
+            - DONE: Calls handle_task_success
+            - RUNNING: Marks future as running
+            - CANCELED: Cancels the future
+            - FAILED: Calls handle_task_failure
+
+        Logging:
+            - Debug: Non-relevant state received
+            - Info: Task state changes
+            - Warning: Unknown task received
+
+        Example:
+            ::
+
                 def service_ready_callback(future, task, state):
                     def wait_and_set():
                         try:
-                            wait_for_something_to_happen_here  # synchronous call
+                            # Synchronous operation
                             future.set_result(info)
                         except Exception as e:
                             future.set_exception(e)
-
                     threading.Thread(target=wait_and_set, daemon=True).start()
-                ```
-        Returns:
-            None
-        Logs:
-            - Debug message if the state is not relevant.
-            - Info message when a task changes state.
-            - Warning if an unknown task is received.
-        State Handling:
-            - StateMapper.DONE: Calls `handle_task_success`.
-            - StateMapper.RUNNING: Marks the future as running.
-            - StateMapper.CANCELED: Cancels the future.
-            - StateMapper.FAILED: Calls `handle_task_failure`.
         """
         if state not in self.task_states_map.terminal_states and \
             state != self.task_states_map.RUNNING:
@@ -774,12 +841,12 @@ class WorkflowEngine:
 
         - In Jupyter Notebook (sync or async mode), it either returns the
           coroutine for async mode or runs it in a thread for sync mode.
-        - Outside Jupyter, it detects if running in an async context and 
+        - Outside Jupyter, it detects if running in an async context and
           returns the coroutine, or runs it synchronously if not.
         - Ensures proper shutdown regardless of whether the environment is
           synchronous or asynchronous, and whether it's running in Jupyter
           or standard Python.
-        
+
         args:
             skip_execution_backend (bool): If True, skips the shutdown of the
             execution backend. This is useful for cases where the backend

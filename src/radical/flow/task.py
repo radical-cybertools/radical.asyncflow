@@ -2,26 +2,27 @@ import radical.pilot as rp
 
 
 class Task(rp.TaskDescription):
-    """
-    Represents a task description by extending the `TaskDescription` class from `rp`
-    (an external module).
+    """Task description container extending radical.pilot TaskDescription.
 
-    This class is primarily used to define and manage the details of a task, inheriting
-    properties and methods from the `rp.TaskDescription` base class. Additional arguments
-    and keyword arguments can be passed to further configure the task, which are then
-    forwarded to the base class.
+    A specialized task description class that inherits from radical.pilot's
+    TaskDescription to define and manage task configurations.
 
-    Parameters
-    ----------
-    *args : tuple
-        Positional arguments to pass to the parent class constructor, if needed.
-    **kwargs : dict
-        Keyword arguments to configure the task. Passed directly to the `TaskDescription`
-        initializer.
+    Args:
+        **kwargs: Configuration parameters for the task. All arguments are
+            passed directly to the parent TaskDescription class.
 
-    Methods
-    -------
-    None. This class relies on inherited methods from `rp.TaskDescription`.
+    Attributes:
+        Inherits all attributes from radical.pilot.TaskDescription.
+
+    Example:
+        >>> task = Task(executable='/bin/date',
+        ...            cpu_processes=1,
+        ...            gpu_processes=0)
+
+    Note:
+        This class uses dictionary-based initialization through the parent
+        class's from_dict parameter to maintain compatibility with
+        radical.pilot's configuration system.
     """
 
     def __init__(self, **kwargs):

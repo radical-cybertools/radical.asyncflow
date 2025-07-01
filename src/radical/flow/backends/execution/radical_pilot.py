@@ -21,65 +21,77 @@ def service_ready_callback(future, task, state):
 
 
 class RadicalExecutionBackend(BaseExecutionBackend):
-    """
-    The RadicalExecutionBackend class is responsible for managing computing resources
-    and creating sessions for executing tasks on a large scale. It interfaces with
-    different resource management systems such SLURM and FLUX on diverse HPC machines.
-    This backend is capable of initialize sessions, manage task execution, and submit
-    resources required for the workflow.
+    """Manages HPC resources and task execution using RADICAL-Pilot.
+
+    A backend implementation that interfaces with various resource management
+    systems (e.g., SLURM, FLUX) on HPC machines. Handles session management,
+    resource allocation, and task execution at scale.
+
+    Args:
+        resources (Dict): Resource requirements for the pilot, specifying:
+            - CPU cores
+            - GPU devices
+            - Memory allocation
+            - Other resource-specific parameters
+        raptor_config (Optional[Dict]): Configuration for Raptor execution mode.
+            Defaults to None.
 
     Attributes:
-        session (rp.Session): A session instance used to manage and track task execution,
-            uniquely identified by a generated ID. This session serves as the primary context for
-            all task and resource management within the workflow.
-
-        task_manager (rp.TaskManager): Manages the lifecycle of tasks, handling their submission,
-            tracking, and completion within the session.
-
-        pilot_manager (rp.PilotManager): Manages computing resources, known as "pilots," which
-            are dynamically allocated based on the provided resources. The pilot manager
-            coordinates these resources to support task execution.
-
-        resource_pilot (rp.Pilot): Represents the submitted computing resources as a pilot.
-            This pilot is described by the `resources` parameter provided during initialization,
-            specifying details such as CPU, GPU, and memory requirements.
-
-    Parameters:
-        resources (Dict): A dictionary specifying the resource requirements for the pilot,
-            including details like the number of CPUs, GPUs, and memory. This dictionary
-            configures the pilot to match the needs of the tasks that will be executed.
-
-    Raises:
-        Exception: If session creation, pilot submission, or task manager setup fails,
-            the RadicalExecutionBackend will raise an exception, ensuring the resources
-            are correctly allocated and managed.
+        session (rp.Session): Main session context with unique ID for task tracking
+        task_manager (rp.TaskManager): Manages task lifecycle and execution
+        pilot_manager (rp.PilotManager): Manages compute resource allocation
+        resource_pilot (rp.Pilot): Active pilot job on the compute resources
 
     Example:
-        ```python
-        resources = {"cpu": 4, "gpu": 1, "memory": "8GB"}
-        backend = RadicalExecutionBackend(resources)
-        ```
+        >>> resources = {
+        ...     "cpu": 4,
+        ...     "gpu": 1,
+        ...     "memory": "8GB"
+        ... }
+        >>> backend = RadicalExecutionBackend(resources)
+
+    Note:
+        The backend automatically handles:
+        - Session creation and management
+        - Resource allocation via pilots
+        - Task scheduling and execution
+        - Data staging and movement
     """
 
     @typeguard.typechecked
     def __init__(self, resources: Dict, raptor_config: Optional[Dict] = None) -> None:
-        """
-        Initialize the RadicalExecutionBackend with the given resources and optional
-        Raptor configuration.
+        """Initializes a RadicalPilot execution backend instance.
+
+        Sets up a RADICAL-Pilot session with the specified resource
+        configuration and optional Raptor mode settings.
+
         Args:
-            resources (Dict): A dictionary specifying the resource configuration
-                for the Radical Pilot session.
-            raptor_config (Optional[Dict]): An optional dictionary containing
-                configuration for enabling Raptor mode. Defaults to None.
+            resources (Dict): Resource configuration containing:
+                - Resource allocation requirements
+                - System-specific parameters
+                - Hardware specifications (CPU, GPU, memory)
+            raptor_config (Optional[Dict], optional): Raptor mode settings.
+                When provided, enables and configures Raptor execution mode.
+                Defaults to None.
+
         Raises:
-            Exception: If the RadicalPilot execution backend fails to start.
-            SystemExit: If a KeyboardInterrupt or SystemExit is encountered during
-                initialization, providing a message with the session path for debugging.
-        Notes:
-            - Initializes a Radical Pilot session, task manager, and pilot manager.
-            - Submits pilots based on the provided resource configuration.
-            - Adds the pilots to the task manager.
-            - Enables Raptor mode if a configuration is provided.
+            Exception: If backend initialization fails
+            SystemExit: If initialization is interrupted, includes session path
+                in error message for debugging
+
+        Side Effects:
+            - Creates RADICAL-Pilot session
+            - Initializes task and pilot managers
+            - Submits pilot job
+            - Configures Raptor mode if specified
+            - Registers state mapping handlers
+
+        Note:
+            The initialization process follows these steps:
+            1. Creates and configures session components
+            2. Submits pilot based on resource configuration
+            3. Enables Raptor mode if configured
+            4. Sets up state mapping and callbacks
         """
         raptor_config = raptor_config or {}
         try:
@@ -97,9 +109,9 @@ class RadicalExecutionBackend(BaseExecutionBackend):
                 self.raptor_mode = True
                 print('Enabling Raptor mode for RadicalExecutionBackend')
                 self.setup_raptor_mode(raptor_config)
-            
+
             # register the backend task states to the global state manager
-            StateMapper.register_backend_states(backend=self, 
+            StateMapper.register_backend_states(backend=self,
                                                 done_state=rp.DONE,
                                                 failed_state=rp.FAILED,
                                                 canceled_state=rp.CANCELED,
@@ -118,55 +130,52 @@ class RadicalExecutionBackend(BaseExecutionBackend):
             # reason).
             exception_msg = f'Radical execution backend failed'
             exception_msg += f' internally, please check {self.session.path}'
-            
+
             raise SystemExit(exception_msg) from e
-    
+
     def get_task_states_map(self):
         return StateMapper(backend=self)
 
     def setup_raptor_mode(self, raptor_config):
-        """
-        Sets up the Raptor mode by configuring and submitting master and worker tasks.
+        """Sets up Raptor execution mode with masters and workers.
 
-        This method initializes the Raptor mode by creating and submitting master tasks
-        and their associated worker tasks to the resource pilot. The configuration for
-        the masters and workers is provided through the `raptor_config` dictionary.
+        Initializes Raptor mode by configuring and submitting master tasks and
+        their associated worker tasks to the resource pilot.
 
         Args:
-            raptor_config (dict): A dictionary containing the configuration for the
-                Raptor mode. The structure of the dictionary is as follows:
-                            'executable': str,  # Path to the master executable
-                            'arguments': list,  # List of arguments for the master
-                            'ranks': int,  # Number of ranks (CPU processes) for the master
-                            'workers': [  # List of worker configurations
-                                    'executable': str,  # Path to the worker executable
-                                    'arguments': list,  # List of arguments for the worker
-                                    'ranks': int  # Number of ranks (CPU processes) for the worker
-                                },
-                                ...
-                            ]
-                        },
-                        ...
-                    ]
-                }
+            raptor_config (dict): Configuration dictionary containing masters.
 
-        Attributes:
-            masters (list): A list of master tasks created and submitted.
-            workers (list): A list of worker tasks created and submitted.
-            master_selector (callable): A callable used to select a master.
+        Master and Worker Configuration:
+            Masters configurations:
+                executable (str): Path to master executable
+                arguments (list): Command line arguments
+                ranks (int): Number of CPU processes
+                workers (list[dict]):
+            Worker configurations:
+                executable (str): Path to worker executable
+                arguments (list): Command line arguments
+                ranks (int): Number of CPU processes
+                worker_type (str, optional): Worker class name. Defaults to 'DefaultWorker'
 
-        Steps:
-            1. Deep copies the `raptor_config` to avoid modifying the original.
-            2. Iterates through the master configurations in `raptor_config['masters']`.
-            3. Extracts and removes the worker configurations from each master configuration.
-            4. Creates and submits a master task using the `rp.TaskDescription`.
-            5. Iterates through the worker configurations and creates worker tasks
-               associated with the corresponding master.
-            6. Submits the worker tasks to the master and stores them in the `workers` list.
+        Attributes Modified:
+            masters (list): Created and submitted master tasks
+            workers (list): Created and submitted worker tasks
+            master_selector (generator): Round-robin master selection generator
 
         Raises:
-            Any exceptions raised by the `rp.TaskDescription` or submission methods
-            will propagate to the caller.
+            rp.TaskDescription.Exception: On invalid task configuration
+            RuntimeError: On submission failures
+
+        Process Flow:
+            1. Deep copies config to preserve original
+            2. Creates and submits master tasks
+            3. Creates and submits associated worker tasks
+            4. Sets up master selection for task distribution
+            5. Links workers to their respective masters
+
+        Note:
+            Each worker is automatically configured with a unique ID and
+            linked to its master via raptor_id.
         """
 
         self.masters = []
@@ -180,8 +189,7 @@ class RadicalExecutionBackend(BaseExecutionBackend):
             workers = master_description.pop('workers')
 
             md = rp.TaskDescription(master_description)
-            md.uid = ru.generate_id('flow.master.%(item_counter)06d', ru.ID_CUSTOM,
-                                     ns=self.session.uid)
+            md.uid = ru.generate_id('flow.master.%(item_counter)06d', ru.ID_CUSTOM, ns=self.session.uid)
             md.mode = rp.RAPTOR_MASTER
             master = self.resource_pilot.submit_raptors(md)[0]
             self.masters.append(master)
@@ -197,7 +205,7 @@ class RadicalExecutionBackend(BaseExecutionBackend):
                         'raptor_id': md.uid,
                         'mode': rp.RAPTOR_WORKER,
                         'raptor_class': raptor_class,
-                        'uid': ru.generate_id('flow.worker.%(item_counter)06d', 
+                        'uid': ru.generate_id('flow.worker.%(item_counter)06d',
                                               ru.ID_CUSTOM, ns=self.session.uid)}))
 
                 self.workers.append(worker)
@@ -267,16 +275,34 @@ class RadicalExecutionBackend(BaseExecutionBackend):
         return rp_task
 
     def link_explicit_data_deps(self, src_task=None, dst_task=None, file_name=None, file_path=None):
-        """Links explicit data dependencies by adding an input_staging entry to the destination task.
+        """Configures explicit data staging between tasks or from external sources.
+
+        Sets up data dependencies by adding input staging entries to destination
+        tasks. Supports both task-to-task data movement and staging from external
+        paths.
 
         Args:
-            src_task: Source task dict (where file comes from). None for external paths.
-            dst_task: Destination task dict (where file goes).
-            file_name: Name of the file. Defaults to src_task UID if from task, or basename if from path.
-            file_path: External path to stage in (alternative to task-sourced files).
+            src_task (Optional[dict]): Source task containing the file. None for
+                external files. Contains task metadata and configuration.
+            dst_task (Optional[dict]): Destination task where file will be staged. Must contain 'task_backend_specific_kwargs' field.
+            file_name (Optional[str]): Target file name. Will default to:
+                - basename of file_path if staging from path
+                - src_task UID if staging from task
+            file_path (Optional[str]): External file path for staging. Alternative to task-sourced files.
 
         Returns:
-            dict: The data dependency dict that was staged.
+            dict: Staging configuration containing:
+                - source: Original file location (task or path based)
+                - target: Destination path in task sandbox
+                - action: TRANSFER for external files, LINK for task files
+
+        Raises:
+            ValueError: If neither file_name nor file_path is provided
+            ValueError: If src_task is missing when staging from task
+
+        Note:
+            At least one of file_name/file_path must be provided. For
+            task-to-task transfers, src_task is required.
         """
         if not file_name and not file_path:
             raise ValueError('Either file_name or file_path must be provided')
@@ -315,10 +341,29 @@ class RadicalExecutionBackend(BaseExecutionBackend):
         return data_dep
 
     def link_implicit_data_deps(self, src_task, dst_task):
-        """
-        Adds pre_exec commands to dst_task that symlink files from src_task's sandbox.
+        """Creates implicit data dependencies between tasks via symlinks.
 
-        This is used to simulate implicit data dependencies.
+        Configures pre-execution commands in the destination task to create
+        symlinks to all files in the source task's sandbox directory. This
+        provides implicit data staging between tasks.
+
+        Args:
+            src_task (dict): Source task whose sandbox contains the files to link
+                Must contain 'uid' field for identifying the source sandbox
+            dst_task (dict): Destination task where symlinks will be created
+                Must contain 'task_backend_specific_kwargs' for configuring
+                pre-execution commands
+
+        Side Effects:
+            Modifies dst_task's 'pre_exec' commands to:
+            - Set environment variables for source task location
+            - Create symlinks to all files in source task sandbox
+            - Skip files matching the source task's UID pattern
+
+        Note:
+            The implementation uses shell commands executed before task launch
+            to establish the data dependencies at runtime. This approach allows
+            flexible data sharing without explicit file declarations.
         """
 
         dst_kwargs = dst_task['task_backend_specific_kwargs']
@@ -329,7 +374,7 @@ class RadicalExecutionBackend(BaseExecutionBackend):
 
         cmd3 = '''files=$(cd "$SRC_TASK_SANDBOX" && ls | grep -ve "^$SRC_TASK_ID")
                 for f in $files
-                do 
+                do
                     ln -sf "$SRC_TASK_SANDBOX/$f" "$RP_TASK_SANDBOX"
                 done'''
 
@@ -342,12 +387,37 @@ class RadicalExecutionBackend(BaseExecutionBackend):
 
 
     def submit_tasks(self, tasks: list):
+        """Submits a list of tasks to the RADICAL-Pilot task manager.
 
+        Processes and submits multiple tasks for execution. Each task is built
+        using the task description and backend-specific parameters before
+        submission to the task manager.
+
+        Args:
+            tasks (list): List of task dictionaries, each containing:
+                - uid (str): Unique identifier for the task
+                - task_backend_specific_kwargs (dict): Backend configuration
+                - Other task-specific parameters and descriptions
+
+        Returns:
+            list: Submitted task objects managed by RADICAL-Pilot
+
+        Note:
+            Tasks that fail during build phase (e.g., due to invalid
+            configuration or Raptor mode requirements) are filtered out
+            before submission.
+
+        Process Flow:
+            1. Builds each task using build_task()
+            2. Filters out failed or invalid tasks
+            3. Submits valid tasks to task manager
+            4. Returns list of submitted task objects
+        """
         _tasks = []
         for task in tasks:
             task_to_submit = self.build_task(task['uid'],
                           task, task['task_backend_specific_kwargs'])
-            
+
             if not task_to_submit:
                 continue
 
@@ -356,13 +426,18 @@ class RadicalExecutionBackend(BaseExecutionBackend):
         return self.task_manager.submit_tasks(_tasks)
 
     def get_nodelist(self):
-        """
-        Get the information about allocated nodes.
+        """Retrieves information about allocated compute nodes.
+
+        Gets the list of nodes allocated to the current pilot job. Only
+        returns information when the pilot is in an active state.
 
         Returns:
-            `rp.NodeList` object, which holds the information about allocated
-            nodes, where each node from `nodelist.nodes` is of the type
-            `rp.NodeResource`.
+            rp.NodeList: Object containing allocated node information:
+                - nodes (list[rp.NodeResource]): List of node resources
+                - Each node contains hardware/system information
+
+        Note:
+            Returns None if the pilot is not in PMGR_ACTIVE state
         """
         nodelist = None
         if self.resource_pilot.state == rp.PMGR_ACTIVE:
@@ -371,37 +446,61 @@ class RadicalExecutionBackend(BaseExecutionBackend):
         return nodelist
 
     def state(self):
-        """
-        Retrieve the current state of the resource pilot.
+        """Retrieves the current state of the resource pilot.
 
         Returns:
-            The current state of the resource pilot.
+            str: Current state of the pilot job
+
+        Raises:
+            NotImplementedError: This method must be implemented by subclasses
+
+        Note:
+            State values are specific to the backend implementation
         """
         raise NotImplementedError
 
     def task_state_cb(self, task, state):
-        """
-        Callback function for handling task state changes.
+        """Handles state change callbacks for tasks.
+
+        Called when a task's state changes to perform any necessary
+        state-specific actions.
 
         Args:
-            task: The task object whose state has changed.
-            state: The new state of the task.
-        
+            task (Union[dict, object]): Task object whose state changed
+            state (str): New state of the task
+
+        Raises:
+            NotImplementedError: This method must be implemented by subclasses
+
         Note:
-            This method is intended to be overridden or extended
-            to perform specific actions when a task's state changes.
+            Subclasses should override this to implement specific state
+            handling logic
         """
         raise NotImplementedError
 
     def shutdown(self) -> None:
-        """
-        Gracefully shuts down the session, downloading any necessary data.
+        """Performs graceful shutdown of the execution backend.
 
-        This method ensures that the session is properly closed and any
-        required data is downloaded before finalizing the shutdown.
+        Closes the current session and ensures all data is properly downloaded
+        before termination. This method should be called when workflow
+        execution is complete or needs to be terminated.
 
         Returns:
             None
+
+        Side Effects:
+            - Closes active session
+            - Downloads any pending data
+            - Releases allocated resources
+            - Logs shutdown message
+        """
+        print('Shutdown is triggered, terminating the resources gracefully')
+        self.session.close(download=True)
+        """
+        print('Shutdown is triggered, terminating the resources gracefully')
+        self.session.close(download=True)
+        print('Shutdown is triggered, terminating the resources gracefully')
+        self.session.close(download=True)
         """
         print('Shutdown is triggered, terminating the resources gracefully')
         self.session.close(download=True)
