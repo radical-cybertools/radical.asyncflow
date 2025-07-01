@@ -3,8 +3,7 @@ import pytest
 import asyncio
 import threading
 
-from radical.asyncflow.workflow_manager import WorkflowEngine
-from radical.asyncflow.backends.execution.noop import NoopExecutionBackend
+from radical.asyncflow import WorkflowEngine
 
 
 @pytest.mark.asyncio
