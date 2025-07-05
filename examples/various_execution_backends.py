@@ -17,29 +17,27 @@ print("""
 def main():
     for backend, resource in backends.items():
         backend = backend(resource)
-        flow = WorkflowEngine(backend=backend)
+        with WorkflowEngine(backend=backend) as flow:
+            task = flow.executable_task
+            if isinstance(backend, DaskExecutionBackend):
+                task = flow.function_task
+            
+            @task
+            def task1(*args):
+                return '/bin/date'
 
-        task = flow.executable_task
-        if isinstance(backend, DaskExecutionBackend):
-            task = flow.function_task
-        
-        @task
-        def task1(*args):
-            return '/bin/date'
+            @task
+            def task2(*args):
+                return '/bin/date'
 
-        @task
-        def task2(*args):
-            return '/bin/date'
+            @task
+            def task3(*args):
+                return '/bin/date'
 
-        @task
-        def task3(*args):
-            return '/bin/date'
+            t3 = task3(task1(), task2())
 
-        t3 = task3(task1(), task2())
+            print(t3.result())
 
-        print(t3.result())
-
-        flow.shutdown()
 
 if __name__ == "__main__":
     main()

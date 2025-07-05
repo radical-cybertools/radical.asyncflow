@@ -5,12 +5,12 @@ import multiprocessing
 
 
 from radical.asyncflow import WorkflowEngine
-from radical.asyncflow import ThreadExecutionBackend
+from radical.asyncflow import RadicalExecutionBackend
 
 
 async def main():
 
-    backend = ThreadExecutionBackend({'max_workers': 4})
+    backend = RadicalExecutionBackend({'resource': 'local.localhost'})
     flow = WorkflowEngine(backend=backend)
 
     async with WorkflowEngine(backend=backend) as flow: 

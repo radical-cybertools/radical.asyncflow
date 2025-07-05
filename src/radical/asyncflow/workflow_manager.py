@@ -769,8 +769,6 @@ class WorkflowEngine:
         else:
             self.log.warning("Skipping execution backend shutdown as requested")
         
-        print(f"GOOODBYE ASYNCCC")
-
     def shutdown(self, skip_execution_backend: bool = False):
         """
         Shuts down the workflow manager in a universal way, handling different
@@ -826,17 +824,15 @@ class WorkflowEngine:
             return future.result()
     
     def __enter__(self):
-        print("Setting up the logger sync...")
         return self
     
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.shutdown(self.skip_execution_backend)
 
     async def __aenter__(self):
-        print("Setting up the logger for Async...")
         return self
     
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        await self.shutdown(self.skip_execution_backend)
+        await self.shutdown(skip_execution_backend=self.skip_execution_backend)
     
 

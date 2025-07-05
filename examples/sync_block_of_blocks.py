@@ -1,11 +1,10 @@
 import time
 
 from radical.asyncflow import WorkflowEngine
-from radical.asyncflow import ThreadExecutionBackend, RadicalExecutionBackend
+from radical.asyncflow import RadicalExecutionBackend
 
 
-#backend = RadicalExecutionBackend({'resource': 'local.localhost'}) # Commeneted out for M2 run
-backend = ThreadExecutionBackend({'max_workers': 4})
+backend = RadicalExecutionBackend({'resource': 'local.localhost'}) # Commeneted out for M2 run
 
 with WorkflowEngine(backend=backend, skip_execution_backend=False) as flow: # DOC: skip_execution_backend
     @flow.executable_task
