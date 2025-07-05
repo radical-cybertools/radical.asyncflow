@@ -170,3 +170,5 @@ cython_debug/
 # PyPI configuration file
 .pypirc
 asyncflow.session.*
+
+src/radical/asyncflow/VERSION

@@ -75,7 +75,7 @@ class WorkflowEngine:
 
     @typeguard.typechecked
     def __init__(self, backend: Optional[BaseExecutionBackend] = None,
-                 dry_run: bool = False, jupyter_async=None, implicit_data=True) -> None:
+                 dry_run: bool = False, jupyter_async=None, implicit_data=True, skip_execution_backend: bool = False) -> None:
 
         self.loop = None
         self.running = []
@@ -87,6 +87,7 @@ class WorkflowEngine:
         self.unresolved = set()
         self.queue = asyncio.Queue()
         self.implicit_data_mode = implicit_data
+        self.skip_execution_backend = skip_execution_backend
 
         self._setup_execution_backend()
 
@@ -767,6 +768,8 @@ class WorkflowEngine:
             await self.loop.run_in_executor(None, self.backend.shutdown)
         else:
             self.log.warning("Skipping execution backend shutdown as requested")
+        
+        print(f"GOOODBYE ASYNCCC")
 
     def shutdown(self, skip_execution_backend: bool = False):
         """
@@ -821,3 +824,19 @@ class WorkflowEngine:
                 self.loop
             )
             return future.result()
+    
+    def __enter__(self):
+        print("Setting up the logger sync...")
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.shutdown(self.skip_execution_backend)
+
+    async def __aenter__(self):
+        print("Setting up the logger for Async...")
+        return self
+    
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.shutdown(self.skip_execution_backend)
+    
+
