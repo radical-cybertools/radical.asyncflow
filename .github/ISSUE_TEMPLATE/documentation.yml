@@ -1,0 +1,101 @@
+name: 📚 Documentation Issue
+description: Report a documentation problem or request documentation improvements
+title: "[DOCS] "
+labels: ["type:documentation"]
+assignees: []
+body:
+
+        
+  - type: dropdown
+    id: issue-type
+    attributes:
+      label: Issue Type
+      description: What type of documentation issue is this?
+      options:
+        - "Missing documentation"
+        - "Incorrect documentation"
+        - "Unclear documentation"
+        - "Outdated documentation"
+        - "Documentation improvement request"
+        - "Other"
+    validations:
+      required: true
+      
+  - type: textarea
+    id: issue-description
+    attributes:
+      label: Issue Description
+      description: A clear and concise description of the documentation issue.
+      placeholder: Describe the documentation issue you encountered...
+    validations:
+      required: true
+      
+  - type: textarea
+    id: affected-documentation
+    attributes:
+      label: Affected Documentation
+      description: Which documentation pages, sections, or files are affected?
+      placeholder: |
+        - File: [e.g., README.md, docs/api.md]
+        - Section: [e.g., Installation, API Reference]
+        - URL: [if applicable]
+        
+  - type: textarea
+    id: current-content
+    attributes:
+      label: Current Content
+      description: If reporting an issue with existing documentation, paste the relevant content here.
+      placeholder: |
+        ```markdown
+        # Current documentation content
+        ```
+        
+  - type: textarea
+    id: expected-content
+    attributes:
+      label: Expected Content
+      description: What should the documentation say or include?
+      placeholder: |
+        ```markdown
+        # Expected documentation content
+        ```
+
+        
+  - type: dropdown
+    id: documentation-category
+    attributes:
+      label: Documentation Category
+      description: What type of documentation is affected?
+      options: # MOST DONT EXIST YET THO
+        - "Getting Started"
+        - "API Reference"
+        - "Examples/Tutorials"
+        - "Installation Guide"
+        - "Configuration"
+        - "Troubleshooting"
+        - "Contributing Guide"
+        - "README"
+        - "Other"
+    validations:
+      required: true
+      
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority Level
+      description: How important is this documentation issue?
+      options:
+        - "Low - Minor issue"
+        - "Medium - Confusing but workable"
+        - "High - Blocks understanding"
+        - "Critical - Misleading or incorrect"
+    validations:
+      required: true
+      
+  
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional Context
+      description: Add any other context, screenshots, or information about the documentation issue here.
+      placeholder: Any additional information that might be helpful...

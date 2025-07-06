@@ -1,0 +1,113 @@
+name: 🔧 Enhancement Request
+description: Suggest an improvement to existing functionality
+title: "[ENHANCEMENT] "
+labels: ["type:enhancement"]
+assignees: []
+body:
+
+        
+  - type: textarea
+    id: enhancement-description
+    attributes:
+      label: Enhancement Description
+      description: A clear and concise description of the enhancement you'd like to see.
+      placeholder: Describe the enhancement you'd like to see implemented...
+    validations:
+      required: true
+      
+  - type: textarea
+    id: current-behavior
+    attributes:
+      label: Current Behavior
+      description: A clear and concise description of how the current functionality works.
+      placeholder: Describe how the current functionality works...
+    validations:
+      required: true
+      
+  - type: textarea
+    id: proposed-improvement
+    attributes:
+      label: Proposed Improvement
+      description: A clear and concise description of how you'd like it to work.
+      placeholder: Describe how you'd like the functionality to work...
+    validations:
+      required: true
+      
+  - type: textarea
+    id: benefits
+    attributes:
+      label: Benefits
+      description: What benefits would this enhancement provide?
+      placeholder: |
+        - Benefit 1: [Description]
+        - Benefit 2: [Description]
+        - Benefit 3: [Description]
+        
+  - type: textarea
+    id: affected-components
+    attributes:
+      label: Affected Components
+      description: Which parts of Radical AsyncFlow would be affected by this enhancement?
+      placeholder: |
+        - Component 1: [Description]
+        - Component 2: [Description]
+        - Component 3: [Description]
+        
+  - type: textarea
+    id: code-example
+    attributes:
+      label: Code Example
+      description: If applicable, provide a code example showing the current vs. proposed behavior.
+      placeholder: |
+        ```python
+        # Current behavior
+        # Your current code here
+        
+        # Proposed behavior
+        # Your proposed code here
+        ```
+      render: python
+      
+  - type: dropdown
+    id: enhancement-category
+    attributes:
+      label: Enhancement Category
+      description: What type of enhancement is this?
+      options:
+        - "Performance"
+        - "Usability"
+        - "API Design"
+        - "Error Handling"
+        - "Logging/Monitoring"
+        - "Configuration"
+        - "Backend Integration"
+        - "Other"
+    validations:
+      required: true
+      
+  - type: dropdown
+    id: impact-level
+    attributes:
+      label: Impact Level
+      description: How significant is this enhancement?
+      options:
+        - "Low - Minor improvement"
+        - "Medium - Noticeable improvement"
+        - "High - Significant improvement"
+        - "Critical - Major improvement"
+    validations:
+      required: true
+      
+  - type: textarea
+    id: migration-considerations
+    attributes:
+      label: Migration Considerations
+      description: Are there any backward compatibility concerns or migration steps to consider?
+      placeholder: Describe any migration considerations or backward compatibility concerns...
+      
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional Context
+      description: Add any other context, screenshots, or information about the enhancement request here.
+      placeholder: Any additional information that might be helpful...

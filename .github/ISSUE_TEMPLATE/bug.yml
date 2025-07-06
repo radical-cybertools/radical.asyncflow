@@ -1,0 +1,97 @@
+name: 🐛 Bug Report
+description: Report a bug 
+title: "[BUG] "
+labels: ["type:bug"]
+assignees: []
+body:
+
+        
+  - type: textarea
+    id: bug-description
+    attributes:
+      label: Bug Description
+      description: A clear and concise description of what the bug is.
+      placeholder: Describe the bug you encountered...
+    validations:
+      required: true
+      
+  - type: textarea
+    id: reproduction-steps
+    attributes:
+      label: Steps to Reproduce
+      description: Steps to reproduce the behavior
+      placeholder: |
+        1. Go to '...'
+        2. Click on '....'
+        3. Scroll down to '....'
+        4. See error
+    validations:
+      required: true
+      
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: Expected Behavior
+      description: A clear and concise description of what you expected to happen.
+      placeholder: Describe what you expected to happen...
+    validations:
+      required: true
+      
+  - type: textarea
+    id: actual-behavior
+    attributes:
+      label: Actual Behavior
+      description: A clear and concise description of what actually happened.
+      placeholder: Describe what actually happened...
+    validations:
+      required: true
+      
+  - type: textarea
+    id: error-messages
+    attributes:
+      label: Error Messages
+      description: Any error messages, stack traces, or logs that might help identify the issue.
+      placeholder: Paste any error messages or stack traces here...
+      render: shell
+      
+  - type: textarea
+    id: code-example
+    attributes:
+      label: Code Example
+      description: A minimal code example that reproduces the issue.
+      placeholder: |
+        ```python
+        # Your code here
+        ```
+      render: python
+      
+  - type: dropdown
+    id: execution-backend
+    attributes:
+      label: Execution Backend
+      description: Which execution backend were you using when the bug occurred?
+      options:
+        - "Dask Parallel"
+        - "Radical Pilot"
+        - "Thread Pool"
+        - "NoOp"
+        - "Other"
+        - "Not applicable"
+        
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment Information
+      description: Details about your environment (OS, dependencies, etc.)
+      placeholder: |
+        - OS: [e.g., macOS, Linux, Windows]
+        - Python version: [e.g., 3.9.7]
+        - Radical AsyncFlow version: [e.g., 0.1.0]
+        - Other relevant packages: [e.g., dask, radical.pilot]
+        
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional Context
+      description: Add any other context about the problem here.
+      placeholder: Any additional information that might be helpful...
