@@ -1,6 +1,7 @@
 name: Full CI pipeline. Includes testing and linting. Stores testing report to Github's artifacts
 
 on: 
+  workflow_dispatch:
   push: 
   pull_request: 
     branches: 
@@ -32,7 +33,7 @@ jobs:
       
       - name: Running tests 
         run: |
-            raidcal-stack
+            radical-stack
             pytest -v tests 
       
 
