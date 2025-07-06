@@ -1,0 +1,12 @@
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+# Enable rulesets (E, F = pycodestyle/flake8, D = docstrings, ANN = type hints)
+select = ["E", "F", "D", "ANN", "N"] # N is for pep8-naming
+
+# Rules you want to ignore (e.g., allow long lines)
+ignore = ["D107"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"

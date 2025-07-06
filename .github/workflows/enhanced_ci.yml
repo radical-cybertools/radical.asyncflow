@@ -41,4 +41,7 @@ jobs:
         with:
           name: coverage-html-report
           path: htmlcov/
+
+      - name: "Run linter"
+        run: ruff check . 
       
