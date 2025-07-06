@@ -28,3 +28,4 @@ class Task(rp.TaskDescription):
         # we pass only the kwargs as dict to the rp.TaskDescription
         # as it only allows from_dict
         super().__init__(from_dict=kwargs)
+        
