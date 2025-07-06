@@ -34,13 +34,11 @@ jobs:
       - name: Running tests 
         run: |
             radical-stack
-            pytest -v tests 
+            pytest -v --cov=tests --cov-report=html
       
-
-          
-
+      - name: Upload results to Github's artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-html-report
+          path: htmlcov/
       
-
-    
-
-
