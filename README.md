@@ -23,10 +23,12 @@ RADICAL AsyncFlow (RAF) is a fast asynchronous scripting library built on top of
 
 ## Basic Usage
 ```python
+import asyncio
+
 from radical.asyncflow import WorkflowEngine
 from radical.asyncflow import RadicalExecutionBackend
 
-async def main():
+async def run():
     # Create backend and workflow
     backend = RadicalExecutionBackend({'resource': 'local.localhost'})
     flow = WorkflowEngine(backend=backend)
@@ -47,4 +49,7 @@ async def main():
 
     # shutdown the execution backend
     await flow.shutdown()
+
+if __name__ == "__main__":
+    asyncio.run(run())
 ```
