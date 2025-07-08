@@ -682,8 +682,10 @@ class WorkflowEngine:
                 # Notify dependents of completed components
                 for comp_uid in completed_components:
                     self._notify_dependents(comp_uid)
-                    if completed_components:  # Signal that something changed
-                        self._component_change_event.set()
+
+                # Signal that something changed
+                if completed_components:
+                    self._component_change_event.set()
 
                 # If nothing is ready and nothing is running, wait for changes
                 if not self._ready_queue and not to_submit and not completed_components:
