@@ -34,18 +34,18 @@ async def run():
     flow = WorkflowEngine(backend=backend)
 
     @flow.executable_task
-    def task1():
+    async def task1():
         return "echo $RANDOM"
 
     @flow.function_task
-    def task2(t1_result):
+    async def task2(t1_result):
         return t1_result * 2 * 2
 
     # create the workflow
-    t1_result = task1().result()
-    t2_future = task2(t1_result) # t2 depends on t1 (waits for it)
+    t1_fut = task1()
+    t2_fut = task2(t1_fut) # t2 depends on t1 (waits for it)
 
-    t2_result = t2_future.result()
+    t2_result = await t2_fut
 
     # shutdown the execution backend
     await flow.shutdown()
