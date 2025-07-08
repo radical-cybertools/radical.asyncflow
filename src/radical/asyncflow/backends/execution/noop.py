@@ -34,11 +34,11 @@ class NoopExecutionBackend(BaseExecutionBackend):
             task['return_value'] = 'Dummy Output'
             self._callback_func(task, 'DONE')
 
-    def link_explicit_data_deps(self, task_id, file_name=None, file_path=None):
+    def link_explicit_data_deps(self, src_task=None, dst_task=None, file_name=None, file_path=None):
         # No-op: No explicit data dependencies in the Noop backend
         pass
 
-    def link_implicit_data_deps(self, task):
+    def link_implicit_data_deps(self, src_task, dst_task):
         # No-op: No implicit data dependencies in the Noop backend
         pass
 

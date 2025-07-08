@@ -2,6 +2,8 @@
 import os
 import asyncio
 import threading
+from contextlib import contextmanager
+from collections import defaultdict, deque
 
 from pathlib import Path
 from typing import Callable, Optional, Union
@@ -15,6 +17,7 @@ from concurrent.futures import Future as SyncFuture
 import typeguard
 from .data import InputFile, OutputFile
 
+from .errors import DependencyFailure
 from .backends.execution.noop import NoopExecutionBackend
 from .backends.execution.base import BaseExecutionBackend
 
@@ -88,6 +91,12 @@ class WorkflowEngine:
         self.queue = asyncio.Queue()
         self.implicit_data_mode = implicit_data
 
+        # Optimization: Track component state changes
+        self._ready_queue = deque()
+        self._dependents_map = defaultdict(set)  # Maps component -> components that depend on it
+        self._dependency_count = {}  # Maps component -> number of unresolved dependencies
+        self._component_change_event = asyncio.Event()
+
         self._setup_execution_backend()
 
         self.task_states_map = self.backend.get_task_states_map()
@@ -109,11 +118,29 @@ class WorkflowEngine:
         self._set_loop() # detect and set the event-loop 
         self._start_async_internal_comps() # start the solver and submitter
 
-
         # Define specific decorators
         self.block = self._register_decorator(comp_type=BLOCK)
         self.function_task = self._register_decorator(comp_type=TASK, task_type=FUNCTION)
         self.executable_task = self._register_decorator(comp_type=TASK, task_type=EXECUTABLE)
+
+    def _update_dependency_tracking(self, comp_uid):
+        """Update dependency tracking structures for a component."""
+        dependencies = self.dependencies[comp_uid]
+        
+        # Count unresolved dependencies
+        unresolved_count = 0
+        for dep in dependencies:
+            dep_uid = dep['uid']
+            if dep_uid not in self.resolved or not self.components[dep_uid]['future'].done():
+                unresolved_count += 1
+                # Track reverse dependencies
+                self._dependents_map[dep_uid].add(comp_uid)
+        
+        self._dependency_count[comp_uid] = unresolved_count
+        
+        # If no dependencies, add to ready queue
+        if unresolved_count == 0:
+            self._ready_queue.append(comp_uid)
 
     def _setup_execution_backend(self):
         if self.backend is None:
@@ -279,7 +306,6 @@ class WorkflowEngine:
 
         return outer
 
-
     def _handle_flow_component_registration(self,
                                             func: Callable,
                                             is_service:bool,
@@ -380,6 +406,9 @@ class WorkflowEngine:
 
         self.log.debug(f"Registered {comp_type}: '{comp_desc['name']}' with id of {comp_desc['uid']}")
 
+        self._update_dependency_tracking(comp_desc['uid'])
+        self._component_change_event.set()
+
         return comp_fut
 
     @staticmethod
@@ -461,118 +490,221 @@ class WorkflowEngine:
         """
         clear workflow component and their deps
         """
-
         self.components.clear()
         self.dependencies.clear()
+        self._ready_queue.clear()
+        self._dependents_map.clear()
+        self._dependency_count.clear()
+
+    def _notify_dependents(self, comp_uid):
+        """Notify dependents that a component has completed and update ready queue."""
+        for dependent_uid in self._dependents_map[comp_uid]:
+            if dependent_uid in self._dependency_count:
+                self._dependency_count[dependent_uid] -= 1
+                if self._dependency_count[dependent_uid] == 0:
+                    self._ready_queue.append(dependent_uid)
+
+        # Clean up
+        del self._dependents_map[comp_uid]
+        if comp_uid in self._dependency_count:
+            del self._dependency_count[comp_uid]
+
+    def _create_dependency_failure_exception(self, comp_desc, failed_deps):
+        """
+        Create a DependencyFailure exception that shows both the immediate failure
+        and the root cause from failed dependencies.
+        
+        Args:
+            comp_desc (dict): Description of the component that cannot execute
+            failed_deps (list): List of exceptions from failed dependencies
+            
+        Returns:
+            DependencyFailure: Exception with detailed failure information
+        """
+        # Get the first failed dependency's exception as root cause
+        root_exception = failed_deps[0]
+
+        # Create a descriptive error message
+        error_message = f"Cannot execute '{comp_desc['name']}' due to dependency failure"
+
+        # Get the names of the failed dependencies for better context
+        failed_dep_names = []
+        dependencies = self.dependencies[comp_desc['uid']]
+        dep_futures = [self.components[dep['uid']]['future'] for dep in dependencies]
+
+        for dep, dep_future in zip(dependencies, dep_futures):
+            if dep_future.exception() is not None:
+                failed_dep_names.append(dep['name'])
+
+        # Create the DependencyFailure exception with all context
+        return DependencyFailure(
+            message=error_message,
+            failed_dependencies=failed_dep_names,
+            root_cause=root_exception
+        )
+
+    def _get_dependency_output_files(self, dependencies):
+        """
+        Helper method to get all output files from dependencies.
+        
+        Args:
+            dependencies: List of dependency descriptions
+            
+        Returns:
+            set: Set of output file names from all dependencies
+        """
+        dependency_output_files = set()
+        for dep in dependencies:
+            dep_desc = self.components[dep['uid']]['description']
+            for output_file in dep_desc['metadata']['output_files']:
+                dependency_output_files.add(Path(output_file).name)
+        return dependency_output_files
 
     async def run(self):
         """
-        Async method to manage the execution of workflow components by resolving
-        dependencies and submitting then for execution once they are resolved.
+        Optimized async method to manage the execution of workflow components.
 
-        This method continuously checks for unresolved components, evaluates their
-        dependencies, and prepares them for submission if all dependencies are resolved.
-        It also handles input and output data staging for the components.
+        This method uses an event-driven approach with dependency tracking for
+        efficient DAG resolution. Key optimizations:
 
-        Workflow:
-        - Identifies unresolved components.
-        - Checks if their dependencies are resolved and their associated tasks are completed.
-        - Prepares components for execution by setting up pre-execution commands and
-          input staging based on dependencies.
-        - Submits components that are ready for execution to the queue.
+        1. Dependency resolution using counters
+        2. Event-driven updates to avoid busy waiting
+        3. Ready queue for components with resolved dependencies
 
-        Attributes:
-            unresolved (set): A set of component UIDs that have unresolved dependencies.
-            resolved (set): A set of component UIDs whose dependencies are resolved.
-            running (list): A list of component UIDs that are currently running.
-            dependencies (dict): A mapping of component UIDs to their dependency information.
-            components (dict): A mapping of component UIDs to their descriptions and futures.
-            queue (asyncio.Queue): A queue to submit components ready for execution.
-
-        Raises:
-            asyncio.CancelledError: If the coroutine is cancelled during execution.
-
-        Notes:
-            - This method runs indefinitely until cancelled.
-            - It uses a sleep interval to avoid busy-waiting.
+        The method maintains several data structures:
+        - _ready_queue: Components ready for execution
+        - _dependents_map: Reverse dependency mapping
+        - _dependency_count: Count of unresolved dependencies per component
+        - _component_change_event: Event to signal changes
         """
-
         while True:
-            self.unresolved = set(self.dependencies.keys())
+            try:
+                # Process ready components first
+                to_submit = []
 
-            if not self.unresolved:
-                await asyncio.sleep(0.1)
-                continue
+                while self._ready_queue:
+                    comp_uid = self._ready_queue.popleft()
 
-            to_submit = []
-
-            for comp_uid in list(self.unresolved):
-                if self.components[comp_uid]['future'].done():
-                    self.resolved.add(comp_uid)
-                    self.unresolved.remove(comp_uid)
-                    continue
-
-                if comp_uid in self.running:
-                    if self.components[comp_uid]['future'].done():
-                        self.running.remove(comp_uid)
-                    else:
+                    # Skip if already processed
+                    if comp_uid in self.resolved or comp_uid in self.running:
                         continue
 
-                dependencies = self.dependencies[comp_uid]
-                if all(dep['uid'] in self.resolved and self.components[dep['uid']]['future'].done() for dep in dependencies):
+                    # Check if future is already done (could be cancelled/failed)
+                    if self.components[comp_uid]['future'].done():
+                        self.resolved.add(comp_uid)
+                        self._notify_dependents(comp_uid)
+                        continue
+
+                    # Verify dependencies are still met
+                    dependencies = self.dependencies[comp_uid]
+                    dep_futures = [self.components[dep['uid']]['future'] for dep in dependencies]
+                    failed_deps = [fut.exception() for fut in dep_futures if fut.exception() is not None]
+
+                    if failed_deps:
+                        comp_desc = self.components[comp_uid]['description']
+                        
+                        # Create a comprehensive chained exception
+                        chained_exception = self._create_dependency_failure_exception(comp_desc, failed_deps)
+                        
+                        self.log.error(f"Dependency failure for {comp_desc['name']}: {chained_exception}")
+
+                        # Fail this component with the chained exception
+                        self.handle_task_failure(comp_desc, self.components[comp_uid]['future'], chained_exception)
+
+                        self.resolved.add(comp_uid)
+                        self._notify_dependents(comp_uid)
+                        continue
+
+                    # Prepare component for submission
                     comp_desc = self.components[comp_uid]['description']
 
-                    explicit_files_to_stage = []
-
-                    # NOTE: We do not link or manage implicit or explicit
-                    # data dependencies if the component is a block.
-                    # TODO: We should consider this in the future.
+                    # Handle data dependencies for tasks
                     if self.components[comp_uid]['type'] == TASK:
+                        explicit_files_to_stage = []
 
                         for dep in dependencies:
                             dep_desc = self.components[dep['uid']]['description']
 
-                            # link implicit data dependencies
+                            # Link implicit data dependencies
                             if self.implicit_data_mode and not dep_desc['metadata'].get('output_files'):
-                                self.log.debug(f'Linking implicit file(s): from {dep_desc['name']} to {comp_desc["name"]}')
+                                self.log.debug(f'Linking implicit file(s): from {dep_desc["name"]} to {comp_desc["name"]}')
                                 self.backend.link_implicit_data_deps(dep_desc, comp_desc)
 
-                            # link explicit data dependencies
+                            # Link explicit data dependencies
                             for output_file in dep_desc['metadata']['output_files']:
                                 if output_file in comp_desc['metadata']['input_files']:
-                                    self.log.debug(f'Linking explicit file ({output_file}) from {dep_desc['name']} to {comp_desc["name"]}')
-                                    data_dep = self.backend.link_explicit_data_deps(src_task=dep_desc,
-                                                                                    dst_task=comp_desc,
-                                                                                    file_name=output_file)
+                                    self.log.debug(f'Linking explicit file ({output_file}) from {dep_desc["name"]} to {comp_desc["name"]}')
+                                    data_dep = self.backend.link_explicit_data_deps(
+                                        src_task=dep_desc,
+                                        dst_task=comp_desc,
+                                        file_name=output_file
+                                    )
                                     explicit_files_to_stage.append(data_dep)
 
-                        # input staging data dependencies
+                        # Input staging data dependencies
+                        # Get all output files from dependencies to avoid staging files that are already linked
+                        dependency_output_files = self._get_dependency_output_files(dependencies)
                         staged_targets = {Path(item['target']).name for item in explicit_files_to_stage}
+                        
                         for input_file in comp_desc['metadata']['input_files']:
                             input_basename = Path(input_file).name
-                            if input_basename not in staged_targets:
-                                msg = f'Staging {input_file} to {comp_desc["name"]} work dir'
-                                self.log.debug(msg)
-                                data_dep = self.backend.link_explicit_data_deps(src_task=None,
-                                                                                dst_task=comp_desc,
-                                                                                file_name=input_basename,
-                                                                                file_path=input_file)
+                            # Only stage if the file is not already staged AND not an output from a dependency
+                            if input_basename not in staged_targets and input_basename not in dependency_output_files:
+                                self.log.debug(f'Staging {input_file} to {comp_desc["name"]} work dir')
+                                data_dep = self.backend.link_explicit_data_deps(
+                                    src_task=None,
+                                    dst_task=comp_desc,
+                                    file_name=input_basename,
+                                    file_path=input_file
+                                )
                                 explicit_files_to_stage.append(data_dep)
 
                     to_submit.append(comp_desc)
-
                     msg = f"Ready to submit: {comp_desc['name']}"
                     msg += f" with resolved dependencies: {[dep['name'] for dep in dependencies]}"
                     self.log.debug(msg)
 
-            if to_submit:
-                await self.queue.put(to_submit)
-                for t in to_submit:
-                    self.running.append(t['uid'])
-                    self.resolved.add(t['uid'])
-                    self.unresolved.remove(t['uid'])
+                # Submit ready components
+                if to_submit:
+                    await self.queue.put(to_submit)
+                    for comp_desc in to_submit:
+                        comp_uid = comp_desc['uid']
+                        self.running.append(comp_uid)
+                        self.resolved.add(comp_uid)
 
-            await asyncio.sleep(0.5)
+                # Check for completed components and update dependency tracking
+                completed_components = []
+                for comp_uid in list(self.running):
+                    if self.components[comp_uid]['future'].done():
+                        completed_components.append(comp_uid)
+                        self.running.remove(comp_uid)
+
+                # Notify dependents of completed components
+                for comp_uid in completed_components:
+                    self._notify_dependents(comp_uid)
+
+                # Signal that something changed
+                if completed_components:
+                    self._component_change_event.set()
+
+                # If nothing is ready and nothing is running, wait for changes
+                if not self._ready_queue and not to_submit and not completed_components:
+                    # Wait for new components or state changes, with a timeout
+                    try:
+                        await asyncio.wait_for(self._component_change_event.wait(), timeout=1.0)
+                        self._component_change_event.clear()
+                    except asyncio.TimeoutError:
+                        # Timeout is fine, just continue the loop
+                        pass
+                else:
+                    # Small delay to prevent tight loop when actively processing
+                    await asyncio.sleep(0.01)
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                self.log.exception(f"Error in run loop: {e}")
+                await asyncio.sleep(0.1)
 
     async def submit(self):
         """Async method to submit blocks or tasks from the queue for execution."""
@@ -584,7 +716,7 @@ class WorkflowEngine:
                 tasks = [t for t in objects if t and BLOCK not in t['uid']]
                 blocks = [b for b in objects if b and TASK not in b['uid']]
 
-                self.log.debug(f'Submitting {[b['name'] for b in objects]} for execution')
+                self.log.debug(f'Submitting {[b["name"] for b in objects]} for execution')
 
                 if tasks:
                     self.backend.submit_tasks(tasks)
@@ -629,21 +761,47 @@ class WorkflowEngine:
         """
         internal_task = self.components[task['uid']]['description']
 
-        if internal_task[FUNCTION]:
-            task_fut.set_result(task['return_value'])
+        if not task_fut.done():
+            if internal_task[FUNCTION]:
+                task_fut.set_result(task['return_value'])
+            else:
+                task_fut.set_result(task['stdout'])
         else:
-            task_fut.set_result(task['stdout'])
+            raise RuntimeError('Can not handle an already resolved future')
 
-    def handle_task_failure(self, task, task_fut):
+    def handle_task_failure(self, task: dict, task_fut: Union[SyncFuture, AsyncFuture], 
+                            override_error_message: Union[str, Exception] = None) -> None:
         """
         Handle task failure by setting the exception in the future.
+        
+        Args:
+            task: Dictionary containing task details including 'uid' and exception information.
+            task_fut: Future object associated with the task that needs to be marked as failed.
+            override_error_message: Optional custom error message/exception to use instead of the task's error.
+                                Can be a string or an Exception instance (like DependencyFailure).
+            
+        Raises:
+            RuntimeError: If attempting to handle an already resolved future.
+            KeyError: If required task components are missing.
         """
+        if task_fut.done():
+            raise RuntimeError('Cannot handle an already resolved future')
+
         internal_task = self.components[task['uid']]['description']
 
-        if internal_task[FUNCTION]:
-            task_fut.set_exception(task['exception'])
+        # Determine the appropriate exception to set
+        if override_error_message is not None:
+            # If it's already an exception (like DependencyFailure), use it directly
+            if isinstance(override_error_message, Exception):
+                exception = override_error_message
+            else:
+                # If it's a string, wrap it in RuntimeError
+                exception = RuntimeError(str(override_error_message))
         else:
-            task_fut.set_exception(task['stderr'])
+            # Use the task's original exception or stderr
+            exception = task['exception'] if internal_task.get(FUNCTION) else task['stderr']
+
+        task_fut.set_exception(exception)
 
     @typeguard.typechecked
     def task_callbacks(self, task, state: str,
@@ -749,7 +907,8 @@ class WorkflowEngine:
         # Cancel background tasks
         for internal_component in internal_component_to_shutdown:
             if internal_component and not internal_component.done():
-                self.log.debug(f"Cancelling {internal_component.get_name()}")
+                internal_comp_name = internal_component.get_coro().__name__
+                self.log.debug(f"Shutting down {internal_comp_name} component")
                 internal_component.cancel()
 
         # Wait for tasks to complete
@@ -765,6 +924,7 @@ class WorkflowEngine:
         # Shutdown the execution backend
         if not skip_execution_backend and self.backend:
             await self.loop.run_in_executor(None, self.backend.shutdown)
+            self.log.debug(f"Shutting down execution backend")
         else:
             self.log.warning("Skipping execution backend shutdown as requested")
 
