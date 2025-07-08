@@ -42,10 +42,8 @@ async def run():
         return t1_result * 2 * 2
 
     # create the workflow
-    t1_fut = task1()
-    t2_fut = task2(t1_fut) # t2 depends on t1 (waits for it)
-
-    t2_result = await t2_fut
+    t1_result = await task1()
+    t2_result = await task2(t1_result) # t2 depends on t1 (waits for it)
 
     # shutdown the execution backend
     await flow.shutdown()
