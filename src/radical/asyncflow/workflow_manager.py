@@ -785,7 +785,7 @@ class WorkflowEngine:
             KeyError: If required task components are missing.
         """
         if task_fut.done():
-            return
+            self.log.warning(f'Attempted to handle failure for already resolved task "{task["uid"]}"')
 
         internal_task = self.components[task['uid']]['description']
 
