@@ -879,7 +879,12 @@ class WorkflowEngine:
             self.handle_task_success(task_dct, task_fut)
 
         elif state == self.task_states_map.RUNNING:
-            task_fut.set_running_or_notify_cancel()
+            # NOTE: with asyncio future the running state is
+            # implicit: when a coroutine that awaits the future
+            # is scheduled and started by the event loop, that’s
+            # when the “work” is running.
+            if isinstance(task_fut, SyncFuture):
+                task_fut.set_running_or_notify_cancel()
 
         elif state == self.task_states_map.CANCELED:
             task_fut.cancel()
