@@ -785,7 +785,7 @@ class WorkflowEngine:
             KeyError: If required task components are missing.
         """
         if task_fut.done():
-            raise RuntimeError('Cannot handle an already resolved future')
+            return
 
         internal_task = self.components[task['uid']]['description']
 
@@ -799,7 +799,14 @@ class WorkflowEngine:
                 exception = RuntimeError(str(override_error_message))
         else:
             # Use the task's original exception or stderr
-            exception = task['exception'] if internal_task.get(FUNCTION) else task['stderr']
+            original_error = task['exception'] if internal_task.get(FUNCTION) else task['stderr']
+
+            # Ensure we have an Exception object
+            if isinstance(original_error, Exception):
+                exception = original_error
+            else:
+                # If it's a string (stderr) or any other type, wrap it in RuntimeError
+                exception = RuntimeError(str(original_error))
 
         task_fut.set_exception(exception)
 
