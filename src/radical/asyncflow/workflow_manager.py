@@ -763,9 +763,9 @@ class WorkflowEngine:
 
         if not task_fut.done():
             if internal_task[FUNCTION]:
-                task_fut.set_result(task['return_value'])
+                self.loop.call_soon_threadsafe(task_fut.set_result, task['return_value'])
             else:
-                task_fut.set_result(task['stdout'])
+                self.loop.call_soon_threadsafe(task_fut.set_result, task['stdout'])
         else:
             raise RuntimeError('Can not handle an already resolved future')
 
@@ -773,7 +773,7 @@ class WorkflowEngine:
                             override_error_message: Union[str, Exception] = None) -> None:
         """
         Handle task failure by setting the exception in the future.
-        
+
         Args:
             task: Dictionary containing task details including 'uid' and exception information.
             task_fut: Future object associated with the task that needs to be marked as failed.
