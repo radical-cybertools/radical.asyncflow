@@ -99,3 +99,21 @@ async def test_register_component_adds_block_entry():
     # now the block is unpacked test if
     # the task is registered
     assert len(engine.components) == 2
+
+
+@pytest.mark.asyncio
+async def test_dynamic_task_backend_specific_kwargs():
+    engine = WorkflowEngine(backend=NoopExecutionBackend())
+
+    @engine.function_task
+    async def dummy_task(task_description={'ranks': 8}):
+        return "dummy return value"
+    
+
+    await dummy_task(task_description={'gpus_per_rank': 2})
+
+    first_value_desc = next(iter(engine.components.values()))['description']
+
+    assert first_value_desc['task_backend_specific_kwargs'] == {'ranks': 8,
+                                                                'gpus_per_rank': 2}
+

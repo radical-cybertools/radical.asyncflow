@@ -785,7 +785,7 @@ class WorkflowEngine:
             KeyError: If required task components are missing.
         """
         if task_fut.done():
-            raise RuntimeError('Cannot handle an already resolved future')
+            self.log.warning(f'Attempted to handle failure for already resolved task "{task["uid"]}"')
 
         internal_task = self.components[task['uid']]['description']
 
@@ -799,7 +799,14 @@ class WorkflowEngine:
                 exception = RuntimeError(str(override_error_message))
         else:
             # Use the task's original exception or stderr
-            exception = task['exception'] if internal_task.get(FUNCTION) else task['stderr']
+            original_error = task['exception'] if internal_task.get(FUNCTION) else task['stderr']
+
+            # Ensure we have an Exception object
+            if isinstance(original_error, Exception):
+                exception = original_error
+            else:
+                # If it's a string (stderr) or any other type, wrap it in RuntimeError
+                exception = RuntimeError(str(original_error))
 
         task_fut.set_exception(exception)
 
@@ -872,7 +879,12 @@ class WorkflowEngine:
             self.handle_task_success(task_dct, task_fut)
 
         elif state == self.task_states_map.RUNNING:
-            task_fut.set_running_or_notify_cancel()
+            # NOTE: with asyncio future the running state is
+            # implicit: when a coroutine that awaits the future
+            # is scheduled and started by the event loop, that’s
+            # when the “work” is running.
+            if isinstance(task_fut, SyncFuture):
+                task_fut.set_running_or_notify_cancel()
 
         elif state == self.task_states_map.CANCELED:
             task_fut.cancel()
