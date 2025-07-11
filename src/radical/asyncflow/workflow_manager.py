@@ -761,13 +761,11 @@ class WorkflowEngine:
         """
         internal_task = self.components[task['uid']]['description']
 
-        if not task_fut.done():
-            if internal_task[FUNCTION]:
-                self.loop.call_soon_threadsafe(task_fut.set_result, task['return_value'])
-            else:
-                self.loop.call_soon_threadsafe(task_fut.set_result, task['stdout'])
+        if internal_task[FUNCTION]:
+            self.loop.call_soon_threadsafe(task_fut.set_result, task['return_value'])
         else:
-            raise RuntimeError('Can not handle an already resolved future')
+            self.loop.call_soon_threadsafe(task_fut.set_result, task['stdout'])
+
 
     def handle_task_failure(self, task: dict, task_fut: Union[SyncFuture, AsyncFuture], 
                             override_error_message: Union[str, Exception] = None) -> None:
@@ -779,14 +777,10 @@ class WorkflowEngine:
             task_fut: Future object associated with the task that needs to be marked as failed.
             override_error_message: Optional custom error message/exception to use instead of the task's error.
                                 Can be a string or an Exception instance (like DependencyFailure).
-            
+
         Raises:
-            RuntimeError: If attempting to handle an already resolved future.
             KeyError: If required task components are missing.
         """
-        if task_fut.done():
-            self.log.warning(f'Attempted to handle failure for already resolved task "{task["uid"]}"')
-
         internal_task = self.components[task['uid']]['description']
 
         # Determine the appropriate exception to set
@@ -867,6 +861,10 @@ class WorkflowEngine:
             return
 
         task_fut = self.components[task_dct['uid']]['future']
+
+        if task_fut.done():
+            self.log.warning(f'Task {task_dct["uid"]} is already in {state}, skipping state update')
+            return
 
         self.log.info(f'{task_dct["uid"]} is in {state} state')
 
