@@ -1,24 +1,27 @@
-import os
 import asyncio
 import typeguard
 import subprocess
-from typing import Dict, Callable, Optional, Any, List
-from concurrent.futures import ThreadPoolExecutor
+from typing import Dict, Callable, Optional, Any, List, Union
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, Executor
 
 from ...constants import StateMapper
 from .base import Session, BaseExecutionBackend
 
 
-class ThreadExecutionBackend(BaseExecutionBackend):
+class ConcurrentExecutionBackend(BaseExecutionBackend):
     @typeguard.typechecked
-    def __init__(self, resources: Dict):
-        self.tasks = {}
-        self.session = Session()
-        self.executor = ThreadPoolExecutor(**resources)
+    def __init__(self, executor: Union[ThreadPoolExecutor, ProcessPoolExecutor]):
+        if not isinstance(executor, (ThreadPoolExecutor, ProcessPoolExecutor)):
+            raise TypeError("Executor must be an instance of ThreadPoolExecutor or ProcessPoolExecutor.")
+        
+        self.tasks: Dict[str, asyncio.Future] = {}
+        self.session: Session = Session()
+        self.executor: Union[Executor, ThreadPoolExecutor, ProcessPoolExecutor] = executor
         self._callback_func: Optional[Callable[[Any, str], None]] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
+
         StateMapper.register_backend_states_with_defaults(backend=self)
-        print('ThreadPool execution backend started successfully')
+        print(f'{type(executor).__name__} execution backend started successfully')
 
     def get_task_states_map(self):
         return StateMapper(backend=self)
