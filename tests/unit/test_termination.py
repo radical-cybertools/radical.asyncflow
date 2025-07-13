@@ -1,7 +1,9 @@
 import pytest
 from unittest.mock import MagicMock
 
-from radical.asyncflow import WorkflowEngine, ThreadExecutionBackend
+from radical.asyncflow import WorkflowEngine, ConcurrentExecutionBackend
+
+from concurrent.futures import ThreadPoolExecutor
 
 @pytest.mark.asyncio
 async def test_async_shutdown():
@@ -9,7 +11,7 @@ async def test_async_shutdown():
     Unit test: ensures `flow.shutdown()` completes without error in async context,
     and backend.shutdown() is called once.
     """
-    backend = ThreadExecutionBackend({})
+    backend = ConcurrentExecutionBackend(ThreadPoolExecutor())
     backend.shutdown = MagicMock()
     flow = WorkflowEngine(backend=backend)
 
@@ -25,7 +27,7 @@ def test_sync_shutdown():
     Unit test: ensures `flow.shutdown()` works in sync context,
     and backend.shutdown() is called once.
     """
-    backend = ThreadExecutionBackend({})
+    backend = ConcurrentExecutionBackend(ThreadPoolExecutor())
     backend.shutdown = MagicMock()
     flow = WorkflowEngine(backend=backend)
 

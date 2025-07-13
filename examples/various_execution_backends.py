@@ -1,9 +1,11 @@
 from radical.asyncflow import WorkflowEngine
 from radical.asyncflow import RadicalExecutionBackend
 from radical.asyncflow import DaskExecutionBackend
-from radical.asyncflow import ThreadExecutionBackend
+from radical.asyncflow import ConcurrentExecutionBackend
 
-backends= {ThreadExecutionBackend : {'max_workers': 4},
+from concurrent.futures import ThreadPoolExecutor
+
+backends= {ConcurrentExecutionBackend : ThreadPoolExecutor(max_workers= 4),
            RadicalExecutionBackend: {'resource': 'local.localhost'},
            DaskExecutionBackend   : {'n_workers': 2, 'threads_per_worker': 1}}
 

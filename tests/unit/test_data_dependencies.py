@@ -1,13 +1,14 @@
 from unittest.mock import MagicMock
 
 from radical.asyncflow import WorkflowEngine
-from radical.asyncflow import ThreadExecutionBackend
+from radical.asyncflow import ConcurrentExecutionBackend
 from radical.asyncflow import InputFile, OutputFile
 
+from concurrent.futures import ThreadPoolExecutor
 
 def test_implicit_data_dependencies_trigger():
 
-    backend=ThreadExecutionBackend({})
+    backend=ConcurrentExecutionBackend(ThreadPoolExecutor())
     flow = WorkflowEngine(backend)
     flow.backend.link_implicit_data_deps = MagicMock()
 
@@ -26,7 +27,7 @@ def test_implicit_data_dependencies_trigger():
     flow.backend.link_implicit_data_deps.assert_called_once()
 
 def test_explicit_data_dependencies_trigger():
-    backend=ThreadExecutionBackend({})
+    backend=ConcurrentExecutionBackend(ThreadPoolExecutor())
     flow = WorkflowEngine(backend)
     flow.backend.link_explicit_data_deps = MagicMock()
 
