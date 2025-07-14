@@ -121,10 +121,7 @@ class ConcurrentExecutionBackend(BaseExecutionBackend):
         result_task, state = await self._execute_task(task)
         
         if self._callback_func:
-            if asyncio.iscoroutinefunction(self._callback_func):
-                await self._callback_func(result_task, state)
-            else:
-                self._callback_func(result_task, state)
+            self._callback_func(result_task, state)
 
     def submit_tasks(self, tasks: List[Dict]) -> None:
         """Submit tasks for execution."""
