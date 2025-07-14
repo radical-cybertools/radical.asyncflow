@@ -597,13 +597,13 @@ class WorkflowEngine:
 
                             # link implicit data dependencies
                             if self.implicit_data_mode and not dep_desc['metadata'].get('output_files'):
-                                self.log.debug(f'Linking implicit file(s): from {dep_desc['name']} to {comp_desc["name"]}')
+                                self.log.debug(f'Linking implicit file(s): from {dep_desc["name"]} to {comp_desc["name"]}')
                                 self.backend.link_implicit_data_deps(dep_desc, comp_desc)
 
                             # link explicit data dependencies
                             for output_file in dep_desc['metadata']['output_files']:
                                 if output_file in comp_desc['metadata']['input_files']:
-                                    self.log.debug(f'Linking explicit file ({output_file}) from {dep_desc['name']} to {comp_desc["name"]}')
+                                    self.log.debug(f'Linking explicit file ({output_file}) from {dep_desc["name"]} to {comp_desc["name"]}')
                                     data_dep = self.backend.link_explicit_data_deps(src_task=dep_desc,
                                                                                     dst_task=comp_desc,
                                                                                     file_name=output_file)
@@ -647,7 +647,7 @@ class WorkflowEngine:
                 tasks = [t for t in objects if t and BLOCK not in t['uid']]
                 blocks = [b for b in objects if b and TASK not in b['uid']]
 
-                self.log.debug(f'Submitting {[b['name'] for b in objects]} for execution')
+                self.log.debug(f'Submitting {[b["name"] for b in objects]} for execution')
 
                 if tasks:
                     self.backend.submit_tasks(tasks)

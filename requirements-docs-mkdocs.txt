@@ -1,7 +1,6 @@
 -r requirements.txt
 
 mkdocs
-mkdocs-material
 mkdocstrings[python]
 mkdocs-jupyter
 mkdocs-gen-files
