@@ -100,6 +100,7 @@ class ConcurrentExecutionBackend(BaseExecutionBackend):
             
         except (NotImplementedError, RuntimeError):
             # Fallback to sync subprocess in thread pool
+            # This handles cases where asyncio executables aren't supported
             loop = asyncio.get_running_loop()
             result = await loop.run_in_executor(
                 self.executor,
