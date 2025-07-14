@@ -1,5 +1,7 @@
 import pytest
 
+from asyncio import Future as AsyncFuture
+
 from radical.asyncflow import WorkflowEngine
 from radical.asyncflow import NoopExecutionBackend
 from radical.asyncflow.workflow_manager import TASK, FUNCTION, BLOCK
@@ -38,8 +40,8 @@ async def test_handle_flow_component_registration_registers_function():
 
     assert callable(decorated)
 
-
-def test_register_component_adds_task_entry():
+@pytest.mark.asyncio
+async def test_register_component_adds_task_entry():
     engine = WorkflowEngine(backend=NoopExecutionBackend())
 
     async def dummy():
@@ -49,7 +51,7 @@ def test_register_component_adds_task_entry():
                  'args': (), 'kwargs': {}, 'executable': None}
 
     engine._register_component(
-        comp_fut=dummy,
+        comp_fut=AsyncFuture(),
         comp_type=TASK,
         comp_desc=comp_desc
     )
@@ -69,20 +71,20 @@ async def test_register_component_adds_block_entry():
 
     async def dummy_block():
         comp_desc = {'function': dummy_task,
-                    'args': (), 'kwargs': {}, 'executable': None}    
-        
+                     'args': (), 'kwargs': {}, 'executable': None}    
+
         task_future = engine._register_component(
-            comp_fut=dummy_task,
+            comp_fut=AsyncFuture(),
             comp_type=TASK,
             comp_desc=comp_desc)
             
-        return await task_future()
+        return await task_future
 
     comp_desc = {'function': dummy_block,
                  'args': (), 'kwargs': {}, 'executable': None}    
 
     block_future = engine._register_component(
-        comp_fut=dummy_block,
+        comp_fut=AsyncFuture(),
         comp_type=BLOCK,
         comp_desc=comp_desc)
 
@@ -94,7 +96,7 @@ async def test_register_component_adds_block_entry():
     # block gets registered first
     assert BLOCK in buid
 
-    await block_future()
+    await block_future
 
     # now the block is unpacked test if
     # the task is registered
