@@ -48,6 +48,7 @@ theme:
     text: 'Segoe UI'
     code: Roboto Mono
 
+# Plugins
 plugins:
   - search
   - glightbox
@@ -58,25 +59,7 @@ plugins:
         - docs/generate_api_references.py
   - literate-nav:
       nav_file: SUMMARY.md
-  - mkdocstrings:
-      enable_inventory: true
-      handlers:
-        python:
-          paths: [src]
-          options:
-            show_source: true
-            show_root_heading: true
-            show_root_toc_entry: true
-watch:
-  - mkdocs.yml
-  - README.md
-  - docs/
 
-extra:
-  version:
-    alias: true
-    default: stable
-    provider: mike
 
 # Extensions
 markdown_extensions:
@@ -100,5 +83,9 @@ nav:
   - API Reference:
       - AsyncFlow: api/
 
+
 extra_css:
   - css/extra.css
+
+extra_javascript:
+  - scripts/custom.js
