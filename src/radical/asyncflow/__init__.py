@@ -10,14 +10,11 @@ from .backends.execution.thread_pool import ThreadExecutionBackend
 from .backends.execution.dask_parallel import DaskExecutionBackend
 from .backends.execution.radical_pilot import RadicalExecutionBackend
 
+__all__ = [
 
-# ------------------------------------------------------------------------------
-#
-# get version info
-#
-_mod_root = _os.path.dirname (__file__)
-
-version_short, version_base, version_branch, version_tag, version_detail \
-             = _ru.get_version(_mod_root)
-version      = version_short
-__version__  = version_detail
+    "WorkflowEngine",
+    "NoopExecutionBackend",
+    "ThreadExecutionBackend",
+    "DaskExecutionBackend",
+    "RadicalExecutionBackend"
+]
