@@ -1,4 +1,5 @@
 name: documentation
+
 on:
   push:
     branches:
@@ -6,24 +7,44 @@ on:
 
 permissions:
   contents: write
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: Configure Git Credentials
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+
       - uses: actions/setup-python@v5
         with:
           python-version: 3.x
+
       - run: echo "cache_id=$(date --utc '+%V')" >> $GITHUB_ENV 
+
       - uses: actions/cache@v4
         with:
           key: mkdocs-material-${{ env.cache_id }}
           path: .cache
           restore-keys: |
             mkdocs-material-
-      - run: pip install mkdocs mkdocs-material mkdocs-glightbox mkdocs-material-extensions mkdocs-minify-plugin
-      - run: mkdocs gh-deploy --force
+
+      - name: Install documentation dependencies
+        run: |
+          pip install \
+            "mkdocs==1.5.3" \
+            "mkdocs-material==9.5.9" \
+            "mkdocstrings[python]==0.24.0" \
+            "mkdocs-gen-files==0.5.0" \
+            "mkdocs-literate-nav==0.6.1" \
+            "mkdocs-section-index==0.3.8" \
+            mkdocs-glightbox \
+            mkdocs-material-extensions \
+            mkdocs-minify-plugin
+
+      - name: Build and deploy docs
+        run: |
+          mkdocs gh-deploy --force
