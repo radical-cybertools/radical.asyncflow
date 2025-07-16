@@ -1090,13 +1090,20 @@ class WorkflowEngine:
 
         This method performs the following steps:
             1. Cancels background tasks responsible for running and
-               submitting workflows.
+            submitting workflows.
             2. Waits for the cancellation and completion of these tasks,
-               with a timeout of 5 seconds.
+            with a timeout of 5 seconds.
             3. Logs a warning if the tasks do not complete within the timeout
-               period.
+            period.
             4. Shuts down the backend using an executor to avoid blocking the
-               event loop.
+            event loop.
+
+        Args:
+            skip_execution_backend (bool): If True, skips the shutdown of the
+                execution backend.
+
+        Returns:
+            None
 
         Raises:
             asyncio.TimeoutError: If the background tasks do not complete
@@ -1136,29 +1143,29 @@ class WorkflowEngine:
         execution environments:
 
         - In Jupyter Notebook (sync or async mode), it either returns the
-          coroutine for async mode or runs it in a thread for sync mode.
+        coroutine for async mode or runs it in a thread for sync mode.
         - Outside Jupyter, it detects if running in an async context and 
-          returns the coroutine, or runs it synchronously if not.
+        returns the coroutine, or runs it synchronously if not.
         - Ensures proper shutdown regardless of whether the environment is
-          synchronous or asynchronous, and whether it's running in Jupyter
-          or standard Python.
+        synchronous or asynchronous, and whether it's running in Jupyter
+        or standard Python.
 
-        args:
+        Args:
             skip_execution_backend (bool): If True, skips the shutdown of the
-            execution backend. This is useful for cases where the backend
-            should not be shut down, such as in testing or when the backend
-            is managed externally.
+                execution backend. This is useful for cases where the backend
+                should not be shut down, such as in testing or when the backend
+                is managed externally.
 
         Returns:
-            The result of the asynchronous shutdown operation, either as a
-            coroutine (for async contexts) or the actual result (for sync contexts).
+            Union[Coroutine, Any]: The result of the asynchronous shutdown operation, 
+                either as a coroutine (for async contexts) or the actual result 
+                (for sync contexts).
 
         Modes:
-        - Regular sync Python
-        - Jupyter sync mode
-        - Jupyter async mode
-        - Regular async Python
-
+            - Regular sync Python
+            - Jupyter sync mode
+            - Jupyter async mode
+            - Regular async Python
         """
         # Case 1: We're in Jupyter
         if self._is_in_jupyter():
