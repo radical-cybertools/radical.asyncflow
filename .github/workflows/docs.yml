@@ -32,7 +32,7 @@ jobs:
           restore-keys: |
             mkdocs-material-
 
-      - name: Install documentation dependencies
+      - name: Install dependencies
         run: |
           pip install \
             "mkdocs==1.5.3" \
@@ -44,6 +44,8 @@ jobs:
             mkdocs-glightbox \
             mkdocs-material-extensions \
             mkdocs-minify-plugin
+
+          pip install -e .
 
       - name: Build and deploy docs
         run: |
