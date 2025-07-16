@@ -80,7 +80,8 @@ markdown_extensions:
 
 nav:
   - Home: index.md
-  - API Reference: reference/
+  - API Reference:
+      - AsyncFlow: api/
 
 
 extra_css:
