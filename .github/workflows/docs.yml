@@ -52,4 +52,5 @@ jobs:
 
       - name: Build and deploy docs
         run: |
+          . doc_env/bin/activate
           mkdocs gh-deploy --force
