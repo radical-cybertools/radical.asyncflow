@@ -34,7 +34,12 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install \
+          python -m venv doc_env
+          . doc_env/bin/activate
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install .
+
+          python -m pip install \
             "mkdocs==1.5.3" \
             "mkdocs-material==9.5.9" \
             "mkdocstrings[python]>=0.26.1" \
@@ -44,11 +49,6 @@ jobs:
             mkdocs-glightbox \
             mkdocs-material-extensions \
             mkdocs-minify-plugin
-
-          pip install -e .
-
-      - name: Set PYTHONPATH
-        run: echo "PYTHONPATH=$PWD" >> $GITHUB_ENV
 
       - name: Build and deploy docs
         run: |
