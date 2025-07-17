@@ -45,8 +45,8 @@ jobs:
             mkdocs-material-extensions \
             mkdocs-minify-plugin
 
-          pip install -e .
-
       - name: Build and deploy docs
         run: |
+          pip install -e .
           mkdocs gh-deploy --force
+          
