@@ -968,10 +968,6 @@ class WorkflowEngine:
 
         Returns:
             None
-
-        Raises:
-            RuntimeError: If trying to handle an already resolved future.
-            KeyError: If expected task components are missing from `components`.
         """
         if task_fut.done():
             self.log.warning(f'Attempted to handle an already resolved task "{task["uid"]}"')
