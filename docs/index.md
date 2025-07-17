@@ -23,11 +23,11 @@ Currently, RAF supports the following execution backends:
 import asyncio
 
 from radical.asyncflow import WorkflowEngine
-from radical.asyncflow import RadicalExecutionBackend
+from radical.asyncflow import ThreadExecutionBackend
 
 async def run():
     # Create backend and workflow
-    backend = RadicalExecutionBackend({'resource': 'local.localhost'})
+    backend = ThreadExecutionBackend({})
     flow = WorkflowEngine(backend=backend)
 
     @flow.executable_task
@@ -36,11 +36,11 @@ async def run():
 
     @flow.function_task
     async def task2(t1_result):
-        return t1_result * 2 * 2
+        return eval(t1_result) * 2 * 2
 
     # create the workflow
     t1_result = await task1()
-    t2_result = await task2(t1_result)  # t2 depends on t1 (waits for it)
+    t2_result = await task2(t1_result) # t2 depends on t1 (waits for it)
 
     # shutdown the execution backend
     await flow.shutdown()

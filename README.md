@@ -8,11 +8,11 @@
   <a href="https://www.python.org/downloads/">
     <img src="https://img.shields.io/badge/python-3.8+-blue.svg" alt="Python 3.8+">
   </a>
-  <a href="https://radical-cybertools.github.io/radical.asyncflow/">
-    <img src="https://img.shields.io/badge/docs-online-blue" alt="Docs">
+  <a href="https://github.com/radical-cybertools/radical.asyncflow/actions/workflows/tests.yml">
+    <img src="https://github.com/radical-cybertools/radical.asyncflow/actions/workflows/tests.yml/badge.svg?branch=main" alt="Tests">
   </a>
-  <a href="https://radical-cybertools.github.io/radical.asyncflow/actions">
-    <img src="https://radical-cybertools.github.io/radical.asyncflow/actions/workflows/tests.yml/badge.svg" alt="Tests">
+  <a href="https://github.com/radical-cybertools/radical.asyncflow/actions/workflows/docs.yml">
+    <img src="https://github.com/radical-cybertools/radical.asyncflow/actions/workflows/docs.yml/badge.svg" alt="Documentation">
   </a>
 </p>
 
@@ -35,11 +35,11 @@ RADICAL AsyncFlow (RAF) is a fast asynchronous scripting library built on top of
 import asyncio
 
 from radical.asyncflow import WorkflowEngine
-from radical.asyncflow import RadicalExecutionBackend
+from radical.asyncflow import ThreadExecutionBackend
 
 async def run():
     # Create backend and workflow
-    backend = RadicalExecutionBackend({'resource': 'local.localhost'})
+    backend = ThreadExecutionBackend({})
     flow = WorkflowEngine(backend=backend)
 
     @flow.executable_task
@@ -48,7 +48,7 @@ async def run():
 
     @flow.function_task
     async def task2(t1_result):
-        return t1_result * 2 * 2
+        return eval(t1_result) * 2 * 2
 
     # create the workflow
     t1_result = await task1()
