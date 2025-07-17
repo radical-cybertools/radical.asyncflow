@@ -1,7 +1,7 @@
 site_name: AsyncFlow
-site_url: 'https://github.com/radical-cybertools/async.flow'
+site_url: 'https://github.com/radical-cybertools/asyncflow'
 repo_name: 'AsyncFlow'
-repo_url: 'https://github.com/radical-cybertools/async.flow'
+repo_url: 'https://github.com/radical-cybertools/asyncflow'
 edit_uri: ""
 
 theme:

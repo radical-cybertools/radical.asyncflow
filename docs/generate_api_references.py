@@ -10,6 +10,9 @@ src = Path(__file__).parent.parent / "src"
 package_dir = src / "radical/asyncflow/"
 
 for path in sorted(package_dir.rglob("*.py")):
+    if path.name == "__init__.py":
+        continue
+
     module_path = path.relative_to(src).with_suffix("")
     doc_path = path.relative_to(src).with_suffix(".md")
     full_doc_path = Path("api", doc_path)
