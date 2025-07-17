@@ -8,6 +8,12 @@
   <a href="https://www.python.org/downloads/">
     <img src="https://img.shields.io/badge/python-3.8+-blue.svg" alt="Python 3.8+">
   </a>
+  <a href="https://radical-cybertools.github.io/radical.asyncflow/">
+    <img src="https://img.shields.io/badge/docs-online-blue" alt="Docs">
+  </a>
+  <a href="https://radical-cybertools.github.io/radical.asyncflow/actions">
+    <img src="https://radical-cybertools.github.io/radical.asyncflow/actions/workflows/tests.yml/badge.svg" alt="Tests">
+  </a>
 </p>
 
 
@@ -19,6 +25,9 @@ RADICAL AsyncFlow (RAF) is a fast asynchronous scripting library built on top of
 - Noop with `dry_run`
 - Custom implementations
 
+
+## 📚 Documentation
+👉 [AsyncFlow Documentation and API References](https://radical-cybertools.github.io/radical.asyncflow)
 
 
 ## Basic Usage

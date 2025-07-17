@@ -1,0 +1,128 @@
+site_name: AsyncFlow
+site_url: 'https://github.com/radical-cybertools/asyncflow'
+repo_name: 'AsyncFlow'
+repo_url: 'https://github.com/radical-cybertools/asyncflow'
+edit_uri: ""
+
+theme:
+  name: material
+  features:
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.top
+    - navigation.instant
+    - toc.integrate
+    - header.autohide
+    - search.highlight
+    - search.share
+    - search.suggest
+    - content.code.annotate
+    - content.tooltips
+    - content.tabs.link
+    - content.code.copy
+
+  palette:
+      - media: "(prefers-color-scheme: light)"
+        scheme: default
+        toggle:
+          icon: material/weather-night
+          name: Switch to dark mode
+        primary: black
+        accent: indigo
+      - media: "(prefers-color-scheme: dark)"
+        scheme: slate
+        toggle:
+          icon: material/weather-sunny
+          name: Switch to light mode
+        primary: black
+        accent: indigo
+
+  highlightjs: true
+  hljs_languages:
+        - yaml
+        - json
+        - bash
+  font:
+    text: 'Segoe UI'
+    code: Roboto Mono
+
+# Plugins
+plugins:
+  - search
+  - glightbox
+  - minify:
+      minify_html: true
+  - gen-files:
+      scripts:
+        - docs/generate_api_references.py
+  - literate-nav:
+      nav_file: SUMMARY.md
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            inherited_members: yes
+            line_length: 60
+            members_order: source
+            merge_init_into_class: yes
+            separate_signature: yes
+            show_object_full_path: no
+            show_root_full_path: yes
+            show_root_heading: no
+            show_root_members_full_path: no
+            show_root_toc_entry: yes
+            show_signature_annotations: yes
+            show_submodules: no
+            show_symbol_type_heading: yes
+            show_symbol_type_toc: yes
+            signature_crossrefs: yes
+
+# Extensions
+markdown_extensions:
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+  - pymdownx.tabbed
+  - attr_list
+  - toc:
+      permalink: true
+  - admonition
+  - codehilite:
+      linenums: true
+  - pymdownx.details
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - md_in_html
+
+nav:
+  - Home: 
+      - Introduction: index.md
+      - Installation: install.md
+  - Getting Started:
+      - Basic Usage: basic.md
+  - Best Practices: 
+      - Best Practices: best_practice.md
+  - Workflows:
+      - Asynchronous Workflows: async_sync.md
+      - Execution Backends: exec_backends.md
+      - Workflows: workflows.md
+      - Campings: campings.md
+    
+  - Campings:
+    - Campings: camps.md
+    - Workflow of Campings: wf_of_camps.md
+
+  - API Reference:
+      - AsyncFlow: api/
+
+
+extra_css:
+  - css/extra.css
+
+extra_javascript:
+  - https://unpkg.com/mermaid@10/dist/mermaid.min.js

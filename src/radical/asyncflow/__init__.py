@@ -1,5 +1,6 @@
-import os as _os
-import radical.utils as _ru
+from __future__ import annotations
+
+import importlib.metadata as importlib_metadata
 
 from .task import Task
 from .data import InputFile
@@ -10,14 +11,4 @@ from .backends.execution.thread_pool import ThreadExecutionBackend
 from .backends.execution.dask_parallel import DaskExecutionBackend
 from .backends.execution.radical_pilot import RadicalExecutionBackend
 
-
-# ------------------------------------------------------------------------------
-#
-# get version info
-#
-_mod_root = _os.path.dirname (__file__)
-
-version_short, version_base, version_branch, version_tag, version_detail \
-             = _ru.get_version(_mod_root)
-version      = version_short
-__version__  = version_detail
+__version__ = importlib_metadata.version('radical.asyncflow')
