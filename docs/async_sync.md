@@ -94,7 +94,7 @@ flow.shutdown()
 - Total time is the sum of all workflow execution times
 - Simple to implement but inefficient for independent tasks
 
-### Asynchronous Workflows
+## Asynchronous Workflows
 In the asynchronous approach, we submit all 5 blocking workflows concurrently and wait for their completion.
 
 ```mermaid

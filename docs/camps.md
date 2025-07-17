@@ -40,7 +40,6 @@ import asyncio
 from radical.asyncflow import ThreadExecutionBackend
 from radical.asyncflow import WorkflowEngine
 
-# + Create a backend and workflow engine
 backend = ThreadExecutionBackend({})
 asyncflow = WorkflowEngine(backend=backend)
 ```
@@ -71,7 +70,6 @@ async def workflow_step(name: str, step: int):
 
 ```python
 
-# 
 @asyncflow.block # (1)!
 async def campaign(name: str):
     step1 = await workflow_step(name, 1)
@@ -103,11 +101,11 @@ await asyncio.gather( # (1)!
 end_time = time.time()
 print(f"\nTotal time running asynchronously is: {end_time - start_time:.2f}s")
 
-# + Shutdown the workflow engine
-await flow.shutdown()
+await flow.shutdown() # (2)!
 ```
 
 1. Run all campaigns concurrently
+2. Shutdown the agent and terminate the resources
 
 ??? "Campaigns log"
     ```text
