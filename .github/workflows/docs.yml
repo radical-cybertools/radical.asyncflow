@@ -45,8 +45,11 @@ jobs:
             mkdocs-material-extensions \
             mkdocs-minify-plugin
 
+          pip install -e .
+
+      - name: Set PYTHONPATH
+        run: echo "PYTHONPATH=$PWD" >> $GITHUB_ENV
+
       - name: Build and deploy docs
         run: |
-          pip install -e .
           mkdocs gh-deploy --force
-          
