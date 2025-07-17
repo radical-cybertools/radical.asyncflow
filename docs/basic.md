@@ -7,7 +7,7 @@ You’ll learn how to define tasks, set dependencies, execute the workflow, and 
 
 ---
 
-## 📄 Prerequisites
+## Prerequisites
 
 - Make sure you have installed `radical.asyncflow` in your Python environment.  
 - You also need a working Jupyter Notebook or Python >=3.8.
@@ -22,7 +22,9 @@ You need to set an environment variable to enable async mode in Jupyter.
 %env FLOW_JUPYTER_ASYNC=TRUE
 ```
 
-**💡 Tip:** If running outside Jupyter, you don’t need `FLOW_JUPYTER_ASYNC` to be set.
+!!! tip
+
+If running outside Jupyter, you don’t need `FLOW_JUPYTER_ASYNC` to be set.
 
 ---
 
@@ -74,7 +76,7 @@ async def task3(t1_result, t2_result):
     return time.time()
 ```
 
-**📌 Note:**  
+!!! note  
 - `task3` depends on the outputs of `task1` and `task2`.
 - You express this dependency by calling `task3(task1(), task2())`.
 

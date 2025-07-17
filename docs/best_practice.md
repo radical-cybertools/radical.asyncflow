@@ -6,17 +6,19 @@ This page outlines **recommended practices** when using AsyncFlow effectively in
 
 ---
 
-## 🚀 Why Best Practices Matter
+## Why Best Practices Matter
 
 Async programming can easily lead to:
-- Hard-to-debug concurrency bugs
-- Deadlocks or race conditions
-- Inefficient task scheduling
+
+- Hard-to-debug concurrency bugs 🚨
+- Deadlocks or race conditions 💥
+- Inefficient task scheduling ⚠️
 
 By following these best practices, you can:
-- Make your workflows reliable  
-- Maximize concurrency  
-- Keep code maintainable
+
+- Make your workflows reliable 🏅
+- Maximize concurrency 🔥
+- Keep code maintainable 🔧
 
 ---
 
@@ -24,7 +26,7 @@ By following these best practices, you can:
 
 - Define **small, composable tasks** that each do one thing well.
 - Prefer pure functions or side-effect-free coroutines as tasks.
-- Use `@flow.function_task` or `@flow.python_task` decorators consistently.
+- Use `@flow.function_task` or `@flow.executable_task` decorators consistently.
 
 !!! tip 
 
@@ -75,13 +77,13 @@ result = task_c(task_a(), task_b()) # (3)!
 
 !!! warning
 
-Avoid this:
+Avoid this as it will be slower:
 
 ```python
 await task_a()
 await task_b()
 ```
-Instead:
+Instead 1 await is faster 🔥:
 
 ```python
 result = await task_c(task_a(), task_b())
