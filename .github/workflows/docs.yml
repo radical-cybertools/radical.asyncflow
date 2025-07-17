@@ -3,7 +3,8 @@ name: documentation
 on:
   push:
     branches:
-      - feature/docs
+      - main
+      - master
 
 permissions:
   contents: write
