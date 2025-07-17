@@ -7,12 +7,14 @@ nav = mkdocs_gen_files.Nav()
 
 # Adjust this to your package structure
 src = Path(__file__).parent.parent / "src"
-package_dir = src / "radical/asyncflow"
+package_dir = src / "radical/asyncflow/"
 
 for path in sorted(package_dir.rglob("*.py")):
     module_path = path.relative_to(src).with_suffix("")
     doc_path = path.relative_to(src).with_suffix(".md")
     full_doc_path = Path("api", doc_path)
+
+    print(full_doc_path)
 
     parts = tuple(module_path.parts)
 

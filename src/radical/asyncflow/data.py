@@ -21,13 +21,43 @@ URL_SCHEMES = [
 ]
 
 class File:
+    """Base class for file handling in task execution systems.
+    
+    Provides common attributes and functionality for managing files with
+    filename and filepath properties.
+    """
+
     def __init__(self) -> None:
+        """Initialize a File object with default None values.
+        
+        Sets filename and filepath attributes to None, to be populated
+        by subclasses during file resolution.
+        """
         self.filename = None
         self.filepath = None
 
     @staticmethod
     def download_remote_url(url: str) -> Path:
-        """Download the remote file to the current directory and return its full path."""
+        """Download a remote file to the current directory and return its full path.
+        
+        Downloads file content from a remote URL using streaming to handle large files
+        efficiently. Saves the file with a name derived from the URL.
+        
+        Args:
+            url: The remote URL to download from.
+            
+        Returns:
+            Path: Absolute path to the downloaded file.
+            
+        Raises:
+            requests.exceptions.RequestException: If the download fails or URL is invalid.
+            
+        Example:
+            ::
+            
+                file_path = File.download_remote_url("https://example.com/data.txt")
+                print(f"Downloaded to: {file_path}")
+        """
         response = requests.get(url, stream=True)
         response.raise_for_status()  # Check if the download was successful
 
@@ -44,7 +74,34 @@ class File:
 
 
 class InputFile(File):
+    """Represents an input file that can be sourced from remote URLs, local paths, or task outputs.
+    
+    Automatically detects the file source type and handles appropriate resolution.
+    Supports remote file downloading, local file path resolution, and task output file references.
+    """
+
     def __init__(self, file):
+        """Initialize an InputFile with automatic source type detection and resolution.
+        
+        Determines whether the input is a remote URL, local file path, or reference
+        to another task's output file, then resolves the appropriate file path.
+        
+        Args:
+            file: Input file specification. Can be:
+                - Remote URL (http, https, ftp, s3, etc.)
+                - Local file path (absolute or relative)
+                - Task output file reference (filename for future resolution)
+                
+        Raises:
+            Exception: If file resolution fails or file source cannot be determined.
+            
+        Attributes:
+            remote_url (str): URL if file is remote, None otherwise.
+            local_file (str): Local path if file exists locally, None otherwise.
+            other_task_file (str): Task reference if file is from another task, None otherwise.
+            filepath (Path): Resolved file path.
+            filename (str): Extracted filename from the resolved path.
+        """
         # Initialize file-related variables
         self.remote_url = None
         self.local_file = None
@@ -84,7 +141,39 @@ class InputFile(File):
 
 
 class OutputFile(File):
+    """Represents an output file that will be produced by a task.
+    
+    Handles filename validation and extraction from file paths, ensuring
+    proper output file naming for task execution.
+    """
+
     def __init__(self, filename):
+        """Initialize an OutputFile with filename validation.
+        
+        Extracts the filename from the provided path and validates that it
+        represents a valid file (not a directory or empty path).
+        
+        Args:
+            filename: The output filename or path. Can be a simple filename
+                or a path, but must resolve to a valid filename.
+                
+        Raises:
+            ValueError: If filename is empty or resolves to an invalid file path.
+            
+        Attributes:
+            filename (str): The extracted filename for the output file.
+            
+        Example:
+            ::
+            
+                # Valid initializations
+                output1 = OutputFile("result.txt")
+                output2 = OutputFile("path/to/result.txt")
+                
+                # Invalid - will raise ValueError
+                output3 = OutputFile("")  # Empty filename
+                output4 = OutputFile("path/")  # Path ends with separator
+        """
         if not filename:
             raise ValueError("Filename cannot be empty")
 

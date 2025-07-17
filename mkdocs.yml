@@ -59,6 +59,25 @@ plugins:
         - docs/generate_api_references.py
   - literate-nav:
       nav_file: SUMMARY.md
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            inherited_members: yes
+            line_length: 60
+            members_order: source
+            merge_init_into_class: yes
+            separate_signature: yes
+            show_object_full_path: no
+            show_root_full_path: yes
+            show_root_heading: no
+            show_root_members_full_path: no
+            show_root_toc_entry: yes
+            show_signature_annotations: yes
+            show_submodules: no
+            show_symbol_type_heading: yes
+            show_symbol_type_toc: yes
+            signature_crossrefs: yes
 
 
 # Extensions
@@ -87,5 +106,3 @@ nav:
 extra_css:
   - css/extra.css
 
-extra_javascript:
-  - scripts/custom.js
