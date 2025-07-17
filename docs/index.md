@@ -36,7 +36,7 @@ async def run():
 
     @flow.function_task
     async def task2(t1_result):
-        return eval(t1_result) * 2 * 2
+        return int(t1_result.strip()) * 2 * 2
 
     # create the workflow
     t1_result = await task1()
