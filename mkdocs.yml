@@ -105,13 +105,17 @@ nav:
       - Installation: install.md
   - Getting Started:
       - Basic Usage: basic.md
-  - AsyncFlow Best Practices: 
+  - Best Practices: 
       - Best Practices: best_practice.md
-  - Utilize AsyncFlow Capabilities:
-      - Async/Sync: async_sync.md
+  - Workflows:
+      - Asynchronous Workflows: async_sync.md
       - Execution Backends: exec_backends.md
       - Workflows: workflows.md
       - Campings: campings.md
+    
+  - Campings:
+    - Campings: camps.md
+    - Workflow of Campings: wf_of_camps.md
 
   - API Reference:
       - AsyncFlow: api/
