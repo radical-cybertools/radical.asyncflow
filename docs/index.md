@@ -1,11 +1,12 @@
 # RADICAL AsyncFlow (RAF)
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-gre.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+**RADICAL AsyncFlow (RAF)** is a fast asynchronous scripting library built on top of [asyncio](https://docs.python.org/3/library/asyncio.html) for building powerful async/sync workflows on HPC, clusters, and local machines. It supports pluggable execution backends with intuitive task dependencies and workflow composition. 
 
-**RADICAL AsyncFlow (RAF)** is a fast asynchronous scripting library built on top of [asyncio](https://docs.python.org/3/library/asyncio.html) for complex async/sync workflows on HPC, clusters, and local machines.  
+- ⚡ **Powerful asynchronous workflows** — Compose complex async and sync workflows easily, with intuitive task dependencies.
 
-It supports pluggable execution backends with intuitive task dependencies and workflow composition.  
+- 🌐 **Portable across environments** — Run seamlessly on HPC systems, clusters, and local machines with pluggable execution backends.
+
+- 🧩 **Flexible and extensible** — Supports campaign management and advanced workflow patterns.
 
 Currently, RAF supports the following execution backends:
 
@@ -23,11 +24,11 @@ Currently, RAF supports the following execution backends:
 import asyncio
 
 from radical.asyncflow import WorkflowEngine
-from radical.asyncflow import RadicalExecutionBackend
+from radical.asyncflow import ThreadExecutionBackend
 
 async def run():
     # Create backend and workflow
-    backend = RadicalExecutionBackend({'resource': 'local.localhost'})
+    backend = ThreadExecutionBackend({})
     flow = WorkflowEngine(backend=backend)
 
     @flow.executable_task
@@ -36,11 +37,11 @@ async def run():
 
     @flow.function_task
     async def task2(t1_result):
-        return t1_result * 2 * 2
+        return int(t1_result.strip()) * 2 * 2
 
     # create the workflow
     t1_result = await task1()
-    t2_result = await task2(t1_result)  # t2 depends on t1 (waits for it)
+    t2_result = await task2(t1_result) # t2 depends on t1 (waits for it)
 
     # shutdown the execution backend
     await flow.shutdown()
