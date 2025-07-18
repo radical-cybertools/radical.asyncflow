@@ -113,7 +113,7 @@ nav:
 
   - Campaigns:
     - Campaigns: camps.md
-    - Workflow of Campaign: wf_of_camps.md
+    - Workflow of Campaigns: wf_of_camps.md
 
   - API Reference:
       - AsyncFlow: api/
