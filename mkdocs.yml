@@ -111,9 +111,9 @@ nav:
       - Asynchronous Workflows: async_sync.md
       - Execution Backends: exec_backends.md
 
-  - Campings:
-    - Campings: camps.md
-    - Workflow of Campings: wf_of_camps.md
+  - Campaigns:
+    - Campaigns: camps.md
+    - Workflow of Campaign: wf_of_camps.md
 
   - API Reference:
       - AsyncFlow: api/
