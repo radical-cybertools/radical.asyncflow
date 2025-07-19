@@ -301,3 +301,4 @@ class StateMapper:
                 # Returns ('COMPLETED', 'ERROR', 'ABORTED') for example backend
         """
         return (self.DONE, self.FAILED, self.CANCELED)
+
