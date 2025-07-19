@@ -11,18 +11,19 @@ from .base import BaseExecutionBackend, Session
 
 
 class DaskExecutionBackend(BaseExecutionBackend):
-    """
-    A robust Dask execution backend supporting both synchronous and asynchronous functions.
-    Handles task submission, dependency management, and proper event loop handling.
+    """A robust Dask execution backend supporting both synchronous and asynchronous functions.
+    
+    Handles task submission, and proper event loop handling
+    for distributed task execution using Dask.
     """
 
     @typeguard.typechecked
     def __init__(self, resources: Optional[Dict]):
-        """
-        Initialize the Dask execution backend.
+        """Initialize the Dask execution backend.
 
         Args:
-            resources: Dictionary of resource requirements for tasks
+            resources: Dictionary of resource requirements for tasks. Contains
+                configuration parameters for the Dask client initialization.
         """
         self.tasks = {}
         self._client = None
@@ -31,9 +32,15 @@ class DaskExecutionBackend(BaseExecutionBackend):
         self.initialize(resources)
         StateMapper.register_backend_states_with_defaults(backend=self)
 
-
     def initialize(self, resources) -> None:
-        """Initialize the Dask client and set up worker environments."""
+        """Initialize the Dask client and set up worker environments.
+        
+        Args:
+            resources: Configuration parameters for Dask client initialization.
+            
+        Raises:
+            Exception: If Dask client initialization fails.
+        """
         try:
             self._client = Client(**resources)
             # Ensure workers can handle async functions
@@ -44,14 +51,28 @@ class DaskExecutionBackend(BaseExecutionBackend):
             raise
 
     def register_callback(self, callback: Callable) -> None:
-        """Register a callback for task state changes."""
+        """Register a callback for task state changes.
+        
+        Args:
+            callback: Function to be called when task states change. Should accept
+                task and state parameters.
+        """
         self._callback = callback
 
     def get_task_states_map(self):
+        """Retrieve a mapping of task IDs to their current states.
+        
+        Returns:
+            StateMapper: Object containing the mapping of task states for this backend.
+        """
         return StateMapper(backend=self)
 
     def shutdown(self) -> None:
-        """Shutdown the Dask client and clean up resources."""
+        """Shutdown the Dask client and clean up resources.
+        
+        Closes the Dask client connection, clears task storage, and handles
+        any cleanup exceptions gracefully.
+        """
         if self._client is not None:
             try:
                 # Close the client
@@ -64,8 +85,11 @@ class DaskExecutionBackend(BaseExecutionBackend):
                 self.tasks.clear()
 
     def submit_tasks(self, tasks: List[Dict[str, Any]]) -> None:
-        """
-        Submit tasks to Dask cluster, handling both sync and async functions.
+        """Submit tasks to Dask cluster, handling both sync and async functions.
+
+        Processes a list of tasks and submits them to the Dask cluster for execution.
+        Filters out future objects from arguments and handles both synchronous and
+        asynchronous functions appropriately.
 
         Args:
             tasks: List of task dictionaries containing:
@@ -74,6 +98,12 @@ class DaskExecutionBackend(BaseExecutionBackend):
                 - args: Positional arguments
                 - kwargs: Keyword arguments
                 - async: Boolean indicating if function is async
+                - executable: Optional executable path (not supported)
+                - task_backend_specific_kwargs: Backend-specific parameters
+                
+        Note:
+            Executable tasks are not supported and will result in FAILED state.
+            Future objects are filtered out from arguments as they are not picklable.
         """
         for task in tasks:
             is_func_task = bool(task.get('function'))
@@ -103,7 +133,16 @@ class DaskExecutionBackend(BaseExecutionBackend):
                 raise
 
     def _submit_to_dask(self, task: Dict[str, Any], fn: Callable, *args) -> None:
-        """Submit function to Dask and register completion callback."""
+        """Submit function to Dask and register completion callback.
+        
+        Submits the wrapped function to Dask client and registers a callback
+        to handle task completion or failure.
+        
+        Args:
+            task: Task dictionary containing task metadata and configuration.
+            fn: The function to submit to Dask.
+            *args: Arguments to pass to the function.
+        """
         def on_done(f: DaskFuture):
             try:
                 result = f.result()
@@ -118,7 +157,14 @@ class DaskExecutionBackend(BaseExecutionBackend):
         dask_future.add_done_callback(on_done)
 
     def _submit_async_function(self, task: Dict[str, Any]) -> None:
-        """Submit async function to Dask."""
+        """Submit async function to Dask.
+        
+        Creates an async wrapper that preserves the original function name
+        for better visibility in the Dask dashboard.
+        
+        Args:
+            task: Task dictionary containing the async function and its parameters.
+        """
         
         # in dask dashboard we want the real task name not "async_wrapper"
         @wraps(task['function'])
@@ -128,7 +174,14 @@ class DaskExecutionBackend(BaseExecutionBackend):
         self._submit_to_dask(task, async_wrapper)
 
     def _submit_sync_function(self, task: Dict[str, Any]) -> None:
-        """Submit sync function to Dask."""
+        """Submit sync function to Dask.
+        
+        Creates a sync wrapper that preserves the original function name
+        for better visibility in the Dask dashboard.
+        
+        Args:
+            task: Task dictionary containing the sync function and its parameters.
+        """
 
         # in dask dashboard we want the real task name not "sync_wrapper"
         @wraps(task['function'])
@@ -138,18 +191,47 @@ class DaskExecutionBackend(BaseExecutionBackend):
         self._submit_to_dask(task, sync_wrapper, task['function'], task['args'], task['kwargs'])
 
     def link_explicit_data_deps(self, src_task=None, dst_task=None, file_name=None, file_path=None):
-        """Handle explicit data dependencies between tasks."""
+        """Handle explicit data dependencies between tasks.
+        
+        Args:
+            src_task: The source task that produces the dependency. Defaults to None.
+            dst_task: The destination task that depends on the source. Defaults to None.
+            file_name: Name of the file that represents the dependency. Defaults to None.
+            file_path: Full path to the file that represents the dependency. Defaults to None.
+        """
         pass
 
     def link_implicit_data_deps(self, src_task, dst_task):
-        """Handle implicit data dependencies for a task."""
+        """Handle implicit data dependencies for a task.
+        
+        Args:
+            src_task: The source task that produces data.
+            dst_task: The destination task that depends on the source task's output.
+        """
         pass
 
     def state(self) -> str:
+        """Get the current state of the Dask execution backend.
+        
+        Returns:
+            Current state of the backend as a string.
+        """
         pass
 
     def task_state_cb(self, task: dict, state: str) -> None:
+        """Callback function invoked when a task's state changes.
+        
+        Args:
+            task: Dictionary containing task information and metadata.
+            state: The new state of the task.
+        """
         pass
 
     def build_task(self, task: dict) -> None:
+        """Build or prepare a task for execution.
+        
+        Args:
+            task: Dictionary containing task definition, parameters, and metadata
+                required for task construction.
+        """
         pass
