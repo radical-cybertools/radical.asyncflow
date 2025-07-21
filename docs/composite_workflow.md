@@ -6,17 +6,19 @@ This page walks you step by step through defining and running composite workflow
 
 ```mermaid
 graph TD
+
     subgraph Block A
-        A1[WF 1] --> A2[WF 2] --> A3[WF 3] --> A4[WF 4] 
+        A_WF1[task1 --> task2 --> task3] --> A_WF2[task1 --> task2 --> task3] --> A_WF3[task1 --> task2 --> task3] 
     end
 
     subgraph Block B
-        B1[WF 1] --> B2[WF 2] --> B3[WF 3] --> B4[WF 4]
+        B_WF1[task1 --> task2 --> task3] --> B_WF2[task1 --> task2 --> task3] --> B_WF3[task1 --> task2 --> task3] 
     end
 
     subgraph Block C
-        C1[WF 1] --> C2[WF 2] --> C3[WF 3] --> C4[WF 4]
+        C_WF1[task1 --> task2 --> task3] --> C_WF2[task1 --> task2 --> task3] --> C_WF3[task1 --> task2 --> task3] 
     end
+
 ```
 
 
@@ -42,12 +44,39 @@ We now define 3 reusable tasks and a block representing one composite workflow.
 
 ```python
 @asyncflow.function_task
-async def create_workflow(name: str, step: int):
+async def task1(name: str):
     now = time.time()
-    print(f"[{now:.2f}] {name} - Step {step} started")
+    print(f"[{now:.2f}] {name} started")
     await asyncio.sleep(0.5)  # simulate work
-    print(f"[{time.time():.2f}] {name} - Step {step} completed")
+    print(f"[{time.time():.2f}] {name} completed")
     return now
+
+@asyncflow.function_task
+async def task2(name: str):
+    now = time.time()
+    print(f"[{now:.2f}] {name} started")
+    await asyncio.sleep(0.5)  # simulate work
+    print(f"[{time.time():.2f}] {name} completed")
+    return now
+
+@asyncflow.function_task
+async def task3(name: str, *args):
+    now = time.time()
+    print(f"[{now:.2f}] {name} started")
+    await asyncio.sleep(0.5)  # simulate work
+    print(f"[{time.time():.2f}] {name} completed")
+    return now
+```
+
+```python
+async def create_workflow(name):
+    now = time.time()
+    print(f"[{now:.2f}] {name} started")
+    t1 = task1('task1')
+    t2 = task2('task2')
+    t3 = task3('task3', t1, t2)
+    await t3
+    print(f"[{time.time():.2f}] {name} completed")
 ```
 
 !!! success
@@ -57,11 +86,10 @@ async def create_workflow(name: str, step: int):
 
 ```python
 @asyncflow.block # (1)!
-async def create_block(name: str):
-    step1 = await create_workflow(name, 1)
-    step2 = await create_workflow(name, 2)
-    step3 = await create_workflow(name, 3)
-    step4 = await create_workflow(name, 4)
+async def create_block(name: str, *args):
+    wf1 = await create_workflow('WF1')
+    wf2 = await create_workflow('WF2')
+    wf3 = await create_workflow('WF3')
     print(f"Processing {name} completed at {time.time():.2f}")
 ```
 
@@ -93,35 +121,84 @@ await asyncflow.shutdown() # (2)!
 ??? "Execution log"
     ```text
     ThreadPool execution backend started successfully
-    [1752775108.50] Block A - workflow 1 started
-    [1752775108.50] Block B - workflow 1 started
-    [1752775108.50] Block C - workflow 1 started
-    [1752775109.00] Block A - workflow 1 completed
-    [1752775109.00] Block C - workflow 1 completed
-    [1752775109.00] Block B - workflow 1 completed
-    [1752775110.00] Block A - workflow 2 started
-    [1752775110.00] Block C - workflow 2 started
-    [1752775110.00] Block B - workflow 2 started
-    [1752775110.50] Block A - workflow 2 completed
-    [1752775110.51] Block C - workflow 2 completed
-    [1752775110.51] Block B - workflow 2 completed
-    [1752775110.51] Block A - workflow 3 started
-    [1752775110.51] Block C - workflow 3 started
-    [1752775110.51] Block B - workflow 3 started
-    [1752775111.01] Block A - workflow 3 completed
-    [1752775111.02] Block C - workflow 3 completed
-    [1752775111.02] Block B - workflow 3 completed
-    [1752775112.02] Block A - workflow 4 started
-    [1752775112.02] Block C - workflow 4 started
-    [1752775112.02] Block B - workflow 4 started
-    [1752775112.52] Block A - workflow 4 completed
-    [1752775112.52] Block B - workflow 4 completed
-    [1752775112.52] Block C - workflow 4 completed
-    Processing Block A completed at 1752775112.53
-    Processing Block C completed at 1752775112.53
-    Processing Block B completed at 1752775112.53
+    [1753116467.34] WF1 started
+    [1753116467.34] WF1 started
+    [1753116467.34] WF1 started
+    [1753116467.35] task1 started
+    [1753116467.35] task2 started
+    [1753116467.35] task1 started
+    [1753116467.35] task2 started
+    [1753116467.85] task1 completed
+    [1753116467.85] task2 completed
+    [1753116467.85] task1 completed
+    [1753116467.85] task2 completed
+    [1753116467.86] task1 started
+    [1753116467.86] task2 started
+    [1753116468.36] task1 completed
+    [1753116468.36] task2 completed
+    [1753116468.86] task3 started
+    [1753116468.86] task3 started
+    [1753116468.86] task3 started
+    [1753116469.36] task3 completed
+    [1753116469.36] task3 completed
+    [1753116469.36] task3 completed
+    [1753116469.38] WF1 completed
+    [1753116469.38] WF2 started
+    [1753116469.38] WF1 completed
+    [1753116469.38] WF2 started
+    [1753116469.38] WF1 completed
+    [1753116469.38] WF2 started
+    [1753116469.39] task2 started
+    [1753116469.39] task1 started
+    [1753116469.39] task1 started
+    [1753116469.39] task2 started
+    [1753116469.89] task1 completed
+    [1753116469.89] task2 completed
+    [1753116469.89] task1 completed
+    [1753116469.89] task1 started
+    [1753116469.89] task2 completed
+    [1753116469.89] task2 started
+    [1753116470.39] task1 completed
+    [1753116470.39] task2 completed
+    [1753116470.89] task3 started
+    [1753116470.89] task3 started
+    [1753116470.89] task3 started
+    [1753116471.39] task3 completed
+    [1753116471.39] task3 completed
+    [1753116471.39] task3 completed
+    [1753116471.42] WF2 completed
+    [1753116471.42] WF3 started
+    [1753116471.42] WF2 completed
+    [1753116471.42] WF3 started
+    [1753116471.42] WF2 completed
+    [1753116471.42] WF3 started
+    [1753116471.42] task1 started
+    [1753116471.42] task1 started
+    [1753116471.42] task2 started
+    [1753116471.42] task2 started
+    [1753116471.92] task1 completed
+    [1753116471.92] task1 completed
+    [1753116471.93] task2 completed
+    [1753116471.93] task2 completed
+    [1753116471.93] task1 started
+    [1753116471.93] task2 started
+    [1753116472.43] task2 completed
+    [1753116472.43] task1 completed
+    [1753116472.92] task3 started
+    [1753116472.93] task3 started
+    [1753116472.93] task3 started
+    [1753116473.43] task3 completed
+    [1753116473.43] task3 completed
+    [1753116473.43] task3 completed
+    [1753116473.45] WF3 completed
+    Processing Block C completed at 1753116473.45
+    [1753116473.45] WF3 completed
+    Processing Block A completed at 1753116473.45
+    [1753116473.45] WF3 completed
+    Processing Block B completed at 1753116473.45
 
-    Total time running asynchronously is: 4.05s
+    Total time running asynchronously is: 6.12s
+    Shutdown is triggered, terminating the resources gracefully
     ```
 
 !!! note
@@ -134,53 +211,99 @@ To represent the previous example as a `DAG` then all you need to do is to
 pass the handler (future) of each the dependent block to the depended block as follows:
 
 ```python
-
 block1 = create_block("Block A") # (1)!
-block2 = create_block(block1, "Block B") # (2)!
-block3 = create_block(block1, block2, "Block C") # (3)!
+block2 = create_block("Block B") # (2)!
+block3 = create_block("Block C", block1, block2) # (3)!
 
 await block3
 ```
 
 1. `block1` will execute first without any waiting.
-2. `block2` will execute once `block1` finishes.
+2. `block2` will execute at the same time of  `block1` without any waiting (in parallel).
 3. `block3` will run only after `block1` and `block2` finishes execution successfully.
 
 
 ??? "Execution log"
     ```text
     ThreadPool execution backend started successfully
-    [1752775108.50] Block A - workflow 1 started
-    [1752775109.00] Block A - workflow 1 completed
-    [1752775109.01] Block A - workflow 2 started
-    [1752775109.51] Block A - workflow 2 completed
-    [1752775110.01] Block A - workflow 3 started
-    [1752775110.51] Block A - workflow 3 completed
-    [1752775111.01] Block A - workflow 4 started
-    [1752775111.51] Block A - workflow 4 completed
-    Processing Block A completed at 1752775111.52
+    [1753116817.42] WF1 started
+    [1753116817.42] WF1 started
+    [1753116817.43] task1 started
+    [1753116817.43] task2 started
+    [1753116817.43] task1 started
+    [1753116817.43] task2 started
+    [1753116817.93] task1 completed
+    [1753116817.93] task2 completed
+    [1753116817.93] task2 completed
+    [1753116817.93] task1 completed
+    [1753116818.93] task3 started
+    [1753116818.93] task3 started
+    [1753116819.43] task3 completed
+    [1753116819.43] task3 completed
+    [1753116819.46] WF1 completed
+    [1753116819.46] WF2 started
+    [1753116819.46] WF1 completed
+    [1753116819.46] WF2 started
+    [1753116819.47] task2 started
+    [1753116819.47] task1 started
+    [1753116819.47] task2 started
+    [1753116819.47] task1 started
+    [1753116819.97] task2 completed
+    [1753116819.97] task1 completed
+    [1753116819.97] task2 completed
+    [1753116819.97] task1 completed
+    [1753116820.97] task3 started
+    [1753116820.97] task3 started
+    [1753116821.47] task3 completed
+    [1753116821.47] task3 completed
+    [1753116821.50] WF2 completed
+    [1753116821.50] WF3 started
+    [1753116821.50] WF2 completed
+    [1753116821.50] WF3 started
+    [1753116821.50] task1 started
+    [1753116821.50] task2 started
+    [1753116821.50] task1 started
+    [1753116821.50] task2 started
+    [1753116822.00] task1 completed
+    [1753116822.00] task2 completed
+    [1753116822.00] task1 completed
+    [1753116822.00] task2 completed
+    [1753116823.00] task3 started
+    [1753116823.01] task3 started
+    [1753116823.51] task3 completed
+    [1753116823.51] task3 completed
+    [1753116823.53] WF3 completed
+    Processing Block B completed at 1753116823.53
+    [1753116823.53] WF3 completed
+    Processing Block A completed at 1753116823.53
+    [1753116823.55] WF1 started
+    [1753116823.56] task1 started
+    [1753116823.56] task2 started
+    [1753116824.06] task2 completed
+    [1753116824.06] task1 completed
+    [1753116825.06] task3 started
+    [1753116825.56] task3 completed
+    [1753116825.59] WF1 completed
+    [1753116825.59] WF2 started
+    [1753116825.59] task1 started
+    [1753116825.59] task2 started
+    [1753116826.10] task1 completed
+    [1753116826.10] task2 completed
+    [1753116827.10] task3 started
+    [1753116827.60] task3 completed
+    [1753116827.63] WF2 completed
+    [1753116827.63] WF3 started
+    [1753116827.63] task1 started
+    [1753116827.63] task2 started
+    [1753116828.13] task1 completed
+    [1753116828.13] task2 completed
+    [1753116829.13] task3 started
+    [1753116829.63] task3 completed
+    [1753116829.66] WF3 completed
+    Processing Block C completed at 1753116829.66
 
-    [1752775111.53] Block B - workflow 1 started
-    [1752775112.03] Block B - workflow 1 completed
-    [1752775112.04] Block B - workflow 2 started
-    [1752775112.54] Block B - workflow 2 completed
-    [1752775113.04] Block B - workflow 3 started
-    [1752775113.54] Block B - workflow 3 completed
-    [1752775114.04] Block B - workflow 4 started
-    [1752775114.54] Block B - workflow 4 completed
-    Processing Block B completed at 1752775114.55
-
-    [1752775114.56] Block C - workflow 1 started
-    [1752775115.06] Block C - workflow 1 completed
-    [1752775115.07] Block C - workflow 2 started
-    [1752775115.57] Block C - workflow 2 completed
-    [1752775116.07] Block C - workflow 3 started
-    [1752775116.57] Block C - workflow 3 completed
-    [1752775117.07] Block C - workflow 4 started
-    [1752775117.57] Block C - workflow 4 completed
-    Processing Block C completed at 1752775117.58
-
-    Total time running 1 DAG of 3 blocks is: 9.08s
+    Total time running asynchronously is: 12.25s
+    Shutdown is triggered, terminating the resources gracefully
     ```
 
 
