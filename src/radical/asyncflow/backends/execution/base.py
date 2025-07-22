@@ -110,17 +110,18 @@ class BaseExecutionBackend(ABC):
         """
         pass
 
-    def cancel_task(self, task_desc: dict):
+    @abstractmethod
+    def cancel_task(self, uid: str):
         """
         Cancel a task in the execution backend.
         
         Args:
-            task_desc: Dictionary containing task description including 'uid'
+            uid: Task identifier
             
         Raises:
             NotImplementedError: If the backend doesn't support cancellation
         """
-        raise NotImplementedError("Task cancellation not implemented in this backend")
+        raise NotImplementedError("Task cancellation not implemented in the base backend")
 
 
 class Session():

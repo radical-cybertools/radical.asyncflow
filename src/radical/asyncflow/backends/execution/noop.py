@@ -75,6 +75,9 @@ class NoopExecutionBackend(BaseExecutionBackend):
         """
         pass
 
+    def cancel_task(self, uid: str) -> None:
+        pass
+
     def submit_tasks(self, tasks):
         """Submit tasks for mock execution.
         
