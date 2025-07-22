@@ -13,7 +13,7 @@ from .base import BaseExecutionBackend, Session
 class DaskExecutionBackend(BaseExecutionBackend):
     """A robust Dask execution backend supporting both synchronous and asynchronous functions.
     
-    Handles task submission, and proper event loop handling
+    Handles task submission, cancellation, and proper event loop handling
     for distributed task execution using Dask.
     """
 
@@ -67,6 +67,21 @@ class DaskExecutionBackend(BaseExecutionBackend):
         """
         return StateMapper(backend=self)
 
+    def cancel_task(self, uid: str) -> None:
+        """Cancel a task by task descriptor.
+
+        Args:
+            task_desc: Either a task UID (string) or a task dictionary containing 'uid' key
+
+        Returns:
+            bool: True if task was found and cancellation was attempted, False otherwise
+        """
+        # Check if we have a Dask future for this task
+        if uid in self.tasks:
+            task = self.tasks[uid]
+            future = self.tasks[task['uid']]['future']
+            cancelled = future.cancel()
+
     def shutdown(self) -> None:
         """Shutdown the Dask client and clean up resources.
         
@@ -75,6 +90,10 @@ class DaskExecutionBackend(BaseExecutionBackend):
         """
         if self._client is not None:
             try:
+                # Cancel all pending tasks before shutdown
+                for task_uid in list(self.tasks.keys()):
+                    self.cancel_task(task_uid)
+
                 # Close the client
                 self._client.close()
                 print("Dask client shutdown complete")
@@ -144,16 +163,30 @@ class DaskExecutionBackend(BaseExecutionBackend):
             *args: Arguments to pass to the function.
         """
         def on_done(f: DaskFuture):
+            task_uid = task['uid']
             try:
                 result = f.result()
                 task['return_value'] = result
-                self._callback(task, 'DONE')
+                if self._callback:
+                    self._callback(task, 'DONE')
+            except dask.distributed.client.FutureCancelledError:
+                if self._callback:
+                    self._callback(task, 'CANCELED')
             except Exception as e:
                 task['exception'] = e
-                self._callback(task, 'FAILED')
+                if self._callback:
+                    self._callback(task, 'FAILED')
+            finally:
+                # Clean up the future reference once task is complete
+                if task_uid in self.tasks:
+                    del self.tasks[task_uid]
 
         dask_future = self._client.submit(fn, *args,
                                           **task['task_backend_specific_kwargs'])
+        
+        # Store the future for potential cancellation
+        self.tasks[task['uid']]['future'] = dask_future
+
         dask_future.add_done_callback(on_done)
 
     def _submit_async_function(self, task: Dict[str, Any]) -> None:
@@ -189,6 +222,36 @@ class DaskExecutionBackend(BaseExecutionBackend):
             return fn(*args, **kwargs)
 
         self._submit_to_dask(task, sync_wrapper, task['function'], task['args'], task['kwargs'])
+
+    def get_task_status(self, task_uid: str) -> Optional[str]:
+        """Get the current status of a task.
+        
+        Args:
+            task_uid: Unique identifier of the task
+            
+        Returns:
+            Status string if task exists and has a Dask future, None otherwise
+        """
+        if task_uid not in self.tasks:
+            return None
+        
+        dask_future = self.tasks[task_uid]
+        return dask_future.status
+
+    def cancel_all_tasks(self) -> int:
+        """Cancel all currently running/pending tasks.
+        
+        Returns:
+            Number of tasks that were successfully cancelled
+        """
+        cancelled_count = 0
+        task_uids = list(self.tasks.keys())
+        
+        for task_uid in task_uids:
+            if self.cancel_task(task_uid):
+                cancelled_count += 1
+        
+        return cancelled_count
 
     def link_explicit_data_deps(self, src_task=None, dst_task=None, file_name=None, file_path=None):
         """Handle explicit data dependencies between tasks.
