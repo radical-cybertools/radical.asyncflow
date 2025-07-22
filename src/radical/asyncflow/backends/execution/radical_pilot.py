@@ -151,7 +151,7 @@ class RadicalExecutionBackend(BaseExecutionBackend):
                 self.raptor_mode = True
                 print('Enabling Raptor mode for RadicalExecutionBackend')
                 self.setup_raptor_mode(raptor_config)
-            
+
             # register the backend task states to the global state manager
             StateMapper.register_backend_states(backend=self, 
                                                 done_state=rp.DONE,
@@ -547,6 +547,17 @@ class RadicalExecutionBackend(BaseExecutionBackend):
             _tasks.append(task_to_submit)
 
         return self.task_manager.submit_tasks(_tasks)
+
+    def cancel_task(self, uid: str):
+        """
+        Cancel a task in the execution backend.
+        
+        Args:
+            task_desc: Dictionary containing task description including 'uid'
+        """
+
+        if uid in self.tasks:
+            self.task_manager.cancel_tasks(uid)
 
     def get_nodelist(self):
         """Get information about allocated compute nodes.

@@ -110,6 +110,18 @@ class BaseExecutionBackend(ABC):
         """
         pass
 
+    def cancel_task(self, task_desc: dict):
+        """
+        Cancel a task in the execution backend.
+        
+        Args:
+            task_desc: Dictionary containing task description including 'uid'
+            
+        Raises:
+            NotImplementedError: If the backend doesn't support cancellation
+        """
+        raise NotImplementedError("Task cancellation not implemented in this backend")
+
 
 class Session():
     """Manages execution session state and working directory.
