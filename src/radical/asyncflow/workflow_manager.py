@@ -459,7 +459,23 @@ class WorkflowEngine:
 
         return comp_fut
 
-    def _setup_future_cancel_hook(self, fut, uid):
+    def _setup_future_cancel_hook(
+        self,
+        fut: Union[SyncFuture, AsyncFuture],
+        uid: str
+    ) -> Callable[..., Any]:
+        """Sets up a custom cancel hook for a future to enable backend cancellation.
+
+        Stores the original `cancel` method and overrides it with a patched version
+        that triggers task cancellation via the execution backend.
+
+        Args:
+            fut (Union[SyncFuture, AsyncFuture]): The future object to modify.
+            uid (str): The unique identifier for the task.
+
+        Returns:
+            Callable[..., Any]: The patched cancel function.
+        """
         orig_cancel = fut.cancel
 
         # to be used for tasks that are not submitted to the
@@ -467,8 +483,8 @@ class WorkflowEngine:
         fut.original_cancel = orig_cancel
 
         def patched_cancel(*args, **kwargs):
-            self.log.debug(f"Cancellation requested for {uid}")
-            self.backend.cancel_task(uid) # non-blocking
+            self.log.debug(f"Cancellation requested for {uid} from the execution backend")
+            self.backend.cancel_task(uid)  # non-blocking
 
         return patched_cancel
 
@@ -704,35 +720,24 @@ class WorkflowEngine:
                     cancelled_deps = []
 
                     for fut in dep_futures:
-                        if fut.cancelled():  # Check cancellation first
+                        if fut.cancelled():
                             cancelled_deps.append(fut)
-                        elif fut.exception() is not None:  # Then check for other exceptions
+                        elif fut.exception() is not None:
                             failed_deps.append(fut.exception())
 
-                    # Handle cancelled dependencies
-                    if cancelled_deps:
+                    # Handle dependency issues
+                    if cancelled_deps or failed_deps:
                         comp_desc = self.components[comp_uid]['description']
-                        self.log.info(f"Cancelling {comp_desc['name']} due to cancelled dependencies")
-                        
-                        # Cancel this component's future
-                        self.handle_task_cancellation(comp_desc, self.components[comp_uid]['future'])
 
-                        self.resolved.add(comp_uid)
-                        self._notify_dependents(comp_uid)
-                        continue
+                        if cancelled_deps:
+                            self.log.info(f"Cancelling {comp_desc['name']} due to cancelled dependencies")
+                            self.handle_task_cancellation(comp_desc, self.components[comp_uid]['future'])
+                        else:  # failed_deps
+                            chained_exception = self._create_dependency_failure_exception(comp_desc, failed_deps)
+                            self.log.error(f"Dependency failure for {comp_desc['name']}: {chained_exception}")
+                            self.handle_task_failure(comp_desc, self.components[comp_uid]['future'], chained_exception)
 
-                    # Handle failed dependencies
-                    if failed_deps:
-                        comp_desc = self.components[comp_uid]['description']
-                        
-                        # Create a comprehensive chained exception
-                        chained_exception = self._create_dependency_failure_exception(comp_desc, failed_deps)
-                        
-                        self.log.error(f"Dependency failure for {comp_desc['name']}: {chained_exception}")
-
-                        # Fail this component with the chained exception
-                        self.handle_task_failure(comp_desc, self.components[comp_uid]['future'], chained_exception)
-
+                        # Common cleanup
                         self.resolved.add(comp_uid)
                         self._notify_dependents(comp_uid)
                         continue
