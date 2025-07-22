@@ -34,17 +34,16 @@ class DaskExecutionBackend(BaseExecutionBackend):
 
     def initialize(self, resources) -> None:
         """Initialize the Dask client and set up worker environments.
-        
+
         Args:
             resources: Configuration parameters for Dask client initialization.
-            
+
         Raises:
             Exception: If Dask client initialization fails.
         """
         try:
             self._client = Client(**resources)
             # Ensure workers can handle async functions
-            #self._client.run(_setup_worker_event_loop)
             print(f"Dask backend initialized with dashboard at {self._client.dashboard_link}")
         except Exception as e:
             print(f"Failed to initialize Dask client: {str(e)}")
@@ -81,27 +80,6 @@ class DaskExecutionBackend(BaseExecutionBackend):
             task = self.tasks[uid]
             future = self.tasks[task['uid']]['future']
             cancelled = future.cancel()
-
-    def shutdown(self) -> None:
-        """Shutdown the Dask client and clean up resources.
-        
-        Closes the Dask client connection, clears task storage, and handles
-        any cleanup exceptions gracefully.
-        """
-        if self._client is not None:
-            try:
-                # Cancel all pending tasks before shutdown
-                for task_uid in list(self.tasks.keys()):
-                    self.cancel_task(task_uid)
-
-                # Close the client
-                self._client.close()
-                print("Dask client shutdown complete")
-            except Exception as e:
-                print(f"Error during shutdown: {str(e)}")
-            finally:
-                self._client = None
-                self.tasks.clear()
 
     def submit_tasks(self, tasks: List[Dict[str, Any]]) -> None:
         """Submit tasks to Dask cluster, handling both sync and async functions.
@@ -183,7 +161,7 @@ class DaskExecutionBackend(BaseExecutionBackend):
 
         dask_future = self._client.submit(fn, *args,
                                           **task['task_backend_specific_kwargs'])
-        
+
         # Store the future for potential cancellation
         self.tasks[task['uid']]['future'] = dask_future
 
@@ -222,21 +200,6 @@ class DaskExecutionBackend(BaseExecutionBackend):
             return fn(*args, **kwargs)
 
         self._submit_to_dask(task, sync_wrapper, task['function'], task['args'], task['kwargs'])
-
-    def get_task_status(self, task_uid: str) -> Optional[str]:
-        """Get the current status of a task.
-        
-        Args:
-            task_uid: Unique identifier of the task
-            
-        Returns:
-            Status string if task exists and has a Dask future, None otherwise
-        """
-        if task_uid not in self.tasks:
-            return None
-        
-        dask_future = self.tasks[task_uid]
-        return dask_future.status
 
     def cancel_all_tasks(self) -> int:
         """Cancel all currently running/pending tasks.
@@ -298,3 +261,19 @@ class DaskExecutionBackend(BaseExecutionBackend):
                 required for task construction.
         """
         pass
+
+    def shutdown(self) -> None:
+        """Shutdown the Dask client and clean up resources.
+        
+        Closes the Dask client connection, clears task storage, and handles
+        any cleanup exceptions gracefully.
+        """
+        if self._client is not None:
+            try:
+                self._client.close()
+                print("Dask client shutdown complete")
+            except Exception as e:
+                print(f"Error during shutdown: {str(e)}")
+            finally:
+                self._client = None
+                self.tasks.clear()
