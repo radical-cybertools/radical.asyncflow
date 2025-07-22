@@ -27,8 +27,8 @@ class DaskExecutionBackend(BaseExecutionBackend):
         """
         self.tasks = {}
         self._client = None
-        self._callback = None
         self.session = Session()
+        self._callback_func = None
         self.initialize(resources)
         StateMapper.register_backend_states_with_defaults(backend=self)
 
@@ -56,7 +56,7 @@ class DaskExecutionBackend(BaseExecutionBackend):
             callback: Function to be called when task states change. Should accept
                 task and state parameters.
         """
-        self._callback = callback
+        self._callback_func = callback
 
     def get_task_states_map(self):
         """Retrieve a mapping of task IDs to their current states.
@@ -109,7 +109,7 @@ class DaskExecutionBackend(BaseExecutionBackend):
             if not is_func_task and is_exec_task:
                 error_msg = 'DaskExecutionBackend does not support executable tasks'
                 task['stderr'] = ValueError(error_msg)
-                self._callback(task, 'FAILED')
+                self._callback_func(task, 'FAILED')
                 continue
 
             self.tasks[task['uid']] = task
@@ -145,15 +145,12 @@ class DaskExecutionBackend(BaseExecutionBackend):
             try:
                 result = f.result()
                 task['return_value'] = result
-                if self._callback:
-                    self._callback(task, 'DONE')
+                self._callback_func(task, 'DONE')
             except dask.distributed.client.FutureCancelledError:
-                if self._callback:
-                    self._callback(task, 'CANCELED')
+                self._callback_func(task, 'CANCELED')
             except Exception as e:
                 task['exception'] = e
-                if self._callback:
-                    self._callback(task, 'FAILED')
+                self._callback_func(task, 'FAILED')
             finally:
                 # Clean up the future reference once task is complete
                 if task_uid in self.tasks:
