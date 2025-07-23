@@ -485,6 +485,7 @@ class WorkflowEngine:
         def patched_cancel(*args, **kwargs):
             self.log.debug(f"Cancellation requested for {uid} from the execution backend")
             self.backend.cancel_task(uid)  # non-blocking
+            return True
 
         return patched_cancel
 
@@ -1011,6 +1012,7 @@ class WorkflowEngine:
         """
         if task_fut.done():
             self.log.warning(f'Attempted to handle an already failed task "{task["uid"]}"')
+            return
 
         internal_task = self.components[task['uid']]['description']
 
@@ -1038,8 +1040,11 @@ class WorkflowEngine:
     def handle_task_cancellation(self, task, task_fut):
         if task_fut.done():
             self.log.warning(f'Attempted to handle an already cancelled task "{task["uid"]}"')
-        
-        return task_fut.original_cancel()
+            return
+
+        # make sure to restore the original cancel back
+        task_fut.cancel = task_fut.original_cancel
+        return task_fut.cancel()
 
     @typeguard.typechecked
     def task_callbacks(self, task, state: str,
