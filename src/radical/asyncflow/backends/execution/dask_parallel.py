@@ -66,20 +66,21 @@ class DaskExecutionBackend(BaseExecutionBackend):
         """
         return StateMapper(backend=self)
 
-    def cancel_task(self, uid: str) -> None:
-        """Cancel a task by task descriptor.
+    def cancel_task(self, uid: str) -> bool:
+        """Cancel a task by its UID.
 
         Args:
-            task_desc: Either a task UID (string) or a task dictionary containing 'uid' key
+            uid (str): The UID of the task to cancel.
 
         Returns:
-            bool: True if task was found and cancellation was attempted, False otherwise
+            bool: True if the task was found and cancellation was attempted, False otherwise.
         """
-        # Check if we have a Dask future for this task
         if uid in self.tasks:
             task = self.tasks[uid]
-            future = self.tasks[task['uid']]['future']
-            cancelled = future.cancel()
+            future = task.get('future')
+            if future:
+                return future.cancel()
+        return False
 
     def submit_tasks(self, tasks: List[Dict[str, Any]]) -> None:
         """Submit tasks to Dask cluster, handling both sync and async functions.

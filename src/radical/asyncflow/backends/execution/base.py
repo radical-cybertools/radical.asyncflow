@@ -111,13 +111,13 @@ class BaseExecutionBackend(ABC):
         pass
 
     @abstractmethod
-    def cancel_task(self, uid: str):
+    def cancel_task(self, uid: str) -> bool:
         """
         Cancel a task in the execution backend.
-        
+
         Args:
             uid: Task identifier
-            
+
         Raises:
             NotImplementedError: If the backend doesn't support cancellation
         """

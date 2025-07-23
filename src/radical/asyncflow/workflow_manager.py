@@ -484,8 +484,8 @@ class WorkflowEngine:
 
         def patched_cancel(*args, **kwargs):
             self.log.debug(f"Cancellation requested for {uid} from the execution backend")
-            self.backend.cancel_task(uid)  # non-blocking
-            return True
+            response = self.backend.cancel_task(uid)  # non-blocking
+            return response
 
         return patched_cancel
 

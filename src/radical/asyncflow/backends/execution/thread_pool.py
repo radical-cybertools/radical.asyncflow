@@ -225,17 +225,24 @@ class ThreadExecutionBackend(BaseExecutionBackend):
 
         return task, state
 
-    def cancel_task(self, uid: str) -> None:
+    def cancel_task(self, uid: str) -> bool:
+        """
+        Cancel a task in the threadpool execution backend.
+        Task will only be cancelled if not yet submitted.
+
+        Args:
+            uid (str): The UID of the task to cancel.
+
+        Returns:
+            bool: True if the task was found and cancellation was attempted, False otherwise.
+        """
         if uid in self.tasks:
             task = self.tasks[uid]
-            future = self.tasks[task['uid']]['future']
-            is_cancelled = future.cancel()
-            if is_cancelled:
+            future = task['future']
+            if future.cancel():
                 self._callback_func(task, 'CANCELED')
-            else:
-                task['stderr'] = 'Can not cancel an already running future'
-                task['exception'] = 'Can not cancel an already running future'
-                self._callback_func(task, 'FAILED')
+                return True
+        return False
 
     def submit_tasks(self, tasks: list):
         """Submit multiple tasks for concurrent execution.

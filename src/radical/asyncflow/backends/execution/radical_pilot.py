@@ -548,16 +548,20 @@ class RadicalExecutionBackend(BaseExecutionBackend):
 
         return self.task_manager.submit_tasks(_tasks)
 
-    def cancel_task(self, uid: str):
+    def cancel_task(self, uid: str) -> bool:
         """
         Cancel a task in the execution backend.
-        
-        Args:
-            task_desc: Dictionary containing task description including 'uid'
-        """
 
+        Args:
+            uid (str): The UID of the task to cancel.
+
+        Returns:
+            bool: True if the task was found and cancellation was attempted, False otherwise.
+        """
         if uid in self.tasks:
             self.task_manager.cancel_tasks(uid)
+            return True
+        return False
 
     def get_nodelist(self):
         """Get information about allocated compute nodes.
