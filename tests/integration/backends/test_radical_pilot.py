@@ -213,7 +213,7 @@ async def test_async_cancel_one_of_many():
     with pytest.raises(asyncio.CancelledError):
         await t1
 
-    t2_result = await t2
-    assert int(t2_result) == 2
+    t2_res = await t2
+    assert int(t2_res.strip()) == 2
 
     await flow.shutdown()
