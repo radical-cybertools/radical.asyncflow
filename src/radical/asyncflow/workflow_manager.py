@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from collections import defaultdict, deque
 
 from pathlib import Path
-from typing import Callable, Optional, Union
+from typing import Callable, Optional, Union, Any
 
 import radical.utils as ru
 
@@ -455,7 +455,39 @@ class WorkflowEngine:
         self._update_dependency_tracking(comp_desc['uid'])
         self._component_change_event.set()
 
+        comp_fut.cancel = self._setup_future_cancel_hook(comp_fut, comp_desc['uid'])
+
         return comp_fut
+
+    def _setup_future_cancel_hook(
+        self,
+        fut: Union[SyncFuture, AsyncFuture],
+        uid: str
+    ) -> Callable[..., Any]:
+        """Sets up a custom cancel hook for a future to enable backend cancellation.
+
+        Stores the original `cancel` method and overrides it with a patched version
+        that triggers task cancellation via the execution backend.
+
+        Args:
+            fut (Union[SyncFuture, AsyncFuture]): The future object to modify.
+            uid (str): The unique identifier for the task.
+
+        Returns:
+            Callable[..., Any]: The patched cancel function.
+        """
+        orig_cancel = fut.cancel
+
+        # to be used for tasks that are not submitted to the
+        # execution backend yet.
+        fut.original_cancel = orig_cancel
+
+        def patched_cancel(*args, **kwargs):
+            self.log.debug(f"Cancellation requested for {uid} from the execution backend")
+            response = self.backend.cancel_task(uid)  # non-blocking
+            return response
+
+        return patched_cancel
 
     @staticmethod
     def shutdown_on_failure(func: Callable):
@@ -684,24 +716,34 @@ class WorkflowEngine:
                     # Verify dependencies are still met
                     dependencies = self.dependencies[comp_uid]
                     dep_futures = [self.components[dep['uid']]['future'] for dep in dependencies]
-                    failed_deps = [fut.exception() for fut in dep_futures if fut.exception() is not None]
 
-                    if failed_deps:
+                    failed_deps = []
+                    cancelled_deps = []
+
+                    for fut in dep_futures:
+                        if fut.cancelled():
+                            cancelled_deps.append(fut)
+                        elif fut.exception() is not None:
+                            failed_deps.append(fut.exception())
+
+                    # Handle dependency issues
+                    if cancelled_deps or failed_deps:
                         comp_desc = self.components[comp_uid]['description']
-                        
-                        # Create a comprehensive chained exception
-                        chained_exception = self._create_dependency_failure_exception(comp_desc, failed_deps)
-                        
-                        self.log.error(f"Dependency failure for {comp_desc['name']}: {chained_exception}")
 
-                        # Fail this component with the chained exception
-                        self.handle_task_failure(comp_desc, self.components[comp_uid]['future'], chained_exception)
+                        if cancelled_deps:
+                            self.log.info(f"Cancelling {comp_desc['name']} due to cancelled dependencies")
+                            self.handle_task_cancellation(comp_desc, self.components[comp_uid]['future'])
+                        else:  # failed_deps
+                            chained_exception = self._create_dependency_failure_exception(comp_desc, failed_deps)
+                            self.log.error(f"Dependency failure for {comp_desc['name']}: {chained_exception}")
+                            self.handle_task_failure(comp_desc, self.components[comp_uid]['future'], chained_exception)
 
+                        # Common cleanup
                         self.resolved.add(comp_uid)
                         self._notify_dependents(comp_uid)
                         continue
 
-                    # Prepare component for submission
+                    # Rest of the existing logic for successful dependencies...
                     comp_desc = self.components[comp_uid]['description']
 
                     # Handle data dependencies for tasks
@@ -728,13 +770,11 @@ class WorkflowEngine:
                                     explicit_files_to_stage.append(data_dep)
 
                         # Input staging data dependencies
-                        # Get all output files from dependencies to avoid staging files that are already linked
                         dependency_output_files = self._get_dependency_output_files(dependencies)
                         staged_targets = {Path(item['target']).name for item in explicit_files_to_stage}
                         
                         for input_file in comp_desc['metadata']['input_files']:
                             input_basename = Path(input_file).name
-                            # Only stage if the file is not already staged AND not an output from a dependency
                             if input_basename not in staged_targets and input_basename not in dependency_output_files:
                                 self.log.debug(f'Staging {input_file} to {comp_desc["name"]} work dir')
                                 data_dep = self.backend.link_explicit_data_deps(
@@ -791,6 +831,7 @@ class WorkflowEngine:
             except Exception as e:
                 self.log.exception(f"Error in run loop: {e}")
                 await asyncio.sleep(0.1)
+
 
     async def submit(self):
         """Manages asynchronous submission of tasks and blocks to the execution backend.
@@ -948,7 +989,7 @@ class WorkflowEngine:
             else:
                 task_fut.set_result(task['stdout'])
         else:
-            self.log.warning(f'Attempted to handle an already resolved task "{task["uid"]}"')
+            self.log.warning(f'Attempted to handle an already finished task "{task["uid"]}"')
 
     def handle_task_failure(self, task: dict, task_fut: Union[SyncFuture, AsyncFuture], 
                             override_error_message: Union[str, Exception] = None) -> None:
@@ -970,7 +1011,8 @@ class WorkflowEngine:
             None
         """
         if task_fut.done():
-            self.log.warning(f'Attempted to handle an already resolved task "{task["uid"]}"')
+            self.log.warning(f'Attempted to handle an already failed task "{task["uid"]}"')
+            return
 
         internal_task = self.components[task['uid']]['description']
 
@@ -994,6 +1036,15 @@ class WorkflowEngine:
                 exception = RuntimeError(str(original_error))
 
         task_fut.set_exception(exception)
+    
+    def handle_task_cancellation(self, task, task_fut):
+        if task_fut.done():
+            self.log.warning(f'Attempted to handle an already cancelled task "{task["uid"]}"')
+            return
+
+        # make sure to restore the original cancel back
+        task_fut.cancel = task_fut.original_cancel
+        return task_fut.cancel()
 
     @typeguard.typechecked
     def task_callbacks(self, task, state: str,
@@ -1075,7 +1126,7 @@ class WorkflowEngine:
                 task_fut.set_running_or_notify_cancel()
 
         elif state == self.task_states_map.CANCELED:
-            task_fut.cancel()
+            self.handle_task_cancellation(task_dct, task_fut)
 
         elif state == self.task_states_map.FAILED:
             self.handle_task_failure(task_dct, task_fut)

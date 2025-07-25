@@ -93,7 +93,7 @@ class ThreadExecutionBackend(BaseExecutionBackend):
             task_desc: Task description containing execution details.
             task_specific_kwargs: Task-specific keyword arguments.
         """
-        self.tasks[uid] = task_desc
+        pass
 
     def link_explicit_data_deps(self, src_task=None, dst_task=None, file_name=None, file_path=None):
         """Link explicit data dependencies between tasks.
@@ -225,6 +225,25 @@ class ThreadExecutionBackend(BaseExecutionBackend):
 
         return task, state
 
+    def cancel_task(self, uid: str) -> bool:
+        """
+        Cancel a task in the threadpool execution backend.
+        Task will only be cancelled if not yet submitted.
+
+        Args:
+            uid (str): The UID of the task to cancel.
+
+        Returns:
+            bool: True if the task was found and cancellation was attempted, False otherwise.
+        """
+        if uid in self.tasks:
+            task = self.tasks[uid]
+            future = task['future']
+            if future.cancel():
+                self._callback_func(task, 'CANCELED')
+                return True
+        return False
+
     def submit_tasks(self, tasks: list):
         """Submit multiple tasks for concurrent execution.
         
@@ -260,6 +279,8 @@ class ThreadExecutionBackend(BaseExecutionBackend):
             fut = self.executor.submit(self._task_wrapper, task,
                                        **task['task_backend_specific_kwargs'])
             fut.add_done_callback(lambda f, task=task: self._callback_func(*f.result()))
+            self.tasks[task['uid']] = task
+            self.tasks[task['uid']]['future'] = fut
 
     def shutdown(self) -> None:
         """Shutdown the backend and clean up resources.

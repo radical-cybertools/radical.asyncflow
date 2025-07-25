@@ -110,6 +110,19 @@ class BaseExecutionBackend(ABC):
         """
         pass
 
+    @abstractmethod
+    def cancel_task(self, uid: str) -> bool:
+        """
+        Cancel a task in the execution backend.
+
+        Args:
+            uid: Task identifier
+
+        Raises:
+            NotImplementedError: If the backend doesn't support cancellation
+        """
+        raise NotImplementedError("Task cancellation not implemented in the base backend")
+
 
 class Session():
     """Manages execution session state and working directory.
