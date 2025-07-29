@@ -314,7 +314,12 @@ class WorkflowEngine:
 
                 if 'task_description' in sig.parameters:
                     param = sig.parameters['task_description']
-                    if param.default is not inspect.Parameter.empty and isinstance(param.default, dict):
+                    if param.default is not inspect.Parameter.empty:
+                        if not isinstance(param.default, dict):
+                            raise TypeError(
+                                f"Default value for 'task_description' in function '{func.__name__}' "
+                                f"must be a dict, got {type(param.default).__name__}"
+                            )
                         task_description_def = param.default
 
                 # Store it for later access if needed (non-binding)
