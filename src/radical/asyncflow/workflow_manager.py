@@ -1,6 +1,7 @@
 # flake8: noqa
 import os
 import asyncio
+import inspect
 import threading
 from contextlib import contextmanager
 from collections import defaultdict, deque
@@ -270,7 +271,7 @@ class WorkflowEngine:
 
     def _register_decorator(self, comp_type: str, task_type: Optional[str] = None):
         """Creates a decorator factory for registering workflow components.
-
+        
         This method generates decorators that handle registration of tasks and
         blocks with optional task-specific descriptions. The generated
         decorators support both definition-time and invocation-time task
@@ -291,43 +292,69 @@ class WorkflowEngine:
             - Registering components using internal registration methods
 
         Example:
-            >>> @engine.function_task(task_description={'cores': 4})
+            >>> @engine.function_task(service=True, task_description={'cores': 4})
             ... def my_task():
             ...     pass
-
+            
             >>> my_task(task_description={'memory': '2GB'})  # Merges descriptions
         """
 
         def outer(possible_func: Union[Callable, None] = None, service: bool = False):
+            # Basic validation for service parameter
+            if not isinstance(service, bool):
+                raise TypeError(f"'service' must be a boolean, got {type(service).__name__}")
+
             def actual_decorator(func: Callable) -> Callable:
-                # Capture definition-time task_description from default args
-                task_description_def = func.__defaults__[0] if func.__defaults__ else {}
+                if not callable(func):
+                    raise TypeError(f"Expected a callable function, got {type(func).__name__}")
+
+                # --- Extract definition-time task_description (if any) ---
+                sig = inspect.signature(func)
+                task_description_def = {}
+
+                if 'task_description' in sig.parameters:
+                    param = sig.parameters['task_description']
+                    if param.default is not inspect.Parameter.empty and isinstance(param.default, dict):
+                        task_description_def = param.default
+
+                # Store it for later access if needed (non-binding)
                 setattr(func, '__task_description__', task_description_def)
 
                 @wraps(func)
                 def wrapped(*args, **kwargs):
-                    task_description_call = kwargs.pop("task_description", {}) or {}
+                    try:
+                        # Extract task_description from call-time kwargs (if any)
+                        task_description_call = kwargs.pop("task_description", {}) or {}
 
-                    task_description_final = {
-                        **getattr(func, '__task_description__', {}),
-                        **task_description_call}
+                        if not isinstance(task_description_call, dict):
+                            raise TypeError(f"Expected 'task_description' to be a dict, got {type(task_description_call)}")
 
-                    registered_func = self._handle_flow_component_registration(
-                        func,
-                        is_service=service,
-                        comp_type=comp_type,
-                        task_type=task_type,
-                        task_backend_specific_kwargs=task_description_final)
+                        # Merge call-time overrides over def-time defaults
+                        task_description_final = {
+                            **task_description_def,
+                            **task_description_call
+                        }
 
-                    return registered_func(*args, **kwargs)
+                        registered_func = self._handle_flow_component_registration(
+                            func,
+                            is_service=service,
+                            comp_type=comp_type,
+                            task_type=task_type,
+                            task_backend_specific_kwargs=task_description_final
+                        )
+
+                        return registered_func(*args, **kwargs)
+
+                    except Exception as e:
+                        # Add context to any errors that occur during registration/execution
+                        raise type(e)(f"Error in decorated function '{func.__name__}': {str(e)}") from e
 
                 return wrapped
 
-            # If used as @decorator
+            # Handle both @decorator and @decorator(...)
             if callable(possible_func):
                 return actual_decorator(possible_func)
 
-            # If used as @decorator(...)
             return actual_decorator
 
         return outer
