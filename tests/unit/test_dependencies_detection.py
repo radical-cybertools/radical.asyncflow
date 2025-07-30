@@ -1,10 +1,12 @@
+import pytest
+
 from radical.asyncflow import WorkflowEngine
 from radical.asyncflow import NoopExecutionBackend
 from radical.asyncflow.data import InputFile, OutputFile
 
-
-def test_detect_data_dependencies():
-    engine = WorkflowEngine(backend=NoopExecutionBackend())
+@pytest.mark.asyncio
+async def test_detect_data_dependencies():
+    engine = await WorkflowEngine.create(backend=NoopExecutionBackend())
     a = InputFile("a.txt")
     b = OutputFile("b.txt")
 
@@ -15,19 +17,20 @@ def test_detect_data_dependencies():
     assert 42 not in input_deps
     assert "string" not in input_deps
 
-
-def test_detect_task_dependencies():
-    engine = WorkflowEngine(backend=NoopExecutionBackend())
+@pytest.mark.asyncio
+async def test_detect_task_dependencies():
+    engine = await WorkflowEngine.create(backend=NoopExecutionBackend())
 
     @engine.function_task
-    def task1():
+    async def task1():
         return 1
     
     @engine.function_task
-    def task2():
+    async def task2():
         return 2
 
     task = task2(task1)
+    await task
 
     task_deps, _, _ = engine._detect_dependencies([task])
 

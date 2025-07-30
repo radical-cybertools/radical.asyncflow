@@ -12,7 +12,7 @@ async def test_flow_function_tasks():
     which is verified at the end of execution.
     """
     backend = ThreadExecutionBackend({})
-    flow = WorkflowEngine(backend=backend)
+    flow = await WorkflowEngine.create(backend=backend)
 
     # Shared state is passed and returned explicitly across tasks
     @flow.function_task
@@ -81,7 +81,7 @@ async def test_flow_executable_tasks(tmp_path):
     Final task output is used to validate execution order.
     """
     backend = ThreadExecutionBackend({})
-    flow = WorkflowEngine(backend=backend)
+    flow = await WorkflowEngine.create(backend=backend)
 
     # Define executable tasks that append their ID to a shared file
     @flow.executable_task
@@ -146,7 +146,7 @@ async def test_flow_mixed_function_and_executable_tasks(tmp_path):
     Function tasks modify state, while executable tasks log their invocation.
     """
     backend = ThreadExecutionBackend({})
-    flow = WorkflowEngine(backend=backend)
+    flow = await WorkflowEngine.create(backend=backend)
 
     # Function tasks
     @flow.function_task

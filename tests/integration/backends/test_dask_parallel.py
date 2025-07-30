@@ -11,7 +11,7 @@ from radical.asyncflow import DaskExecutionBackend
 async def flow():
     # Setup: create backend and flow
     backend = DaskExecutionBackend({'n_workers': 2, 'threads_per_worker': 1})
-    flow = WorkflowEngine(backend=backend)
+    flow = await WorkflowEngine.create(backend=backend)
     
     # provide the flow to the test
     yield flow

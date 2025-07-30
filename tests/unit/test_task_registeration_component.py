@@ -1,14 +1,13 @@
 import pytest
+import asyncio
 
 from radical.asyncflow import WorkflowEngine
 from radical.asyncflow import NoopExecutionBackend
-from radical.asyncflow.workflow_manager import SyncFuture
-from radical.asyncflow.workflow_manager import AsyncFuture
 from radical.asyncflow.workflow_manager import TASK, FUNCTION, BLOCK
 
 @pytest.mark.asyncio
 async def test_register_function_task():
-    engine = WorkflowEngine(backend=NoopExecutionBackend())
+    engine = await WorkflowEngine.create(backend=NoopExecutionBackend())
 
     @engine.function_task
     async def dummy_task(x):
@@ -26,7 +25,7 @@ async def test_register_function_task():
 
 @pytest.mark.asyncio
 async def test_handle_flow_component_registration_registers_function():
-    engine = WorkflowEngine(backend=NoopExecutionBackend())
+    engine = await WorkflowEngine.create(backend=NoopExecutionBackend())
 
     async def test_func(x): return x
 
@@ -40,9 +39,9 @@ async def test_handle_flow_component_registration_registers_function():
 
     assert callable(decorated)
 
-
-def test_register_component_adds_task_entry():
-    engine = WorkflowEngine(backend=NoopExecutionBackend())
+@pytest.mark.asyncio
+async def test_register_component_adds_task_entry():
+    engine = await WorkflowEngine.create(backend=NoopExecutionBackend())
 
     async def dummy():
         return "yo"
@@ -51,7 +50,7 @@ def test_register_component_adds_task_entry():
                  'args': (), 'kwargs': {}, 'executable': None}
 
     engine._register_component(
-        comp_fut=AsyncFuture(),
+        comp_fut=asyncio.Future(),
         comp_type=TASK,
         comp_desc=comp_desc
     )
@@ -64,7 +63,7 @@ def test_register_component_adds_task_entry():
 
 @pytest.mark.asyncio
 async def test_register_component_adds_block_entry():
-    engine = WorkflowEngine(backend=NoopExecutionBackend())
+    engine = await WorkflowEngine.create(backend=NoopExecutionBackend())
 
     async def dummy_task():
         return "dummy return value"
@@ -74,7 +73,7 @@ async def test_register_component_adds_block_entry():
                     'args': (), 'kwargs': {}, 'executable': None}    
         
         task_future = engine._register_component(
-            comp_fut=AsyncFuture(),
+            comp_fut=asyncio.Future(),
             comp_type=TASK,
             comp_desc=comp_desc)
             
@@ -84,7 +83,7 @@ async def test_register_component_adds_block_entry():
                  'args': (), 'kwargs': {}, 'executable': None}    
 
     block_future = engine._register_component(
-        comp_fut=AsyncFuture(),
+        comp_fut=asyncio.Future(),
         comp_type=BLOCK,
         comp_desc=comp_desc)
 
@@ -105,7 +104,7 @@ async def test_register_component_adds_block_entry():
 
 @pytest.mark.asyncio
 async def test_dynamic_task_backend_specific_kwargs():
-    engine = WorkflowEngine(backend=NoopExecutionBackend())
+    engine = await WorkflowEngine.create(backend=NoopExecutionBackend())
 
     @engine.function_task
     async def dummy_task(task_description={'ranks': 8}):

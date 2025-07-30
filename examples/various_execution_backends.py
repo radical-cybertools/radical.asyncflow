@@ -17,7 +17,7 @@ print("""
 def main():
     for backend, resource in backends.items():
         backend = backend(resource)
-        flow = WorkflowEngine(backend=backend)
+        flow = await WorkflowEngine.create(backend=backend)
 
         task = flow.executable_task
         if isinstance(backend, DaskExecutionBackend):
