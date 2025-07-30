@@ -427,7 +427,7 @@ class WorkflowEngine:
 
         def patched_cancel(*args, **kwargs):
             self.log.debug(f"Cancellation requested for {uid} from the execution backend")
-            response = self.backend.cancel_task(uid) # non-blocking
+            response = asyncio.create_task(self.backend.cancel_task(uid)) # non-blocking
             return response
 
         return patched_cancel
@@ -775,7 +775,7 @@ class WorkflowEngine:
                 self.log.debug(f'Submitting {[b["name"] for b in objects]} for execution')
 
                 if tasks:
-                    self.backend.submit_tasks(tasks)
+                    await self.backend.submit_tasks(tasks)
                 if blocks:
                     await self._submit_blocks(blocks)
 
@@ -1069,7 +1069,7 @@ class WorkflowEngine:
 
         # Shutdown execution backend
         if not skip_execution_backend and self.backend:
-            await self.loop.run_in_executor(None, self.backend.shutdown)
+            await self.backend.shutdown()
             self.log.debug("Shutting down execution backend")
         else:
             self.log.warning("Skipping execution backend shutdown as requested")
