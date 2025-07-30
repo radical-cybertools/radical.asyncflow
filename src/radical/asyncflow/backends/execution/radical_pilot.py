@@ -87,7 +87,7 @@ class RadicalExecutionBackend(BaseExecutionBackend):
                 "exit_on_error": True,
                 "cores": 4
             }
-            backend = RadicalExecutionBackend(resources)
+            backend = await RadicalExecutionBackend(resources)
             
             # With Raptor mode
             raptor_config = {
@@ -102,7 +102,7 @@ class RadicalExecutionBackend(BaseExecutionBackend):
                     }]
                 }]
             }
-            backend = RadicalExecutionBackend(resources, raptor_config)
+            backend = await RadicalExecutionBackend(resources, raptor_config)
     """
 
     @typeguard.typechecked
@@ -135,7 +135,23 @@ class RadicalExecutionBackend(BaseExecutionBackend):
             - Prints status messages for successful initialization or failures
             - Session UID is generated using radical.utils for uniqueness
         """
-        raptor_config = raptor_config or {}
+        self.resources = resources
+        self.raptor_config = raptor_config or {}
+        self._initialized = False
+
+    def __await__(self):
+        """Make RadicalExecutionBackend awaitable."""
+        return self._async_init().__await__()
+
+    async def _async_init(self):
+        """Async initialization that happens when awaited."""
+        if not self._initialized:
+            await self._initialize()
+            self._initialized = True
+        return self
+
+    async def _initialize(self) -> None:
+        """Initialize the Radical Pilot components."""
         try:
             self.tasks = {}
             self.raptor_mode = False
@@ -143,14 +159,14 @@ class RadicalExecutionBackend(BaseExecutionBackend):
                                                           mode=ru.ID_PRIVATE))
             self.task_manager = rp.TaskManager(self.session)
             self.pilot_manager = rp.PilotManager(self.session)
-            self.resource_pilot = self.pilot_manager.submit_pilots(rp.PilotDescription(resources))
+            self.resource_pilot = self.pilot_manager.submit_pilots(rp.PilotDescription(self.resources))
             self.task_manager.add_pilots(self.resource_pilot)
             self._callback_func: Callable[[Future], None] = lambda f: None
 
-            if raptor_config:
+            if self.raptor_config:
                 self.raptor_mode = True
                 print('Enabling Raptor mode for RadicalExecutionBackend')
-                self.setup_raptor_mode(raptor_config)
+                self.setup_raptor_mode(self.raptor_config)
 
             # register the backend task states to the global state manager
             StateMapper.register_backend_states(backend=self, 
@@ -514,7 +530,7 @@ class RadicalExecutionBackend(BaseExecutionBackend):
         else:
             dst_kwargs['pre_exec'] = commands
 
-    def submit_tasks(self, tasks: list):
+    async def submit_tasks(self, tasks: list):
         """Submit a list of tasks for execution.
 
         Processes a list of workflow tasks, builds RadicalPilot task descriptions,
@@ -540,7 +556,7 @@ class RadicalExecutionBackend(BaseExecutionBackend):
         for task in tasks:
             task_to_submit = self.build_task(task['uid'],
                           task, task['task_backend_specific_kwargs'])
-            
+
             if not task_to_submit:
                 continue
 
@@ -548,7 +564,7 @@ class RadicalExecutionBackend(BaseExecutionBackend):
 
         return self.task_manager.submit_tasks(_tasks)
 
-    def cancel_task(self, uid: str) -> bool:
+    async def cancel_task(self, uid: str) -> bool:
         """
         Cancel a task in the execution backend.
 
@@ -609,7 +625,7 @@ class RadicalExecutionBackend(BaseExecutionBackend):
         """
         raise NotImplementedError
 
-    def shutdown(self) -> None:
+    async def shutdown(self) -> None:
         """Gracefully shutdown the backend and clean up resources.
 
         Closes the RadicalPilot session with data download, ensuring proper
@@ -622,3 +638,19 @@ class RadicalExecutionBackend(BaseExecutionBackend):
         """
         print('Shutdown is triggered, terminating the resources gracefully')
         self.session.close(download=True)
+
+    async def __aenter__(self):
+        """Async context manager entry."""
+        if not self._initialized:
+            await self._async_init()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Async context manager exit."""
+        await self.shutdown()
+
+    @classmethod
+    async def create(cls, resources: Dict, raptor_config: Optional[Dict] = None):
+        """Alternative factory method for creating initialized backend."""
+        backend = cls(resources, raptor_config)
+        return await backend

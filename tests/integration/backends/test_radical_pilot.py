@@ -1,34 +1,39 @@
 import pytest
 import asyncio
+import pytest_asyncio
+from radical.asyncflow import (
+    WorkflowEngine,
+    OutputFile,
+    InputFile,
+    RadicalExecutionBackend,
+)
 
-from radical.asyncflow import WorkflowEngine
-from radical.asyncflow import OutputFile, InputFile
-from radical.asyncflow import RadicalExecutionBackend
-
-backend = RadicalExecutionBackend({'resource': 'local.localhost'})
+@pytest_asyncio.fixture(scope="module")
+async def backend():
+    """Initialize RadicalExecutionBackend once for all tests."""
+    be = await RadicalExecutionBackend({'resource': 'local.localhost'})
+    yield be
+    await be.shutdown()
 
 @pytest.mark.asyncio
-async def test_async_bag_of_tasks():
+async def test_async_bag_of_tasks(backend):
     flow = await WorkflowEngine.create(backend=backend)
 
     @flow.executable_task
     async def echo_task(i):
         return f'/bin/echo "Task {i} executed at" && /bin/date'
 
-    # Create a bag of independent tasks
     bag_size = 10
     tasks = [echo_task(i) for i in range(bag_size)]
-
-    # Await all tasks in parallel
     results = await asyncio.gather(*tasks)
 
     assert len(results) == bag_size
     for i, result in enumerate(results):
-        assert result is not None, f"Task {i} returned None"
-        assert isinstance(result, str) or isinstance(result, bytes)
+        assert result is not None
+        assert isinstance(result, (str, bytes))
 
 @pytest.mark.asyncio
-async def test_radical_backend_reject_service_task_function():
+async def test_radical_backend_reject_service_task_function(backend):
     flow = await WorkflowEngine.create(backend=backend)
 
     with pytest.raises(ValueError, match="RadicalExecutionBackend does not support function service tasks"):
@@ -36,13 +41,12 @@ async def test_radical_backend_reject_service_task_function():
         async def bad_task2():
             return True
 
-        not_supported_task2 = bad_task2()
-        await not_supported_task2
+        await bad_task2()
 
     await flow.shutdown(skip_execution_backend=True)
 
 @pytest.mark.asyncio
-async def test_radical_backend_reject_function_task_with_raptor_off():
+async def test_radical_backend_reject_function_task_with_raptor_off(backend):
     flow = await WorkflowEngine.create(backend=backend)
 
     with pytest.raises(RuntimeError):
@@ -50,14 +54,12 @@ async def test_radical_backend_reject_function_task_with_raptor_off():
         async def bad_task3():
             return True
 
-        not_supported_task3 = bad_task3()
-        await not_supported_task3
+        await bad_task3()
 
-    # the last test will shutdown everything
     await flow.shutdown(skip_execution_backend=True)
 
 @pytest.mark.asyncio
-async def test_radical_backend_implicit_data():
+async def test_radical_backend_implicit_data(backend):
     flow = await WorkflowEngine.create(backend=backend)
 
     @flow.executable_task
@@ -72,11 +74,10 @@ async def test_radical_backend_implicit_data():
     t2 = task2(t1)
 
     assert await t2 == 'This is a file from task1\n'
-
     await flow.shutdown(skip_execution_backend=True)
 
 @pytest.mark.asyncio
-async def test_radical_backend_explicit_data():
+async def test_radical_backend_explicit_data(backend):
     flow = await WorkflowEngine.create(backend=backend)
 
     @flow.executable_task
@@ -91,11 +92,10 @@ async def test_radical_backend_explicit_data():
     t2 = task2(t1, InputFile('t1_output.txt'))
 
     assert await t2 == 'This is a file from task1\n'
-
     await flow.shutdown(skip_execution_backend=True)
 
 @pytest.mark.asyncio
-async def test_radical_backend_input_data_staging():
+async def test_radical_backend_input_data_staging(backend):
     flow = await WorkflowEngine.create(backend=backend)
 
     with open('t1_input.txt', 'w') as f:
@@ -108,11 +108,10 @@ async def test_radical_backend_input_data_staging():
     t1 = task1(InputFile('t1_input.txt'))
 
     assert await t1 == 'This is a file staged in to task1\n'
-
     await flow.shutdown(skip_execution_backend=True)
 
 @pytest.mark.asyncio
-async def test_async_cancel_tasks():
+async def test_async_cancel_tasks(backend):
     flow = await WorkflowEngine.create(backend=backend)
 
     @flow.executable_task
@@ -133,8 +132,7 @@ async def test_async_cancel_tasks():
         await t2
 
 @pytest.mark.asyncio
-async def test_async_cancel_before_start():
-    """Cancel a task before it even schedules."""
+async def test_async_cancel_before_start(backend):
     flow = await WorkflowEngine.create(backend=backend)
 
     @flow.executable_task
@@ -145,43 +143,34 @@ async def test_async_cancel_before_start():
     async def fast_task():
         return '/bin/echo "done"'
 
-    t1 = slow_task()   # occupies worker
-    t2 = slow_task()   # queued
+    t1 = slow_task()
+    t2 = slow_task()
 
     await asyncio.sleep(1)
+    t2.cancel()
 
-    t2.cancel()  # cancel before it starts
-
-    # Let t1 finish
     await t1
-
     with pytest.raises(asyncio.CancelledError):
         await t2
 
 @pytest.mark.asyncio
-async def test_async_cancel_after_completion():
-    """Cancel a task after it already completed — no effect."""
+async def test_async_cancel_after_completion(backend):
     flow = await WorkflowEngine.create(backend=backend)
-    
+
     @flow.executable_task
     async def quick_task():
         return "/bin/echo 'done'"
 
     t = quick_task()
     result = await t
-
     assert result.strip() == "done"
 
-    # Cancel after done — should not throw
     t.cancel()
-
-    # Still returns the result
     t_result = await t
     assert t_result.strip() == "done"
 
 @pytest.mark.asyncio
-async def test_async_cancel_one_of_many():
-    """Cancel one task out of many — others should not be affected."""
+async def test_async_cancel_one_of_many(backend):
     flow = await WorkflowEngine.create(backend=backend)
 
     @flow.executable_task

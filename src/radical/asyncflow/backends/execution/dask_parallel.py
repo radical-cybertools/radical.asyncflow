@@ -169,7 +169,6 @@ class DaskExecutionBackend(BaseExecutionBackend):
                 task['return_value'] = result
                 self._callback_func(task, 'DONE')
             except dask.distributed.client.FutureCancelledError:
-                print('GOT CANCELLAED')
                 self._callback_func(task, 'CANCELED')
             except Exception as e:
                 task['exception'] = e

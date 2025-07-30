@@ -1,9 +1,13 @@
+import asyncio
+
 from radical.asyncflow import WorkflowEngine
 from radical.asyncflow import RadicalExecutionBackend
 from radical.asyncflow import DaskExecutionBackend
-from radical.asyncflow import ThreadExecutionBackend
+from radical.asyncflow import ConcurrentExecutionBackend
 
-backends= {ThreadExecutionBackend : {'max_workers': 4},
+from concurrent.futures import ThreadPoolExecutor
+
+backends= {ConcurrentExecutionBackend : ThreadPoolExecutor(max_workers=4),
            RadicalExecutionBackend: {'resource': 'local.localhost'},
            DaskExecutionBackend   : {'n_workers': 2, 'threads_per_worker': 1}}
 
@@ -14,9 +18,9 @@ print("""
              \\       /
                task3      <---- running last\n""")
 
-def main():
+async def main():
     for backend, resource in backends.items():
-        backend = backend(resource)
+        backend = await backend(resource)
         flow = await WorkflowEngine.create(backend=backend)
 
         task = flow.executable_task
@@ -24,22 +28,22 @@ def main():
             task = flow.function_task
         
         @task
-        def task1(*args):
+        async def task1(*args):
             return '/bin/date'
 
         @task
-        def task2(*args):
+        async def task2(*args):
             return '/bin/date'
 
         @task
-        def task3(*args):
+        async def task3(*args):
             return '/bin/date'
 
         t3 = task3(task1(), task2())
 
-        print(t3.result())
+        print(await t3)
 
-        flow.shutdown()
+        await flow.shutdown()
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

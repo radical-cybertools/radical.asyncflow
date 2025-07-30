@@ -7,12 +7,13 @@ from concurrent.futures import Future as SyncFuture
 
 from radical.asyncflow.errors import DependencyFailure
 from radical.asyncflow import WorkflowEngine
-from radical.asyncflow import ThreadExecutionBackend
+from radical.asyncflow import ConcurrentExecutionBackend
 
+from concurrent.futures import ThreadPoolExecutor
 
 @pytest_asyncio.fixture
 async def flow():
-    backend = ThreadExecutionBackend({})
+    backend = await ConcurrentExecutionBackend(ThreadPoolExecutor())
     flow = await WorkflowEngine.create(backend=backend)
     yield flow
     await asyncio.sleep(0)  # allow any pending tasks to finish
