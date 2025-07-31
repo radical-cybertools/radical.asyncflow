@@ -108,7 +108,7 @@ nav:
   - Best Practices: 
       - Best Practices: best_practice.md
   - Workflows:
-      - Asynchronous Workflows: async_sync.md
+      - Asynchronous Workflows: async_workflows.md
       - Execution Backends: exec_backends.md
 
   - Composite Workflows: composite_workflow.md
