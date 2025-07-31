@@ -65,7 +65,7 @@ class DaskExecutionBackend(BaseExecutionBackend):
 
     def register_callback(self, callback: Callable) -> None:
         """Register a callback for task state changes.
-        
+
         Args:
             callback: Function to be called when task states change. Should accept
                 task and state parameters.
@@ -74,7 +74,7 @@ class DaskExecutionBackend(BaseExecutionBackend):
 
     def get_task_states_map(self):
         """Retrieve a mapping of task IDs to their current states.
-        
+
         Returns:
             StateMapper: Object containing the mapping of task states for this backend.
         """
@@ -142,12 +142,9 @@ class DaskExecutionBackend(BaseExecutionBackend):
             # Filter out future objects as they are not picklable
             task['args'] = tuple(arg for arg in task['args'] if not isinstance(arg,
                                                (ConcurrentFuture, asyncio.Future)))
-
             try:
                 await self._submit_async_function(task)
-                print(f"Successfully submitted async task {task['uid']}")
             except Exception as e:
-                print(f"Failed to submit task {task['uid']}: {str(e)}")
                 task['exception'] = e
                 await self._callback_func(task, 'FAILED')
 

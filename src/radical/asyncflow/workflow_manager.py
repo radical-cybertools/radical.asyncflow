@@ -59,7 +59,7 @@ class WorkflowEngine:
 
         # Store backend (already validated by create method)
         self.backend = backend
-        
+
         # Initialize core attributes
         self.running = []
         self.components = {}
@@ -101,29 +101,28 @@ class WorkflowEngine:
                      dry_run: bool = False, implicit_data: bool = True) -> 'WorkflowEngine':
         """
         Factory method to create and initialize a WorkflowEngine.
-        
+
         Args:
             backend: Execution backend. If None and dry_run=True, uses NoopExecutionBackend
             dry_run: Whether to run in dry-run mode
             implicit_data: Whether to enable implicit data dependency linking
-            
+
         Returns:
             WorkflowEngine: Fully initialized workflow engine
-            
+
         Example:
             engine = await WorkflowEngine.create(dry_run=True)
         """
         # Setup and validate backend first
         validated_backend = cls._setup_execution_backend(backend, dry_run)
-        
+
         # Create instance with validated backend
         instance = cls(backend=validated_backend, dry_run=dry_run, implicit_data=implicit_data)
-        
+
         # Initialize async components
         await instance._start_async_components()
 
         return instance
-
 
     @staticmethod
     def _setup_execution_backend(backend: Optional[BaseExecutionBackend], 
@@ -147,7 +146,7 @@ class WorkflowEngine:
     def _update_dependency_tracking(self, comp_uid: str):
         """Update dependency tracking structures for a component."""
         dependencies = self.dependencies[comp_uid]
-        
+
         # Count unresolved dependencies
         unresolved_count = 0
         for dep in dependencies:
@@ -156,9 +155,9 @@ class WorkflowEngine:
                 unresolved_count += 1
                 # Track reverse dependencies
                 self._dependents_map[dep_uid].add(comp_uid)
-        
+
         self._dependency_count[comp_uid] = unresolved_count
-        
+
         # If no dependencies, add to ready queue
         if unresolved_count == 0:
             self._ready_queue.append(comp_uid)
@@ -175,7 +174,7 @@ class WorkflowEngine:
             task_type (Optional[str]): The specific task type for task components 
                 (e.g., "executable", "function"). Not used for block components.
                 Defaults to None.
-        
+
         Returns:
             Callable: A decorator factory function that accepts optional parameters:
                 - possible_func (Union[Callable, None]): The function to decorate, or None
@@ -262,7 +261,7 @@ class WorkflowEngine:
                         return registered_func(*args, **kwargs)
 
                     except Exception as e:
-                                                # Add context to any errors that occur during registration/execution
+                        # Add context to any errors that occur during registration/execution
                         raise type(e)(f"Error in decorated function '{func.__name__}': {str(e)}") from e
 
                 return wrapped
@@ -369,7 +368,7 @@ class WorkflowEngine:
         comp_desc['uid'] = self._assign_uid(prefix=comp_type)
 
         comp_desc[FUNCTION] = None if task_type == EXECUTABLE else comp_desc[FUNCTION]
-        
+
         if comp_desc[EXECUTABLE] and not isinstance(comp_desc[EXECUTABLE], str):
             error_msg = f"Executable task must return a string, got {type(comp_desc[EXECUTABLE])}"
             raise ValueError(error_msg)
@@ -427,8 +426,13 @@ class WorkflowEngine:
 
         def patched_cancel(*args, **kwargs):
             self.log.debug(f"Cancellation requested for {uid} from the execution backend")
-            response = asyncio.create_task(self.backend.cancel_task(uid)) # non-blocking
-            return response
+            asyncio.create_task(self.backend.cancel_task(uid)) # fire and forget (non-blocking)
+
+            # NOTE: Returning True means cancellation was requested/scheduled, not guaranteed.
+            # This follows asyncio.Future.cancel() behavior, which is best-effort.
+            # Actual cancellation is handled asynchronously by the backend and delivered to the
+            # WorkflowEngine via callbacks only.
+            return True
 
         return patched_cancel
 
@@ -515,11 +519,11 @@ class WorkflowEngine:
         """
         Create a DependencyFailure exception that shows both the immediate failure
         and the root cause from failed dependencies.
-        
+
         Args:
             comp_desc (dict): Description of the component that cannot execute
             failed_deps (list): List of exceptions from failed dependencies
-            
+
         Returns:
             DependencyFailure: Exception with detailed failure information
         """
@@ -546,10 +550,10 @@ class WorkflowEngine:
     def _get_dependency_output_files(self, dependencies):
         """
         Helper method to get all output files from dependencies.
-        
+
         Args:
             dependencies: List of dependency descriptions
-            
+
         Returns:
             set: Set of output file names from all dependencies
         """
@@ -672,7 +676,7 @@ class WorkflowEngine:
                         # Input staging data dependencies
                         dependency_output_files = self._get_dependency_output_files(dependencies)
                         staged_targets = {Path(item['target']).name for item in explicit_files_to_stage}
-                        
+
                         for input_file in comp_desc['metadata']['input_files']:
                             input_basename = Path(input_file).name
                             if input_basename not in staged_targets and input_basename not in dependency_output_files:
@@ -932,7 +936,7 @@ class WorkflowEngine:
                 exception = RuntimeError(str(original_error))
 
         task_fut.set_exception(exception)
-    
+
     def handle_task_cancellation(self, task: dict, task_fut: asyncio.Future):
         """Handle task cancellation."""
         if task_fut.done():

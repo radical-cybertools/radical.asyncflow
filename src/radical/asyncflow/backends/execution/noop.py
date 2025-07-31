@@ -75,10 +75,10 @@ class NoopExecutionBackend(BaseExecutionBackend):
         """
         pass
 
-    def cancel_task(self, uid: str) -> None:
+    async def cancel_task(self, uid: str) -> None:
         pass
 
-    def submit_tasks(self, tasks):
+    async def submit_tasks(self, tasks):
         """Submit tasks for mock execution.
         
         Immediately marks all tasks as completed with dummy output without
@@ -119,7 +119,7 @@ class NoopExecutionBackend(BaseExecutionBackend):
         """
         pass
 
-    def shutdown(self) -> None:
+    async def shutdown(self) -> None:
         """Shutdown the no-op execution backend.
         
         Performs cleanup operations. Since this is a no-op backend, no actual

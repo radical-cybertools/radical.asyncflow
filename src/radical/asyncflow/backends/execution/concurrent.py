@@ -115,31 +115,42 @@ class ConcurrentExecutionBackend(BaseExecutionBackend):
 
         self._callback_func(result_task, state)
 
-    async def submit_tasks(self, tasks: List[Dict]) -> List[asyncio.Task]:
+    async def submit_tasks(self, tasks: List[Dict[str, Any]]) -> List[asyncio.Task]:
         """Submit tasks for execution."""
         submitted_tasks = []
 
         for task in tasks:
-            task_uid = task.get('uid', f'task_{id(task)}')
-            async_task = asyncio.create_task(self._handle_task(task))
-            self.tasks[task_uid] = async_task
-            submitted_tasks.append(async_task)
+            future = asyncio.create_task(self._handle_task(task))
+            submitted_tasks.append(future)
+
+            self.tasks[task['uid']] = task
+            self.tasks[task['uid']]['future'] = future
 
         return submitted_tasks
 
     async def cancel_task(self, uid: str) -> bool:
-        """Cancel a task by UID."""
+        """Cancel a task by its UID.
+
+        Args:
+            uid (str): The UID of the task to cancel.
+
+        Returns:
+            bool: True if the task was found and cancellation was attempted, False otherwise.
+        """
         if uid in self.tasks:
-            self.tasks[uid].cancel()
-            self._callback_func(task, 'CANCELED')
-            return True
+            task = self.tasks[uid]
+            future = task['future']
+            if future and future.cancel():
+                self._callback_func(task, 'CANCELED')
+                return True
         return False
 
     async def cancel_all_tasks(self) -> int:
         """Cancel all running tasks."""
         cancelled_count = 0
         for task in self.tasks.values():
-            task.cancel()
+            future = task['future']
+            future.cancel()
             cancelled_count += 1
         self.tasks.clear()
         return cancelled_count
@@ -151,7 +162,7 @@ class ConcurrentExecutionBackend(BaseExecutionBackend):
         print('Shutdown complete')
 
     def build_task(self, uid, task_desc, task_specific_kwargs):
-        self.tasks[uid] = task_desc
+        pass
     
     def link_explicit_data_deps(self, src_task=None, dst_task=None, file_name=None, file_path=None):
         pass
