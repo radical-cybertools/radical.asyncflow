@@ -4,7 +4,7 @@ from radical.asyncflow import WorkflowEngine
 from radical.asyncflow import InputFile, OutputFile
 from radical.asyncflow import RadicalExecutionBackend
 
-async def main()
+async def main():
     backend = await RadicalExecutionBackend({'resource': 'local.localhost'})
     flow = await WorkflowEngine.create(backend=backend)
 
