@@ -73,3 +73,10 @@ async def main():
 if __name__ == "__main__":
     asyncio.run(main())
 ```
+
+## What AsyncFlow Can Be Used For
+
+- AI & LLM Workflows - Build complex AI agent systems and orchestrate multiple language model calls with automatic dependency resolution in parallel.
+- Data Processing Pipelines - Create data science pipelines, and real-time analytics with async task coordination.
+- High-Performance Computing - Execute scientific computing workflows and distributed simulations on HPC clusters with scaling.
+- Cross-Platform Execution - Deploy the same workflows locally for development, or HPC infrastructure without code changes
