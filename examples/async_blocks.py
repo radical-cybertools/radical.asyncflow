@@ -6,8 +6,8 @@ from radical.asyncflow import RadicalExecutionBackend
 
 async def main():
     # Create backend and workflow
-    backend = RadicalExecutionBackend({'resource': 'local.localhost'})
-    flow = WorkflowEngine(backend=backend)
+    backend = await RadicalExecutionBackend({'resource': 'local.localhost'})
+    flow = await WorkflowEngine.create(backend=backend)
 
     @flow.executable_task
     async def task1(*args):

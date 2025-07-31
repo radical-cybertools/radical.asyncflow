@@ -21,21 +21,25 @@ graph TD
 
 ```
 
+!!! note
+`Block` entity can have DAG shaped workflows where some workflows depends on others. 
 
 ## Example: Independent Blocks
 
-Below is a full working example using `ThreadExecutionBackend` and Python's asyncio to execute three blocks in parallel, each with four dependent steps.
+Below is a full working example using `ConcurrentExecutionBackend` and Python's asyncio to execute three blocks in parallel, each with four dependent steps.
 
 ### Setup
 
 ```python
 import time
 import asyncio
-from radical.asyncflow import ThreadExecutionBackend
+from radical.asyncflow import ConcurrentExecutionBackend
 from radical.asyncflow import WorkflowEngine
 
-backend = ThreadExecutionBackend({'max_workers': 4})
-asyncflow = WorkflowEngine(backend=backend)
+from concurrent.futures import ThreadPoolExecutor
+
+backend = await ConcurrentExecutionBackend(ThreadPoolExecutor())
+asyncflow = await WorkflowEngine.create(backend=backend)
 ```
 
 ### Define Tasks
@@ -120,7 +124,7 @@ await asyncflow.shutdown() # (2)!
 
 ??? "Execution log"
     ```text
-    ThreadPool execution backend started successfully
+    Concurrent execution backend started successfully
     [1753116467.34] WF1 started
     [1753116467.34] WF1 started
     [1753116467.34] WF1 started
@@ -225,7 +229,7 @@ await block3
 
 ??? "Execution log"
     ```text
-    ThreadPool execution backend started successfully
+    Concurrent execution backend started successfully
     [1753116817.42] WF1 started
     [1753116817.42] WF1 started
     [1753116817.43] task1 started
@@ -311,4 +315,4 @@ await block3
 Do not forget to `await asyncflow.shutdown()` when you are done — otherwise, resources may remain allocated.
 
 !!! tip
-You can replace `ThreadExecutionBackend` with `RadicalExecutionBackend` if you want to run on an HPC cluster instead of local threads.
+You can replace `ConcurrentExecutionBackend` with `RadicalExecutionBackend` if you want to run on an HPC cluster instead of local threads/processes.

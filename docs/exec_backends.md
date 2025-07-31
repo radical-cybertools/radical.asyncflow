@@ -14,13 +14,15 @@ By design, AsyncFlow enforces that the execution backend should be entirely isol
 
 ## Local vs HPC Execution: A Side-by-Side Comparison
 
-### Local Execution with ThreadExecutionBackend
+### Local Execution with ConcurrentExecutionBackend
 
 ```python
 # Local execution with threads
-from radical.asyncflow import ThreadExecutionBackend
 
-backend = ThreadExecutionBackend({})
+from concurrent.futures import ThreadPoolExecutor
+from radical.asyncflow import ConcurrentExecutionBackend
+
+backend = ConcurrentExecutionBackend(ThreadPoolExecutor())
 ```
 
 ### HPC Execution with RadicalExecutionBackend
@@ -124,14 +126,12 @@ await flow.shutdown()
 
 ??? "HPC execution log"
     ```text
-    RadicalExecutionBackend: Connecting to HPC resource 'local.localhost'
+    RadicalExecutionBackend started
     Starting workflow 0 at 1752775108.50
     Starting workflow 1 at 1752775108.50
     Starting workflow 2 at 1752775108.50
     Starting workflow 3 at 1752775108.50
     Starting workflow 4 at 1752775108.50
-    RadicalExecutionBackend: Submitting tasks to compute nodes
-    RadicalExecutionBackend: Task execution distributed across available nodes
     Workflow 0 completed at 1752775110.25
     Workflow 1 completed at 1752775110.26
     Workflow 2 completed at 1752775110.27
@@ -144,7 +144,7 @@ await flow.shutdown()
 
 ## HPC vs Local Development: Key Differences
 
-| Aspect | ThreadExecutionBackend | RadicalExecutionBackend |
+| Aspect | ConcurrentExecutionBackend | RadicalExecutionBackend |
 |--------|---------------------------|-------------------------|
 | **Scale** | Single machine, limited cores | Thousands of nodes, massive parallelism |
 | **Memory** | Local system RAM | Distributed memory across nodes |
@@ -194,7 +194,7 @@ backend = RadicalExecutionBackend({
 **Engineering Simulation**: Run computational fluid dynamics, finite element analysis, or structural optimization across distributed computing resources.
 
 !!! tip
-**Development Strategy**: Start with `ThreadExecutionBackend` for local development and testing, then seamlessly switch to `RadicalExecutionBackend` for production HPC runs.
+**Development Strategy**: Start with `ConcurrentExecutionBackend` for local development and testing, then seamlessly switch to `RadicalExecutionBackend` for production HPC runs.
 
 ## The AsyncFlow Advantage
 

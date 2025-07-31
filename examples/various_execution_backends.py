@@ -1,45 +1,52 @@
+import asyncio
+
+from concurrent.futures import ThreadPoolExecutor
+
 from radical.asyncflow import WorkflowEngine
-from radical.asyncflow import RadicalExecutionBackend
 from radical.asyncflow import DaskExecutionBackend
-from radical.asyncflow import ThreadExecutionBackend
+from radical.asyncflow import RadicalExecutionBackend
+from radical.asyncflow import ConcurrentExecutionBackend
 
-backends= {ThreadExecutionBackend : {'max_workers': 4},
-           RadicalExecutionBackend: {'resource': 'local.localhost'},
-           DaskExecutionBackend   : {'n_workers': 2, 'threads_per_worker': 1}}
-
-
-print('Running 1-layer funnel DAG workflow with each backend\n')
-print("""
-         task1      task2 <---- running in parallel 1st
-             \\       /
-               task3      <---- running last\n""")
-
-def main():
+async def main(backends):
     for backend, resource in backends.items():
-        backend = backend(resource)
-        flow = WorkflowEngine(backend=backend)
+        backend = await backend(resource)
+        flow = await WorkflowEngine.create(backend=backend)
 
         task = flow.executable_task
         if isinstance(backend, DaskExecutionBackend):
             task = flow.function_task
-        
+
         @task
-        def task1(*args):
+        async def task1(*args):
+            return '/bin/sleep 10'
+
+        @task
+        async def task2(*args):
             return '/bin/date'
 
         @task
-        def task2(*args):
+        async def task3(*args):
             return '/bin/date'
 
-        @task
-        def task3(*args):
-            return '/bin/date'
+        t1 = task1()
+        t2 = task2()
+        t3 = await task3(t1, t2)
 
-        t3 = task3(task1(), task2())
+        print(t3)
 
-        print(t3.result())
-
-        flow.shutdown()
+        await flow.shutdown()
 
 if __name__ == "__main__":
-    main()
+    print('Running 1-layer funnel DAG workflow with each backend\n')
+    print("""
+         task1      task2 <---- running in parallel 1st
+             \\       /
+               task3      <---- running last\n""")
+
+    backends= {
+        ConcurrentExecutionBackend : ThreadPoolExecutor(max_workers=4),
+        RadicalExecutionBackend: {'resource': 'local.localhost'},
+        DaskExecutionBackend   : {'n_workers': 2, 'threads_per_worker': 1}
+        }
+
+    asyncio.run(main(backends))

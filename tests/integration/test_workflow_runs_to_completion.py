@@ -2,8 +2,8 @@ import pytest
 import asyncio
 import time
 from pathlib import Path
-
-from radical.asyncflow import WorkflowEngine, ThreadExecutionBackend
+from concurrent.futures import ThreadPoolExecutor
+from radical.asyncflow import WorkflowEngine, ConcurrentExecutionBackend
 
 @pytest.mark.asyncio
 async def test_flow_function_tasks():
@@ -11,8 +11,8 @@ async def test_flow_function_tasks():
     Integration test using `function_task`. Each task updates a shared workflow state,
     which is verified at the end of execution.
     """
-    backend = ThreadExecutionBackend({})
-    flow = WorkflowEngine(backend=backend)
+    backend = await ConcurrentExecutionBackend(ThreadPoolExecutor())
+    flow = await WorkflowEngine.create(backend=backend)
 
     # Shared state is passed and returned explicitly across tasks
     @flow.function_task
@@ -80,8 +80,8 @@ async def test_flow_executable_tasks(tmp_path):
     Integration test using `executable_task`. Each task appends to a workflow-local file.
     Final task output is used to validate execution order.
     """
-    backend = ThreadExecutionBackend({})
-    flow = WorkflowEngine(backend=backend)
+    backend = await ConcurrentExecutionBackend(ThreadPoolExecutor())
+    flow = await WorkflowEngine.create(backend=backend)
 
     # Define executable tasks that append their ID to a shared file
     @flow.executable_task
@@ -145,8 +145,8 @@ async def test_flow_mixed_function_and_executable_tasks(tmp_path):
     Integration test mixing `function_task` and `executable_task`.
     Function tasks modify state, while executable tasks log their invocation.
     """
-    backend = ThreadExecutionBackend({})
-    flow = WorkflowEngine(backend=backend)
+    backend = await ConcurrentExecutionBackend(ThreadPoolExecutor())
+    flow = await WorkflowEngine.create(backend=backend)
 
     # Function tasks
     @flow.function_task

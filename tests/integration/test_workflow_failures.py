@@ -2,7 +2,8 @@ import pytest
 import asyncio
 
 from radical.asyncflow import WorkflowEngine
-from radical.asyncflow import ThreadExecutionBackend
+from concurrent.futures import ThreadPoolExecutor
+from radical.asyncflow import ConcurrentExecutionBackend
 
 @pytest.mark.asyncio
 async def test_task_failure_handling():
@@ -23,8 +24,8 @@ async def test_task_failure_handling():
     - The result of good_task is "success".
     - failing_task raises an Exception with the message "Simulated failure".
     """
-    backend = ThreadExecutionBackend({})
-    flow = WorkflowEngine(backend=backend)
+    backend = await ConcurrentExecutionBackend(ThreadPoolExecutor())
+    flow = await WorkflowEngine.create(backend=backend)
 
     @flow.function_task
     async def good_task():
@@ -62,8 +63,8 @@ async def test_awaiting_failed_task_propagates_exception():
     `task1()`. After the test, the workflow engine is properly
     shut down.
     """
-    backend = ThreadExecutionBackend({})
-    flow = WorkflowEngine(backend=backend)
+    backend = await ConcurrentExecutionBackend(ThreadPoolExecutor())
+    flow = await WorkflowEngine.create(backend=backend)
 
     @flow.function_task
     async def task1():
@@ -91,8 +92,8 @@ async def test_independent_workflow_failures_do_not_affect_others():
     of the failure in workflow 0.
     """
 
-    backend = ThreadExecutionBackend({})
-    flow = WorkflowEngine(backend=backend)
+    backend = await ConcurrentExecutionBackend(ThreadPoolExecutor())
+    flow = await WorkflowEngine.create(backend=backend)
 
     @flow.function_task
     async def task1(wf_id):

@@ -14,20 +14,6 @@ You’ll learn how to define tasks, set dependencies, execute the workflow, and 
 
 ---
 
-## Configure the environment
-
-You need to set an environment variable to enable async mode in Jupyter.
-
-```bash
-%env FLOW_JUPYTER_ASYNC=TRUE
-```
-
-!!! tip
-
-If running outside Jupyter, you don’t need `FLOW_JUPYTER_ASYNC` to be set.
-
----
-
 ## Import the necessary modules
 
 You’ll need `time`, `asyncio`, and the key classes from `radical.asyncflow`.
@@ -36,18 +22,20 @@ You’ll need `time`, `asyncio`, and the key classes from `radical.asyncflow`.
 import time
 import asyncio
 
-from radical.asyncflow import WorkflowEngine, ThreadExecutionEngine
+from concurrent.futures import ThreadPoolExecutor
+
+from radical.asyncflow import WorkflowEngine, ConcurrentExecutionBackend
 ```
 
 ---
 
 ## Set up the workflow engine
 
-We initialize the workflow engine with a `ThreadExecutionEngine` using Python’s `ThreadPoolExecutor`.
+We initialize the workflow engine with a `ConcurrentExecutionBackend` using Python’s `ThreadPoolExecutor` or `ProcessPoolExecutor`.
 
 ```python
-backend = ThreadExecutionEngine({'max_workers': 3})
-flow = WorkflowEngine(backend=backend)
+backend = await ConcurrentExecutionBackend(ThreadPoolExecutor())
+flow = await WorkflowEngine.create(backend=backend)
 ```
 
 ---
@@ -79,6 +67,7 @@ async def task3(t1_result, t2_result):
 !!! note  
 - `task3` depends on the outputs of `task1` and `task2`.
 - You express this dependency by calling `task3(task1(), task2())`.
+- `task1` and `task2` will be automatically resolved during runtime and their values will be assigned to `task3` accordingly.
 
 ---
 

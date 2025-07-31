@@ -48,7 +48,7 @@ Tasks can depend on the output of other tasks:
 Tasks that don’t depend on each other run in parallel automatically.
 
 ```python
-asyncflow = WorkflowManager(dry_run=True)
+asyncflow = await WorkflowManager.create(dry_run=True)
 
 async def task_a():
     asyncio.sleep(2) # (1)!

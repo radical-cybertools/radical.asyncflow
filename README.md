@@ -45,28 +45,38 @@ Currently, RAF supports the following execution backends:
 import asyncio
 
 from radical.asyncflow import WorkflowEngine
-from radical.asyncflow import ThreadExecutionBackend
+from radical.asyncflow import ConcurrentExecutionBackend
 
-async def run():
+from concurrent.futures import ThreadPoolExecutor
+
+async def main():
     # Create backend and workflow
-    backend = ThreadExecutionBackend({})
-    flow = WorkflowEngine(backend=backend)
+    backend = await ConcurrentExecutionBackend(ThreadPoolExecutor())
+    flow = await WorkflowEngine.create(backend=backend)
 
     @flow.executable_task
     async def task1():
-        return "echo $RANDOM"
+        return "/bin/echo 5"
 
     @flow.function_task
     async def task2(t1_result):
         return int(t1_result.strip()) * 2 * 2
 
     # create the workflow
-    t1_result = await task1()
-    t2_result = await task2(t1_result) # t2 depends on t1 (waits for it)
-
+    t1_fut = task1()
+    t2_result = await task2(t1_fut) # t2 depends on t1 (waits for it)
+  
+    print(t2_result)
     # shutdown the execution backend
     await flow.shutdown()
 
 if __name__ == "__main__":
-    asyncio.run(run())
+    asyncio.run(main())
 ```
+
+## What AsyncFlow Can Be Used For
+
+- AI & LLM Workflows - Build complex AI agent systems and orchestrate multiple language model calls with automatic dependency resolution in parallel.
+- Data Processing Pipelines - Create data science pipelines, and real-time analytics with async task coordination.
+- High-Performance Computing - Execute scientific computing workflows and distributed simulations on HPC clusters with scaling.
+- Cross-Platform Execution - Deploy the same workflows locally for development, or HPC infrastructure without code changes
