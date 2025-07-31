@@ -126,7 +126,7 @@ class WorkflowEngine:
 
     @staticmethod
     def _setup_execution_backend(backend: Optional[BaseExecutionBackend], 
-                                dry_run: bool) -> BaseExecutionBackend:
+                                 dry_run: bool) -> BaseExecutionBackend:
         """Setup and validate the execution backend."""
         if backend is None:
             if dry_run:
@@ -142,6 +142,12 @@ class WorkflowEngine:
         """Start internal async components (run and submit tasks)."""
         self._run_task = asyncio.create_task(self.run())
         self._submit_task = asyncio.create_task(self.submit())
+
+        comps = [self._run_task.get_coro().__name__, 
+                 self._submit_task.get_coro().__name__]
+
+        for comp in comps:
+            self.log.debug(f"Started {comp} component")
 
     def _update_dependency_tracking(self, comp_uid: str):
         """Update dependency tracking structures for a component."""
@@ -494,6 +500,36 @@ class WorkflowEngine:
 
         return dependencies, input_files, output_files
 
+    async def _extract_dependency_values(self, comp_desc: dict):
+        """
+        Resolve Future objects in args and kwargs to their actual values.
+        This is called right before submission when all dependencies are guaranteed to be done.
+        
+        Args:
+            comp_desc: Component description dict
+            
+        Returns:
+            tuple: (resolved_args, resolved_kwargs)
+        """
+        resolved_args = []
+        resolved_kwargs = {}
+
+        # Resolve args
+        for arg in comp_desc['args']:
+            if isinstance(arg, asyncio.Future):
+                resolved_args.append(arg.result())  # Safe call, non-blocking
+            else:
+                resolved_args.append(arg)
+
+        # Resolve kwargs
+        for key, value in comp_desc['kwargs'].items():
+            if isinstance(value, asyncio.Future):
+                resolved_kwargs[key] = value.result() # Safe call are done, non-blocking
+            else:
+                resolved_kwargs[key] = value
+
+        return tuple(resolved_args), resolved_kwargs
+
     def _clear(self):
         """Clear workflow components and their dependencies."""
         self.components.clear()
@@ -688,6 +724,16 @@ class WorkflowEngine:
                                     file_path=input_file
                                 )
                                 explicit_files_to_stage.append(data_dep)
+
+                    try:
+                        # Update the component description with resolved values
+                        comp_desc['args'], comp_desc['kwargs'] = await self._extract_dependency_values(comp_desc)
+                    except Exception as e:
+                        self.log.error(f"Failed to resolve future for {comp_desc['name']}: {e}")
+                        self.handle_task_failure(comp_desc, self.components[comp_uid]['future'], e)
+                        self.resolved.add(comp_uid)
+                        self._notify_dependents(comp_uid)
+                        continue
 
                     to_submit.append(comp_desc)
                     msg = f"Ready to submit: {comp_desc['name']}"
