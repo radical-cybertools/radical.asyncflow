@@ -110,9 +110,9 @@ Here’s an example of the output you might see:
 
 ---
 
-!!! warning 
+!!! tip 
 
-Make sure to **await the shutdown** of the `WorkflowEngine` before your script exits. Otherwise, resources may leak.
+The context manager (`async with`) automatically handles the shutdown of the `WorkflowEngine` when the block exits, so no explicit shutdown is needed.
 
 ---
 

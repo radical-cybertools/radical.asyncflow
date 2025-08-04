@@ -15,7 +15,7 @@ class TestFutureResolution:
     async def flow(self):
         """Create a WorkflowEngine instance for testing."""
         backend = await ConcurrentExecutionBackend(ThreadPoolExecutor())
-        async with WorkflowEngine(backend=backend) as flow:
+        async with await WorkflowEngine.create(backend=backend) as flow:
             yield flow
 
     @pytest.mark.asyncio
@@ -234,7 +234,7 @@ async def test_real_workflow_scenario():
     """Integration test simulating a real workflow scenario."""
 
     backend = await ConcurrentExecutionBackend(ThreadPoolExecutor())
-    async with WorkflowEngine(backend=backend) as flow:
+    async with await WorkflowEngine.create(backend=backend) as flow:
         @flow.function_task
         async def fetch_data(source):
             """Simulate data fetching."""

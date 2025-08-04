@@ -50,8 +50,8 @@ from radical.asyncflow import RadicalExecutionBackend
 from radical.asyncflow import WorkflowEngine
 
 # HPC backend configuration
-backend = RadicalExecutionBackend({'resource': 'local.localhost'}) # (1)!
-async with WorkflowEngine(backend=backend) as flow:
+backend = await RadicalExecutionBackend({'resource': 'local.localhost'}) # (1)!
+async with await WorkflowEngine.create(backend=backend) as flow:
 ```
 
 1. Configure for HPC execution - can target supercomputers, GPU clusters, local resources

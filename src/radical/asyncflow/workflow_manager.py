@@ -53,6 +53,7 @@ class WorkflowEngine:
             backend: Execution backend (required, pre-validated)
             dry_run: Whether to run in dry-run mode
             implicit_data: Whether to enable implicit data dependency linking
+            skip_execution_backend: Defining logic for exiting logic of context mangaer
         """
         # Get the current running loop - assume it exists
         self.loop = _get_event_loop_or_raise("WorkflowEngine")
@@ -1129,7 +1130,7 @@ class WorkflowEngine:
         return self
     
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        self.shutdown(self.skip_execution_backend)
+        await self.shutdown(self.skip_execution_backend)
 
 
     @staticmethod

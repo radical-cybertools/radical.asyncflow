@@ -37,7 +37,7 @@ from radical.asyncflow import WorkflowEngine
 
 backend = await ConcurrentExecutionBackend(ThreadPoolExecutor())
 async def main():
-    async with WorkflowEngine(backend=backend) as flow:
+    async with await WorkflowEngine.create(backend=backend) as flow:
         @flow.function_task
         async def task1(*args):
             return time.time()

@@ -30,7 +30,7 @@ from radical.asyncflow import ConcurrentExecutionBackend
 async def run():
     # Create backend and workflow
     backend = await ConcurrentExecutionBackend(ThreadPoolExecutor(max_workers=3))
-    async with WorkflowEngine(backend=backend) as flow:
+    async with await WorkflowEngine.create(backend=backend) as flow:
 
     @flow.executable_task
     async def task1():

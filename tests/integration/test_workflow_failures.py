@@ -25,7 +25,7 @@ async def test_task_failure_handling():
     - failing_task raises an Exception with the message "Simulated failure".
     """
     backend = await ConcurrentExecutionBackend(ThreadPoolExecutor())
-    async with WorkflowEngine(backend=backend) as flow:
+    async with await WorkflowEngine.create(backend=backend) as flow:
     
         @flow.function_task
         async def good_task():
@@ -61,7 +61,7 @@ async def test_awaiting_failed_task_propagates_exception():
     shut down.
     """
     backend = await ConcurrentExecutionBackend(ThreadPoolExecutor())
-    with WorkflowEngine(backend=backend) as flow:
+    async with await WorkflowEngine.create(backend=backend) as flow:
         @flow.function_task
         async def task1():
             raise ValueError("Intentional failure in task1")
@@ -86,7 +86,7 @@ async def test_independent_workflow_failures_do_not_affect_others():
     """
 
     backend = await ConcurrentExecutionBackend(ThreadPoolExecutor())
-    async with WorkflowEngine(backend=backend) as flow:
+    async with await WorkflowEngine.create(backend=backend) as flow:
 
         @flow.function_task
         async def task1(wf_id):

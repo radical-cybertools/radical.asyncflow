@@ -11,7 +11,7 @@ async def test_async_shutdown():
     """
     backend = await ConcurrentExecutionBackend(ThreadPoolExecutor())
     backend.shutdown = AsyncMock()
-    async with WorkflowEngine(backend=backend) as flow:
+    async with await WorkflowEngine.create(backend=backend) as flow:
         pass
 
     try:

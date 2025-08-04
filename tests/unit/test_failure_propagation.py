@@ -14,7 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 @pytest_asyncio.fixture
 async def flow():
     backend = await ConcurrentExecutionBackend(ThreadPoolExecutor())
-    async with await WorkflowEngine.create(backend=backend) as flow:
+    async with await WorkflowEngine.create(backend=backend, skip_execution_backend=True) as flow:
         yield flow
         await asyncio.sleep(0)  # allow any pending tasks to finish
 

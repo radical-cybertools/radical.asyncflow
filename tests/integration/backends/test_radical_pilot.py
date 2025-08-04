@@ -35,7 +35,7 @@ async def test_async_bag_of_tasks(backend):
 @pytest.mark.asyncio
 async def test_radical_backend_reject_service_task_function(backend):
 
-    async with WorkflowEngine(backend=backend, skip_execution_backend=True) as flow:
+    async with await WorkflowEngine.create(backend=backend, skip_execution_backend=True) as flow:
         with pytest.raises(ValueError, match="RadicalExecutionBackend does not support function service tasks"):
             @flow.function_task(service=True)
             async def bad_task2():
@@ -46,7 +46,7 @@ async def test_radical_backend_reject_service_task_function(backend):
 
 @pytest.mark.asyncio
 async def test_radical_backend_reject_function_task_with_raptor_off(backend):
-    async with WorkflowEngine(backend=backend, skip_execution_backend=True) as flow: 
+    async with await WorkflowEngine.create(backend=backend, skip_execution_backend=True) as flow: 
 
         with pytest.raises(RuntimeError):
             @flow.function_task

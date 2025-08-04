@@ -16,7 +16,7 @@ async def flow():
           'dashboard_address':None
           }
           )
-    with WorkflowEngine(backend=backend) as flow:
+    async with await WorkflowEngine.create(backend=backend) as flow:
         # provide the flow to the test
         yield flow
         
