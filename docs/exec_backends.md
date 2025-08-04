@@ -50,8 +50,8 @@ from radical.asyncflow import RadicalExecutionBackend
 from radical.asyncflow import WorkflowEngine
 
 # HPC backend configuration
-backend = RadicalExecutionBackend({'resource': 'local.localhost'}) # (1)!
-flow = WorkflowEngine(backend=backend)
+backend = await RadicalExecutionBackend({'resource': 'local.localhost'}) # (1)!
+async with await WorkflowEngine.create(backend=backend) as flow:
 ```
 
 1. Configure for HPC execution - can target supercomputers, GPU clusters, local resources
@@ -118,8 +118,6 @@ await asyncio.gather(*[run_wf(i) for i in range(5)]) # (1)!
 end_time = time.time()
 print(f'\nTotal time running asynchronously is: {end_time - start_time}')
 
-# Proper cleanup of HPC resources
-await flow.shutdown()
 ```
 
 1. All workflows execute concurrently across available HPC nodes
@@ -181,7 +179,6 @@ backend = RadicalExecutionBackend({
 ```
 
 !!! warning
-**Resource Management**: Always call `await flow.shutdown()` to properly release HPC resources and prevent job queue issues.
 
 ## Real-World HPC Use Cases
 

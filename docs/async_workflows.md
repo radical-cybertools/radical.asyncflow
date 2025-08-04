@@ -36,35 +36,32 @@ from concurrent.futures import ThreadPoolExecutor
 from radical.asyncflow import WorkflowEngine
 
 backend = await ConcurrentExecutionBackend(ThreadPoolExecutor())
-flow = await WorkflowEngine.create(backend=backend)
-
 async def main():
-    @flow.function_task
-    async def task1(*args):
-        return time.time()
+    async with await WorkflowEngine.create(backend=backend) as flow:
+        @flow.function_task
+        async def task1(*args):
+            return time.time()
 
-    @flow.function_task
-    async def task2(*args):
-        return time.time()
+        @flow.function_task
+        async def task2(*args):
+            return time.time()
 
-    @flow.function_task
-    async def task3(*args):
-        return time.time()
+        @flow.function_task
+        async def task3(*args):
+            return time.time()
 
-    async def run_wf(wf_id):
-        print(f'Starting workflow {wf_id} at {time.time()}')
-        t3 = task3(task1(), task2())
-        await t3 # Blocking operation so the entire workflow will block
-        print(f'Workflow {wf_id} completed at {time.time()}')
+        async def run_wf(wf_id):
+            print(f'Starting workflow {wf_id} at {time.time()}')
+            t3 = task3(task1(), task2())
+            await t3 # Blocking operation so the entire workflow will block
+            print(f'Workflow {wf_id} completed at {time.time()}')
 
-    start_time = time.time()
-    await asyncio.gather(*[run_wf(i) for i in range(5)])
-    end_time = time.time()
+        start_time = time.time()
+        await asyncio.gather(*[run_wf(i) for i in range(5)])
+        end_time = time.time()
 
-    print(f'\nTotal time running asynchronously is: {end_time - start_time}')
+        print(f'\nTotal time running asynchronously is: {end_time - start_time}')
 
-    # We are in an async context, so we have to use await
-    await flow.shutdown()
 
 asyncio.run(main())
 ```

@@ -39,7 +39,7 @@ from radical.asyncflow import WorkflowEngine
 from concurrent.futures import ThreadPoolExecutor
 
 backend = await ConcurrentExecutionBackend(ThreadPoolExecutor())
-asyncflow = await WorkflowEngine.create(backend=backend)
+async with WorkflowEngine.create(backend=backend) as flow:
 ```
 
 ### Define Tasks
@@ -116,7 +116,6 @@ await asyncio.gather( # (1)!
 end_time = time.time()
 print(f"\nTotal time running asynchronously is: {end_time - start_time:.2f}s")
 
-await asyncflow.shutdown() # (2)!
 ```
 
 1. Run all composite workflow blocks concurrently
@@ -310,9 +309,6 @@ await block3
     Shutdown is triggered, terminating the resources gracefully
     ```
 
-
-!!! warning
-Do not forget to `await asyncflow.shutdown()` when you are done — otherwise, resources may remain allocated.
 
 !!! tip
 You can replace `ConcurrentExecutionBackend` with `RadicalExecutionBackend` if you want to run on an HPC cluster instead of local threads/processes.

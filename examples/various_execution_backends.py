@@ -10,31 +10,29 @@ from radical.asyncflow import ConcurrentExecutionBackend
 async def main(backends):
     for backend, resource in backends.items():
         backend = await backend(resource)
-        flow = await WorkflowEngine.create(backend=backend)
+        async with await WorkflowEngine.create(backend=backend) as flow:
 
-        task = flow.executable_task
-        if isinstance(backend, DaskExecutionBackend):
-            task = flow.function_task
+            task = flow.executable_task
+            if isinstance(backend, DaskExecutionBackend):
+                task = flow.function_task
 
-        @task
-        async def task1(*args):
-            return '/bin/sleep 10'
+            @task
+            async def task1(*args):
+                return '/bin/sleep 10'
 
-        @task
-        async def task2(*args):
-            return '/bin/date'
+            @task
+            async def task2(*args):
+                return '/bin/date'
 
-        @task
-        async def task3(*args):
-            return '/bin/date'
+            @task
+            async def task3(*args):
+                return '/bin/date'
 
-        t1 = task1()
-        t2 = task2()
-        t3 = await task3(t1, t2)
+            t1 = task1()
+            t2 = task2()
+            t3 = await task3(t1, t2)
 
-        print(t3)
-
-        await flow.shutdown()
+            print(t3)
 
 if __name__ == "__main__":
     print('Running 1-layer funnel DAG workflow with each backend\n')

@@ -35,7 +35,7 @@ We initialize the workflow engine with a `ConcurrentExecutionBackend` using Pyth
 
 ```python
 backend = await ConcurrentExecutionBackend(ThreadPoolExecutor())
-flow = await WorkflowEngine.create(backend=backend)
+async with WorkflowEngine.create(backend=backend) as flow:
 ```
 
 ---
@@ -90,9 +90,6 @@ async def main():
     end_time = time.time()
     print(f"\nWorkflow completed in: {end_time - start_time:.2f} seconds")
 
-    # Shutdown the workflow engine
-    await flow.shutdown()
-
 asyncio.run(main())
 ```
 
@@ -113,9 +110,9 @@ Here’s an example of the output you might see:
 
 ---
 
-!!! warning 
+!!! tip 
 
-Make sure to **await the shutdown** of the `WorkflowEngine` before your script exits. Otherwise, resources may leak.
+The context manager (`async with`) automatically handles the shutdown of the `WorkflowEngine` when the block exits, so no explicit shutdown is needed.
 
 ---
 

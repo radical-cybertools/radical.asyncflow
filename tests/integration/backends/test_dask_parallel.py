@@ -16,10 +16,10 @@ async def flow():
           'dashboard_address':None
           }
           )
-    flow = await WorkflowEngine.create(backend=backend)
-
-    # provide the flow to the test
-    yield flow
+    async with await WorkflowEngine.create(backend=backend) as flow:
+        # provide the flow to the test
+        yield flow
+        
 
 @pytest.mark.asyncio
 async def test_funnel_dag_with_dask_backend(flow):
@@ -212,4 +212,3 @@ async def test_cancel_with_dependencies(flow):
     with pytest.raises(asyncio.CancelledError):  # child cannot complete
         await t2
     
-    await flow.shutdown()

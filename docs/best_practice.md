@@ -91,20 +91,6 @@ result = await task_c(task_a(), task_b())
 
 ---
 
-## Use `await flow.shutdown()`
-
-Always shut down the flow explicitly when finished:
-- Releases resources (e.g., thread pools, processes).
-- Ensures a clean exit.
-
-At the end of your async main:
-
-```python
-await flow.shutdown()
-```
-
----
-
 ## Logging & Debugging
 
 Enable detailed logs to diagnose issues:
@@ -113,12 +99,6 @@ export RADICAL_LOG_LVL=DEBUG
 ```
 
 Logs show task dependencies, execution order, errors.
-
----
-
-## Clean Shutdown
-
-- Use `try`/`finally` in your async main to ensure `flow.shutdown()` is always called, even on exceptions.
 
 ---
 

@@ -43,7 +43,7 @@ class WorkflowEngine:
 
     @typeguard.typechecked
     def __init__(self, backend: BaseExecutionBackend,
-                       dry_run: bool = False, implicit_data: bool = True) -> None:
+                       dry_run: bool = False, implicit_data: bool = True, skip_execution_backend: bool = False) -> None:
         """
         Initialize the WorkflowEngine (sync part only).
         
@@ -53,6 +53,7 @@ class WorkflowEngine:
             backend: Execution backend (required, pre-validated)
             dry_run: Whether to run in dry-run mode
             implicit_data: Whether to enable implicit data dependency linking
+            skip_execution_backend: Defining logic for exiting logic of context mangaer
         """
         # Get the current running loop - assume it exists
         self.loop = _get_event_loop_or_raise("WorkflowEngine")
@@ -68,6 +69,8 @@ class WorkflowEngine:
         self.dry_run = dry_run
         self.queue = asyncio.Queue()
         self.implicit_data_mode = implicit_data
+        self.skip_execution_backend = skip_execution_backend
+
 
         # Optimization: Track component state changes
         self._ready_queue = deque()
@@ -98,7 +101,7 @@ class WorkflowEngine:
 
     @classmethod
     async def create(cls, backend: Optional[BaseExecutionBackend] = None,
-                     dry_run: bool = False, implicit_data: bool = True) -> 'WorkflowEngine':
+                     dry_run: bool = False, implicit_data: bool = True, skip_execution_backend: bool = False) -> 'WorkflowEngine':
         """
         Factory method to create and initialize a WorkflowEngine.
 
@@ -117,7 +120,7 @@ class WorkflowEngine:
         validated_backend = cls._setup_execution_backend(backend, dry_run)
 
         # Create instance with validated backend
-        instance = cls(backend=validated_backend, dry_run=dry_run, implicit_data=implicit_data)
+        instance = cls(backend=validated_backend, dry_run=dry_run, implicit_data=implicit_data, skip_execution_backend=skip_execution_backend)
 
         # Initialize async components
         await instance._start_async_components()
@@ -1123,6 +1126,13 @@ class WorkflowEngine:
             self.log.debug("Shutting down execution backend")
         else:
             self.log.warning("Skipping execution backend shutdown as requested")
+    
+    async def __aenter__(self):
+        return self
+    
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.shutdown(self.skip_execution_backend)
+
 
     @staticmethod
     def shutdown_on_failure(func: Callable):
