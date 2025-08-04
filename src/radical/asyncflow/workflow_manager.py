@@ -43,7 +43,7 @@ class WorkflowEngine:
 
     @typeguard.typechecked
     def __init__(self, backend: BaseExecutionBackend,
-                       dry_run: bool = False, implicit_data: bool = True) -> None:
+                       dry_run: bool = False, implicit_data: bool = True, skip_execution_backend: bool = False) -> None:
         """
         Initialize the WorkflowEngine (sync part only).
         
@@ -68,6 +68,7 @@ class WorkflowEngine:
         self.dry_run = dry_run
         self.queue = asyncio.Queue()
         self.implicit_data_mode = implicit_data
+        self.skip_execution_backend = skip_execution_backend
 
         # Optimization: Track component state changes
         self._ready_queue = deque()
@@ -1128,7 +1129,7 @@ class WorkflowEngine:
         return self
     
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        self.shutdown()
+        self.shutdown(self.skip_execution_backend)
 
 
     @staticmethod

@@ -25,29 +25,26 @@ async def test_task_failure_handling():
     - failing_task raises an Exception with the message "Simulated failure".
     """
     backend = await ConcurrentExecutionBackend(ThreadPoolExecutor())
-    flow = await WorkflowEngine.create(backend=backend)
+    async with WorkflowEngine(backend=backend) as flow:
+    
+        @flow.function_task
+        async def good_task():
+            return "success"
 
-    @flow.function_task
-    async def good_task():
-        return "success"
+        @flow.function_task
+        async def failing_task():
+            raise RuntimeError("Simulated failure")
 
-    @flow.function_task
-    async def failing_task():
-        raise RuntimeError("Simulated failure")
+        @flow.function_task
+        async def dependent_task(prev_result):
+            return f"Got: {prev_result}"
 
-    @flow.function_task
-    async def dependent_task(prev_result):
-        return f"Got: {prev_result}"
-
-    try:
         # Run good task first
         res = await good_task()
         assert res == "success"
 
         with pytest.raises(RuntimeError, match="Simulated failure"):
             await failing_task()
-    finally:
-        await flow.shutdown()
 
 
 @pytest.mark.asyncio
@@ -64,23 +61,19 @@ async def test_awaiting_failed_task_propagates_exception():
     shut down.
     """
     backend = await ConcurrentExecutionBackend(ThreadPoolExecutor())
-    flow = await WorkflowEngine.create(backend=backend)
+    with WorkflowEngine(backend=backend) as flow:
+        @flow.function_task
+        async def task1():
+            raise ValueError("Intentional failure in task1")
 
-    @flow.function_task
-    async def task1():
-        raise ValueError("Intentional failure in task1")
+        @flow.function_task
+        async def task2(x):
+            return f"Received: {x}"
 
-    @flow.function_task
-    async def task2(x):
-        return f"Received: {x}"
-
-    try:
         # The test will fail at await task1(), so task2 should never run
         with pytest.raises(ValueError, match="Intentional failure in task1"):
             await task2(await task1())
-    
-    finally:
-        await flow.shutdown()
+
 
 
 @pytest.mark.asyncio
@@ -93,27 +86,26 @@ async def test_independent_workflow_failures_do_not_affect_others():
     """
 
     backend = await ConcurrentExecutionBackend(ThreadPoolExecutor())
-    flow = await WorkflowEngine.create(backend=backend)
+    async with WorkflowEngine(backend=backend) as flow:
 
-    @flow.function_task
-    async def task1(wf_id):
-        if wf_id == 0:
-            raise Exception("Intentional failure in workflow 0 task1")
-        return f"task1 success from wf {wf_id}"
+        @flow.function_task
+        async def task1(wf_id):
+            if wf_id == 0:
+                raise Exception("Intentional failure in workflow 0 task1")
+            return f"task1 success from wf {wf_id}"
 
-    @flow.function_task
-    async def task2(x):
-        return f"task2 got: {x}"
+        @flow.function_task
+        async def task2(x):
+            return f"task2 got: {x}"
 
-    async def run_wf(wf_id):
-        try:
-            t1 = await task1(wf_id)
-            t2 = await task2(t1)
-            return f"Workflow {wf_id} success: {t2}"
-        except Exception as e:
-            return f"Workflow {wf_id} failed: {str(e)}"
+        async def run_wf(wf_id):
+            try:
+                t1 = await task1(wf_id)
+                t2 = await task2(t1)
+                return f"Workflow {wf_id} success: {t2}"
+            except Exception as e:
+                return f"Workflow {wf_id} failed: {str(e)}"
 
-    try:
         # Run 5 workflows concurrently, workflow 0 should fail
         results = await asyncio.gather(*[run_wf(i) for i in range(5)])
         
@@ -124,5 +116,3 @@ async def test_independent_workflow_failures_do_not_affect_others():
         for i in range(1, 5):
             assert f"Workflow {i} success:" in results[i]
 
-    finally:
-        await flow.shutdown()

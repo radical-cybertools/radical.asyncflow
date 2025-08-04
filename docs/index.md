@@ -30,7 +30,7 @@ from radical.asyncflow import ConcurrentExecutionBackend
 async def run():
     # Create backend and workflow
     backend = await ConcurrentExecutionBackend(ThreadPoolExecutor(max_workers=3))
-    flow = await WorkflowEngine.create(backend=backend)
+    async with WorkflowEngine(backend=backend) as flow:
 
     @flow.executable_task
     async def task1():
@@ -44,8 +44,6 @@ async def run():
     t1_fut = task1()
     t2_result = await task2(t1_fut) # t2 depends on t1 (waits for it)
 
-    # shutdown the execution backend
-    await flow.shutdown()
 
 if __name__ == "__main__":
     asyncio.run(run())

@@ -52,23 +52,21 @@ from concurrent.futures import ThreadPoolExecutor
 async def main():
     # Create backend and workflow
     backend = await ConcurrentExecutionBackend(ThreadPoolExecutor())
-    flow = await WorkflowEngine.create(backend=backend)
+    async with WorkflowEngine(backend=backend) as flow:
 
-    @flow.executable_task
-    async def task1():
-        return "/bin/echo 5"
+      @flow.executable_task
+      async def task1():
+          return "/bin/echo 5"
 
-    @flow.function_task
-    async def task2(t1_result):
-        return int(t1_result.strip()) * 2 * 2
+      @flow.function_task
+      async def task2(t1_result):
+          return int(t1_result.strip()) * 2 * 2
 
-    # create the workflow
-    t1_fut = task1()
-    t2_result = await task2(t1_fut) # t2 depends on t1 (waits for it)
-  
-    print(t2_result)
-    # shutdown the execution backend
-    await flow.shutdown()
+      # create the workflow
+      t1_fut = task1()
+      t2_result = await task2(t1_fut) # t2 depends on t1 (waits for it)
+    
+      print(t2_result)
 
 if __name__ == "__main__":
     asyncio.run(main())

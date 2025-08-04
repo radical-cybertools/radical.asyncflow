@@ -35,7 +35,7 @@ We initialize the workflow engine with a `ConcurrentExecutionBackend` using Pyth
 
 ```python
 backend = await ConcurrentExecutionBackend(ThreadPoolExecutor())
-flow = await WorkflowEngine.create(backend=backend)
+async with WorkflowEngine.create(backend=backend) as flow:
 ```
 
 ---
@@ -89,9 +89,6 @@ async def main():
 
     end_time = time.time()
     print(f"\nWorkflow completed in: {end_time - start_time:.2f} seconds")
-
-    # Shutdown the workflow engine
-    await flow.shutdown()
 
 asyncio.run(main())
 ```

@@ -15,9 +15,8 @@ class TestFutureResolution:
     async def flow(self):
         """Create a WorkflowEngine instance for testing."""
         backend = await ConcurrentExecutionBackend(ThreadPoolExecutor())
-        flow = await WorkflowEngine.create(backend=backend)
-        yield flow
-        await flow.shutdown()
+        async with WorkflowEngine(backend=backend) as flow:
+            yield flow
 
     @pytest.mark.asyncio
     async def test_simple_future_resolution(self, flow):
@@ -235,9 +234,7 @@ async def test_real_workflow_scenario():
     """Integration test simulating a real workflow scenario."""
 
     backend = await ConcurrentExecutionBackend(ThreadPoolExecutor())
-    flow = await WorkflowEngine.create(backend=backend)
-
-    try:
+    async with WorkflowEngine(backend=backend) as flow:
         @flow.function_task
         async def fetch_data(source):
             """Simulate data fetching."""
@@ -269,5 +266,3 @@ async def test_real_workflow_scenario():
         expected = "combined_processed_data_from_api_with_config_a_and_processed_data_from_database_with_config_b"
         assert result == expected
 
-    finally:
-        await flow.shutdown()
