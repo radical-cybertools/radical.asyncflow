@@ -1123,6 +1123,13 @@ class WorkflowEngine:
             self.log.debug("Shutting down execution backend")
         else:
             self.log.warning("Skipping execution backend shutdown as requested")
+    
+    async def __aenter__(self):
+        return self
+    
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        self.shutdown()
+
 
     @staticmethod
     def shutdown_on_failure(func: Callable):
