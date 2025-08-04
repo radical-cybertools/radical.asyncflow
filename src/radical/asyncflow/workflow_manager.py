@@ -71,6 +71,7 @@ class WorkflowEngine:
         self.implicit_data_mode = implicit_data
         self.skip_execution_backend = skip_execution_backend
 
+
         # Optimization: Track component state changes
         self._ready_queue = deque()
         self._dependents_map = defaultdict(set)
@@ -100,7 +101,7 @@ class WorkflowEngine:
 
     @classmethod
     async def create(cls, backend: Optional[BaseExecutionBackend] = None,
-                     dry_run: bool = False, implicit_data: bool = True) -> 'WorkflowEngine':
+                     dry_run: bool = False, implicit_data: bool = True, skip_execution_backend: bool = False) -> 'WorkflowEngine':
         """
         Factory method to create and initialize a WorkflowEngine.
 
@@ -119,7 +120,7 @@ class WorkflowEngine:
         validated_backend = cls._setup_execution_backend(backend, dry_run)
 
         # Create instance with validated backend
-        instance = cls(backend=validated_backend, dry_run=dry_run, implicit_data=implicit_data)
+        instance = cls(backend=validated_backend, dry_run=dry_run, implicit_data=implicit_data, skip_execution_backend=skip_execution_backend)
 
         # Initialize async components
         await instance._start_async_components()
