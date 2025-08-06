@@ -470,14 +470,19 @@ class WorkflowEngine:
         fut.original_cancel = orig_cancel
 
         def patched_cancel(*args, **kwargs):
-            self.log.debug(f"Cancellation requested for {uid} from the execution backend")
-            asyncio.create_task(self.backend.cancel_task(uid)) # fire and forget (non-blocking)
 
-            # NOTE: Returning True means cancellation was requested/scheduled, not guaranteed.
-            # This follows asyncio.Future.cancel() behavior, which is best-effort.
-            # Actual cancellation is handled asynchronously by the backend and delivered to the
-            # WorkflowEngine via callbacks only.
-            return True
+            if not fut.done() and uid in self.running:
+                # NOTE: Returning True means cancellation was requested/scheduled, but not guaranteed.
+                # This follows asyncio.Future.cancel() behavior, which is best-effort.
+                # Actual cancellation is handled asynchronously by the backend and delivered to the
+                # WorkflowEngine via callbacks only.
+                self.log.debug(f"Cancellation requested for {uid} (running) from the execution backend")
+                asyncio.create_task(self.backend.cancel_task(uid)) # fire and forget (non-blocking)
+                return True
+            else:
+                # Task is pending -> cancel locally
+                self.log.debug(f"Cancellation requested for {uid} (pending) locally")
+                return fut.original_cancel
 
         return patched_cancel
 
