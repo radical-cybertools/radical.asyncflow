@@ -373,11 +373,17 @@ class WorkflowEngine:
         comp_desc['name'] = comp_desc['function'].__name__
         comp_desc['uid'] = self._assign_uid(prefix=comp_type)
 
-        comp_desc[FUNCTION] = None if task_type == EXECUTABLE else comp_desc[FUNCTION]
-
-        if comp_desc[EXECUTABLE] and not isinstance(comp_desc[EXECUTABLE], str):
-            error_msg = f"Executable task must return a string, got {type(comp_desc[EXECUTABLE])}"
-            raise ValueError(error_msg)
+        if task_type == EXECUTABLE:
+            # For executable tasks, validate the executable value
+            executable_value = comp_desc.get(EXECUTABLE)
+            if executable_value is None:
+                raise ValueError(f"Executable task '{comp_desc['name']}' returned None - must return a string command")
+            if not isinstance(executable_value, str):
+                raise ValueError(f"Executable task must return a string, got {type(executable_value)}")
+            comp_desc[FUNCTION] = None  # Clear function since we're using executable
+        else:
+            # For regular tasks, clear executable and keep function
+            comp_desc[EXECUTABLE] = None
 
         # Detect dependencies
         comp_deps, input_files_deps, output_files_deps = self._detect_dependencies(comp_desc['args'])
@@ -972,7 +978,7 @@ class WorkflowEngine:
                 exception = RuntimeError(str(override_error_message))
         else:
             # Use the task's original exception or stderr
-            original_error = task['exception'] if internal_task.get(FUNCTION) else task['stderr']
+            original_error = task.get('exception') or task.get('stderr') or 'failed with unknown error'
 
             # Ensure we have an Exception object
             if isinstance(original_error, Exception):
