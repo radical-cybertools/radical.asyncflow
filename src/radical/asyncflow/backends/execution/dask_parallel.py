@@ -121,10 +121,11 @@ class DaskExecutionBackend(BaseExecutionBackend):
         self._ensure_initialized()
         
         for task in tasks:
+
             is_func_task = bool(task.get('function'))
             is_exec_task = bool(task.get('executable'))
 
-            if not is_func_task and is_exec_task:
+            if is_exec_task:
                 error_msg = 'DaskExecutionBackend does not support executable tasks'
                 task['stderr'] = ValueError(error_msg)
                 self._callback_func(task, 'FAILED')
@@ -133,7 +134,7 @@ class DaskExecutionBackend(BaseExecutionBackend):
             # Validate that function is async
             if is_func_task and not asyncio.iscoroutinefunction(task['function']):
                 error_msg = 'DaskExecutionBackend only supports async functions'
-                task['stderr'] = ValueError(error_msg)
+                task['exception'] = ValueError(error_msg)
                 self._callback_func(task, 'FAILED')
                 continue
 
@@ -146,7 +147,7 @@ class DaskExecutionBackend(BaseExecutionBackend):
                 await self._submit_async_function(task)
             except Exception as e:
                 task['exception'] = e
-                await self._callback_func(task, 'FAILED')
+                self._callback_func(task, 'FAILED')
 
     async def _submit_to_dask(self, task: Dict[str, Any], fn: Callable, *args) -> None:
         """Submit function to Dask and register completion callback.
