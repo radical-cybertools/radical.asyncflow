@@ -1,5 +1,6 @@
 # flake8: noqa
 import os
+import signal
 import asyncio
 import inspect
 from collections import defaultdict, deque
@@ -95,6 +96,37 @@ class WorkflowEngine:
         # Initialize async task references (will be set in _start_async_components)
         self._run_task = None
         self._submit_task = None
+        self._shutdown_event = asyncio.Event()  # Added shutdown signal
+
+        self._setup_signal_handlers()
+
+    def _setup_signal_handlers(self):
+        """
+        Register signal handlers for graceful shutdown on SIGHUP, SIGTERM, and SIGINT.
+        """
+        signals = (signal.SIGHUP, signal.SIGTERM, signal.SIGINT)
+        for sig in signals:
+            try:
+                self.loop.add_signal_handler(
+                    sig, lambda s=sig: asyncio.create_task(
+                        self._handle_signal(s), name=f'{sig.name}-task')
+                )
+                self.log.debug(f"Registered signal handler for {sig.name}")
+            except NotImplementedError:
+                self.log.exception(f"Signal {sig.name} not supported on this platform")
+
+    async def _handle_signal(self, sig: signal.Signals):
+        """
+        Handle received signals by initiating a graceful shutdown.
+
+        Args:
+            sig: The signal received (e.g., SIGHUP, SIGTERM, SIGINT)
+        """
+        if self._shutdown_event.is_set():
+            return
+
+        self.log.info(f"Received signal {sig.name}, initiating graceful shutdown")
+        await self.shutdown()
 
     @classmethod
     async def create(cls, backend: Optional[BaseExecutionBackend] = None,
@@ -140,8 +172,8 @@ class WorkflowEngine:
 
     async def _start_async_components(self):
         """Start internal async components (run and submit tasks)."""
-        self._run_task = asyncio.create_task(self.run())
-        self._submit_task = asyncio.create_task(self.submit())
+        self._run_task = asyncio.create_task(self.run(), name='run-component')
+        self._submit_task = asyncio.create_task(self.submit(), name='submit-component')
 
         comps = [self._run_task.get_coro().__name__, 
                  self._submit_task.get_coro().__name__]
@@ -327,6 +359,7 @@ class WorkflowEngine:
                     comp_desc[EXECUTABLE] = await func(*args, **kwargs) if task_type == EXECUTABLE else None
                     return self._register_component(comp_fut, comp_type, comp_desc, task_type)
 
+                # FIXME: assign name for this comp (comp uid)
                 asyncio.create_task(async_wrapper())
             else:
                 # Raise error for non-async functions since we only support async
@@ -437,14 +470,19 @@ class WorkflowEngine:
         fut.original_cancel = orig_cancel
 
         def patched_cancel(*args, **kwargs):
-            self.log.debug(f"Cancellation requested for {uid} from the execution backend")
-            asyncio.create_task(self.backend.cancel_task(uid)) # fire and forget (non-blocking)
 
-            # NOTE: Returning True means cancellation was requested/scheduled, not guaranteed.
-            # This follows asyncio.Future.cancel() behavior, which is best-effort.
-            # Actual cancellation is handled asynchronously by the backend and delivered to the
-            # WorkflowEngine via callbacks only.
-            return True
+            if not fut.done() and uid in self.running:
+                # NOTE: Returning True means cancellation was requested/scheduled, but not guaranteed.
+                # This follows asyncio.Future.cancel() behavior, which is best-effort.
+                # Actual cancellation is handled asynchronously by the backend and delivered to the
+                # WorkflowEngine via callbacks only.
+                self.log.debug(f"Cancellation requested for {uid} (running) from the execution backend")
+                asyncio.create_task(self.backend.cancel_task(uid)) # fire and forget (non-blocking)
+                return True
+            else:
+                # Task is pending -> cancel locally
+                self.log.debug(f"Cancellation requested for {uid} (pending) locally")
+                return fut.original_cancel
 
         return patched_cancel
 
@@ -638,17 +676,16 @@ class WorkflowEngine:
             - queue (asyncio.Queue): Execution queue for ready components
 
         Note:
-            - Runs indefinitely until cancelled
+            - Runs indefinitely until cancelled or shutdown is signaled
             - Uses sleep intervals to prevent busy-waiting
             - Handles both implicit and explicit data dependencies
         """
-
-        while True:
+        while not self._shutdown_event.is_set():
             try:
                 to_submit = []
 
                 # Process ready components
-                while self._ready_queue:
+                while self._ready_queue and not self._shutdown_event.is_set():
                     comp_uid = self._ready_queue.popleft()
 
                     # Skip if already processed
@@ -681,7 +718,7 @@ class WorkflowEngine:
                         if cancelled_deps:
                             self.log.info(f"Cancelling {comp_desc['name']} due to cancelled dependencies")
                             self.handle_task_cancellation(comp_desc, self.components[comp_uid]['future'])
-                        else: # failed_deps
+                        else:  # failed_deps
                             chained_exception = self._create_dependency_failure_exception(comp_desc, failed_deps)
                             self.log.error(f"Dependency failure for {comp_desc['name']}: {chained_exception}")
                             self.handle_task_failure(comp_desc, self.components[comp_uid]['future'], chained_exception)
@@ -769,17 +806,39 @@ class WorkflowEngine:
                 if completed_components:
                     self._component_change_event.set()
 
-                # If nothing is ready and nothing is running, wait for changes
+                # If nothing is ready and nothing is running, wait for changes or shutdown
                 if not self._ready_queue and not to_submit and not completed_components:
                     try:
-                        await asyncio.wait_for(self._component_change_event.wait(), timeout=1.0)
-                        self._component_change_event.clear()
-                    except asyncio.TimeoutError:
-                        pass
+                        # Create tasks for event waiting
+                        event_task = asyncio.create_task(
+                            self._component_change_event.wait(),
+                             name='component-event-task')
+                        shutdown_task = asyncio.create_task(
+                            self._shutdown_event.wait(),
+                             name='shutdown-event-task')
+
+                        done, pending = await asyncio.wait(
+                            [event_task, shutdown_task],
+                            return_when=asyncio.FIRST_COMPLETED,
+                            timeout=1.0
+                        )
+                        # Cancel any pending tasks to clean up
+                        for task in pending:
+                            task.cancel()
+                        # Clear component change event if it was set
+                        if event_task in done:
+                            self._component_change_event.clear()
+                    except asyncio.CancelledError:
+                        # If we get cancelled, make sure to clean up our tasks
+                        for task in [event_task, shutdown_task]:
+                            if not task.done():
+                                task.cancel()
+                        raise
                 else:
                     await asyncio.sleep(0.01)
 
             except asyncio.CancelledError:
+                self.log.debug("Run component cancelled")
                 break
             except Exception as e:
                 self.log.exception(f"Error in run loop: {e}")
@@ -815,15 +874,13 @@ class WorkflowEngine:
             - Tasks and blocks are identified by `uid` field content
 
         Note:
-            - Runs indefinitely until cancelled or stopped
+            - Runs indefinitely until cancelled or shutdown is signaled
             - Uses a 1-second timeout to avoid blocking indefinitely
             - Handles `asyncio.TimeoutError` gracefully with a sleep interval
         """
-
-        while True:
+        while not self._shutdown_event.is_set():
             try:
                 objects = await asyncio.wait_for(self.queue.get(), timeout=1)
-
                 # Separate tasks and blocks
                 tasks = [t for t in objects if t and BLOCK not in t['uid']]
                 blocks = [b for b in objects if b and TASK not in b['uid']]
@@ -836,9 +893,16 @@ class WorkflowEngine:
                     await self._submit_blocks(blocks)
 
             except asyncio.TimeoutError:
+                # Check shutdown signal during timeout
+                if self._shutdown_event.is_set():
+                    self.log.debug("Submit component exiting due to shutdown signal")
+                    break
                 await asyncio.sleep(0.5)
+            except asyncio.CancelledError:
+                self.log.debug("Submit component cancelled")
+                break
             except Exception as e:
-                self.log.exception(f"Error in submit: {e}")
+                self.log.exception(f"Error in submit component: {e}")
                 raise
 
     async def _submit_blocks(self, blocks: list):
@@ -883,7 +947,8 @@ class WorkflowEngine:
             block_fut = self.components[block['uid']]['future']
 
             # Execute the block function as a coroutine
-            asyncio.create_task(self.execute_block(block_fut, func, *args, **kwargs))
+            asyncio.create_task(self.execute_block(
+                block_fut, func, *args, **kwargs), name=block['uid'])
 
     async def execute_block(self, block_fut: asyncio.Future, func: Callable, *args, **kwargs):
         """Executes a block function and sets its result on the associated future.
@@ -1081,13 +1146,15 @@ class WorkflowEngine:
         Internal implementation of asynchronous shutdown for the workflow manager.
 
         This method performs the following steps:
-            1. Cancels background tasks responsible for running and
+            1. Sets the shutdown event to signal components to exit
+            2. Cancels background tasks responsible for running and
             submitting workflows.
-            2. Waits for the cancellation and completion of these tasks,
+            3. Waits for the cancellation and completion of these tasks,
             with a timeout of 5 seconds.
-            3. Logs a warning if the tasks do not complete within the timeout
+            4. Cancel workflow tasks.
+            5. Logs a warning if the tasks do not complete within the timeout
             period.
-            4. Shuts down the backend using an executor to avoid blocking the
+            6. Shuts down the backend using an executor to avoid blocking the
             event loop.
 
         Args:
@@ -1103,25 +1170,36 @@ class WorkflowEngine:
             asyncio.CancelledError: If the shutdown is cancelled before
                 completion.
         """
+        self.log.debug("Initiating shutdown")
+        # Signal components to exit
+        self._shutdown_event.set()
+
         internal_components = [t for t in (self._run_task, self._submit_task) if t]
 
-        # Cancel background tasks
+        # Cancel internal components tasks
         for component in internal_components:
             if component and not component.done():
                 component_name = component.get_coro().__name__
                 self.log.debug(f"Shutting down {component_name} component")
                 component.cancel()
 
-        # Wait for tasks to complete
+        # Wait for internal components shutdown to complete
         try:
             await asyncio.wait_for(
                 asyncio.gather(*internal_components, return_exceptions=True), 
                 timeout=5.0
             )
         except asyncio.TimeoutError:
-            self.log.warning("Timeout waiting for tasks to shutdown")
+            self.log.warning("Timeout waiting for internal components to shutdown")
         except asyncio.CancelledError:
-            self.log.warning("Shutdown cancelled")
+            self.log.warning("Internal components shutdown cancelled")
+
+        # cancel workflow futures (tasks and blocks)
+        for comp in self.components.values():
+            future = comp['future']
+            comp_desc = comp['description']
+            if not future.done():
+                self.handle_task_cancellation(comp_desc, future)
 
         # Shutdown execution backend
         if not skip_execution_backend and self.backend:
@@ -1129,15 +1207,3 @@ class WorkflowEngine:
             self.log.debug("Shutting down execution backend")
         else:
             self.log.warning("Skipping execution backend shutdown as requested")
-
-    @staticmethod
-    def shutdown_on_failure(func: Callable):
-        """Decorator that ensures backend shutdown on function failure."""
-        def wrapper(self, *args, **kwargs):
-            try:
-                return func(self, *args, **kwargs)
-            except Exception as e:
-                self.log.exception('Internal failure detected, shutting down execution backend')
-                asyncio.create_task(self.shutdown())
-                raise e
-        return wrapper

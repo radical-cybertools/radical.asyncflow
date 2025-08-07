@@ -192,8 +192,9 @@ async def test_async_dependency_failure_propagation(flow):
 @pytest.mark.asyncio
 async def test_handle_task_failure_with_dependency_failure(flow):
     mock_task = {
-        'uid': 'test.000001',
+        'uid': 'task.000001',
         'name': 'test_task',
+        'function': lambda: None,
         'exception': ValueError("Original error")
     }
 
@@ -207,7 +208,7 @@ async def test_handle_task_failure_with_dependency_failure(flow):
 
     flow.components[mock_task['uid']] = {
         'future': mock_future,
-        'description': {'function': lambda: None}
+        'description': mock_task
     }
 
     flow.handle_task_failure(mock_task, mock_future, dep_failure)

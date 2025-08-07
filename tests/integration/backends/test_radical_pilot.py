@@ -31,6 +31,8 @@ async def test_async_bag_of_tasks(backend):
     for i, result in enumerate(results):
         assert result is not None
         assert isinstance(result, (str, bytes))
+    
+    await flow.shutdown(skip_execution_backend=True)
 
 @pytest.mark.asyncio
 async def test_radical_backend_reject_service_task_function(backend):
@@ -131,6 +133,8 @@ async def test_async_cancel_tasks(backend):
     with pytest.raises(asyncio.CancelledError):
         await t2
 
+    await flow.shutdown(skip_execution_backend=True)
+
 @pytest.mark.asyncio
 async def test_async_cancel_before_start(backend):
     flow = await WorkflowEngine.create(backend=backend)
@@ -152,6 +156,8 @@ async def test_async_cancel_before_start(backend):
     await t1
     with pytest.raises(asyncio.CancelledError):
         await t2
+    
+    await flow.shutdown(skip_execution_backend=True)
 
 @pytest.mark.asyncio
 async def test_async_cancel_after_completion(backend):
@@ -168,6 +174,8 @@ async def test_async_cancel_after_completion(backend):
     t.cancel()
     t_result = await t
     assert t_result.strip() == "done"
+
+    await flow.shutdown(skip_execution_backend=True)
 
 @pytest.mark.asyncio
 async def test_async_cancel_one_of_many(backend):
