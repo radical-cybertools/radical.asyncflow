@@ -1,23 +1,14 @@
+import time
 import pytest
 import asyncio
 import signal
 import threading
-import time
-from unittest.mock import Mock, AsyncMock, patch, MagicMock
-from pathlib import Path
-
 import pytest_asyncio
 
-from radical.asyncflow import WorkflowEngine, NoopExecutionBackend
-
-import pytest
-import asyncio
-import signal
-import threading
-import time
-from unittest.mock import Mock, AsyncMock, patch, MagicMock
 from pathlib import Path
+from unittest.mock import Mock, AsyncMock, patch, MagicMock
 
+from radical.asyncflow import WorkflowEngine, NoopExecutionBackend
 
 class TestGracefulShutdown:
     """Test suite for graceful shutdown functionality of WorkflowEngine."""

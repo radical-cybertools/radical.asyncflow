@@ -7,8 +7,8 @@ from radical.asyncflow import WorkflowEngine
 from radical.asyncflow import DaskExecutionBackend
 
 
-@pytest_asyncio.fixture
-async def flow():
+@pytest_asyncio.fixture(scope='function')
+async def backend():
     # Setup: create backend and flow
     backend = await DaskExecutionBackend(
         {'n_workers': 2,
@@ -16,13 +16,14 @@ async def flow():
           'dashboard_address':None
           }
           )
-    flow = await WorkflowEngine.create(backend=backend)
-
     # provide the flow to the test
-    yield flow
+    yield backend
+    await backend.shutdown()
 
 @pytest.mark.asyncio
-async def test_funnel_dag_with_dask_backend(flow):
+async def test_funnel_dag_with_dask_backend(backend):
+
+    flow = await WorkflowEngine.create(backend=backend)
 
     @flow.function_task
     async def task1(*args):
@@ -44,8 +45,12 @@ async def test_funnel_dag_with_dask_backend(flow):
     assert isinstance(t3, int)
     assert t3 == 36
 
+    await flow.shutdown(skip_execution_backend=True)
+
 @pytest.mark.asyncio
-async def test_async_funnel_dag_with_dask_backend(flow):
+async def test_async_funnel_dag_with_dask_backend(backend):
+
+    flow = await WorkflowEngine.create(backend=backend)
 
     @flow.function_task
     async def task1():
@@ -75,8 +80,12 @@ async def test_async_funnel_dag_with_dask_backend(flow):
     assert isinstance(t3_result, int)
     assert t3_result == 36
 
+    await flow.shutdown(skip_execution_backend=True)
+
 @pytest.mark.asyncio
-async def test_dask_backend_rejects_executable_task(flow):
+async def test_dask_backend_rejects_executable_task(backend):
+
+    flow = await WorkflowEngine.create(backend=backend)
 
     with pytest.raises(ValueError, match="DaskExecutionBackend does not support executable tasks"):
         @flow.executable_task
@@ -85,9 +94,14 @@ async def test_dask_backend_rejects_executable_task(flow):
 
         not_supported_task1 = bad_task1()
         await not_supported_task1
+    
+    await flow.shutdown(skip_execution_backend=True)
 
 @pytest.mark.asyncio
-async def test_dask_backend_regular_task_failure(flow):
+async def test_dask_backend_regular_task_failure(backend):
+
+    flow = await WorkflowEngine.create(backend=backend)
+
     with pytest.raises(RuntimeError, match="Some error"):
         @flow.function_task
         async def bad_task2():
@@ -96,10 +110,14 @@ async def test_dask_backend_regular_task_failure(flow):
 
         not_supported_task2 = bad_task2()
         await not_supported_task2
+    
+    await flow.shutdown(skip_execution_backend=True)
 
 @pytest.mark.asyncio
-async def test_task_cancellation(flow):
+async def test_task_cancellation(backend):
     """Basic: Cancel tasks while running, they raise CancelledError."""
+
+    flow = await WorkflowEngine.create(backend=backend)
 
     @flow.function_task
     async def task():
@@ -117,11 +135,15 @@ async def test_task_cancellation(flow):
         await t1
     with pytest.raises(asyncio.CancelledError):
         await t2
+    
+    await flow.shutdown(skip_execution_backend=True)
 
 
 @pytest.mark.asyncio
-async def test_cancel_before_start(flow):
+async def test_cancel_before_start(backend):
     """Cancel a task before it even schedules."""
+
+    flow = await WorkflowEngine.create(backend=backend)
 
     @flow.function_task
     async def slow_task():
@@ -143,11 +165,15 @@ async def test_cancel_before_start(flow):
 
     with pytest.raises(asyncio.CancelledError):
         await t2
+    
+    await flow.shutdown(skip_execution_backend=True)
 
 
 @pytest.mark.asyncio
-async def test_cancel_after_completion(flow):
+async def test_cancel_after_completion(backend):
     """Cancel a task after it already completed — no effect."""
+
+    flow = await WorkflowEngine.create(backend=backend)
 
     @flow.function_task
     async def quick_task():
@@ -163,11 +189,15 @@ async def test_cancel_after_completion(flow):
 
     # Still returns the result
     assert await t == "done"
+    
+    await flow.shutdown(skip_execution_backend=True)
 
 
 @pytest.mark.asyncio
-async def test_cancel_one_of_many(flow):
+async def test_cancel_one_of_many(backend):
     """Cancel one task out of many — others should not be affected."""
+
+    flow = await WorkflowEngine.create(backend=backend)
 
     @flow.function_task
     async def task(n):
@@ -184,11 +214,15 @@ async def test_cancel_one_of_many(flow):
         await t1
 
     assert await t2 == 2
+    
+    await flow.shutdown(skip_execution_backend=True)
 
 
 @pytest.mark.asyncio
-async def test_cancel_with_dependencies(flow):
+async def test_cancel_with_dependencies(backend):
     """Cancel a task that another task depends on — dependency should error."""
+
+    flow = await WorkflowEngine.create(backend=backend)
 
     @flow.function_task
     async def parent():

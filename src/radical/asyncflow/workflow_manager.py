@@ -649,7 +649,7 @@ class WorkflowEngine:
 
         Continuously monitors and manages workflow components, handling their
         dependencies and execution states. Performs dependency resolution and
-24.  prepares components for execution when their dependencies are satisfied.
+        prepares components for execution when their dependencies are satisfied.
 
         Workflow Process:
             1. Monitors unresolved components
@@ -816,11 +816,10 @@ class WorkflowEngine:
                         shutdown_task = asyncio.create_task(
                             self._shutdown_event.wait(),
                              name='shutdown-event-task')
-                        done, pending = await asyncio.wait_for(
-                            asyncio.wait(
-                                [event_task, shutdown_task],
-                                return_when=asyncio.FIRST_COMPLETED
-                            ),
+
+                        done, pending = await asyncio.wait(
+                            [event_task, shutdown_task],
+                            return_when=asyncio.FIRST_COMPLETED,
                             timeout=1.0
                         )
                         # Cancel any pending tasks to clean up
@@ -829,8 +828,12 @@ class WorkflowEngine:
                         # Clear component change event if it was set
                         if event_task in done:
                             self._component_change_event.clear()
-                    except asyncio.TimeoutError:
-                        pass
+                    except asyncio.CancelledError:
+                        # If we get cancelled, make sure to clean up our tasks
+                        for task in [event_task, shutdown_task]:
+                            if not task.done():
+                                task.cancel()
+                        raise
                 else:
                     await asyncio.sleep(0.01)
 
