@@ -27,12 +27,13 @@ class _ColoredFormatter(logging.Formatter):
                 'red': '\033[91m',       # Bright red
                 'magenta': '\033[95m',   # Bright magenta
                 'white': '\033[97m',     # Bright white
-                'purple': '\033[95m',
+                'purple': '\033[95m',    # Bright magenta
+                'bright_purple': '\033[38;5;165m',  # Bright purple
                 'bold': '\033[1m',       # Bold
                 'reset': '\033[0m'       # Reset
             }
         else:
-            colors = {k: '' for k in ['grey', 'green', 'cyan', 'blue', 'yellow', 'red', 'magenta', 'white', 'purple', 'bold', 'reset']}
+            colors = {k: '' for k in ['grey', 'green', 'cyan', 'blue', 'yellow', 'red', 'magenta', 'white', 'purple', 'bright_purple', 'bold', 'reset']}
 
         # Detail formatting
         if show_details:
@@ -43,58 +44,76 @@ class _ColoredFormatter(logging.Formatter):
         # Style variations
         if style == "core":
             timestamp_fmt = f'{colors["grey"]}%(asctime)s.%(msecs)03d{colors["reset"]}'
-            level_fmt = '%(levelname)s{reset}'
-            logger_fmt = f'{colors["purple"]}[%(name)s]{colors["reset"]}'
+            level_fmt = f'{colors["cyan"]}%(levelname)s{colors["reset"]}'  # Fixed: added color placeholder
+            logger_fmt = f'{colors["bright_purple"]}[%(short_name)s]{colors["reset"]}'
             separator = ' │ '
         elif style == "execution_backend":
             timestamp_fmt = f'{colors["grey"]}%(asctime)s{colors["reset"]}'
-            level_fmt = '[%(levelname)-8s]{reset}'
-            logger_fmt = f'{colors["green"]}(%(name)s){colors["reset"]}'
+            level_fmt = f'{{level_color}}%(levelname)s{colors["reset"]}'  # Removed brackets and padding
+            logger_fmt = f'{colors["bright_purple"]}(%(short_name)s){colors["reset"]}'
             separator = ' - '
-        else:  # minimal
+        else:  # modern (default)
             timestamp_fmt = f'{colors["grey"]}%(asctime)s{colors["reset"]}'
-            level_fmt = '%(levelname)s{reset}'
-            logger_fmt = f'{colors["magenta"]}%(name)s{colors["reset"]}'
+            level_fmt = f'{colors["blue"]}%(levelname)s{colors["reset"]}'  # Fixed: added color placeholder
+            logger_fmt = f'{colors["bright_purple"]}%(short_name)s{colors["reset"]}'
             separator = ' '
 
         # Date format
         date_format = '%Y-%m-%d %H:%M:%S'
         
-        # Build format string
-        base_format = f'{timestamp_fmt}{separator}{detail_info}{level_fmt}{separator}{logger_fmt}{separator}%(message)s'
+        # Build format string - Fixed: removed .format() call that was breaking the formatter
+        if style == "core":
+            base_format = f'{timestamp_fmt}{separator}{detail_info}{{level_color}}%(levelname)s{colors["reset"]}{separator}{logger_fmt}{separator}%(message)s'
+        elif style == "execution_backend":
+            base_format = f'{timestamp_fmt}{separator}{detail_info}{{level_color}}%(levelname)s{colors["reset"]}{separator}{logger_fmt}{separator}%(message)s'
+        else:  # modern
+            base_format = f'{timestamp_fmt}{separator}{detail_info}{{level_color}}%(levelname)s{colors["reset"]}{separator}{logger_fmt}{separator}%(message)s'
         
         # Level-specific formatters
         self.level_formatters = {
             logging.DEBUG: logging.Formatter(
-                base_format.format(level=colors['cyan'], reset=colors['reset']), 
+                base_format.format(level_color=colors['cyan']), 
                 datefmt=date_format
             ),
             logging.INFO: logging.Formatter(
-                base_format.format(level=colors['blue'], reset=colors['reset']), 
+                base_format.format(level_color=colors['blue']), 
                 datefmt=date_format
             ),
             logging.WARNING: logging.Formatter(
-                base_format.format(level=colors['yellow'], reset=colors['reset']), 
+                base_format.format(level_color=colors['yellow']), 
                 datefmt=date_format
             ),
             logging.ERROR: logging.Formatter(
-                base_format.format(level=colors['red'], reset=colors['reset']), 
+                base_format.format(level_color=colors['red']), 
                 datefmt=date_format
             ),
             logging.CRITICAL: logging.Formatter(
-                base_format.format(level=colors['red'] + colors['bold'], reset=colors['reset']), 
+                base_format.format(level_color=colors['red'] + colors['bold']), 
                 datefmt=date_format
             ),
         }
 
     def format(self, record: logging.LogRecord) -> str:
+        # Extract short name from full logger name
+        if hasattr(record, 'name') and record.name:
+            if record.name == '__main__':
+                record.short_name = 'main'
+            elif 'backends.execution' in record.name:
+                record.short_name = f"execution.backend({record.name.split('.')[-1]})"
+            else:
+                # Get the last component of the logger name
+                record.short_name = record.name.split('.')[-1]
+        else:
+            record.short_name = 'unknown'
+
         return self.level_formatters[record.levelno].format(record)
 
 
-def _thread_info_filter(record: logging.LogRecord) -> logging.LogRecord:
+def _thread_info_filter(record: logging.LogRecord) -> bool:  # Fixed: should return bool
     """Add thread information to log records."""
     record.thread_id = threading.get_native_id()
-    return record
+    return True  # Fixed: filters must return True to pass the record
+
 
 def init_default_logger(
     log_level: Union[int, str] = logging.INFO,
@@ -115,7 +134,7 @@ def init_default_logger(
         file_log_level: Logging level for file output. Defaults to log_level.
         use_colors: Enable colored console output.
         show_details: Include thread/process info in log messages.
-        style: Format style - 'modern', 'classic', or 'minimal'.
+        style: Format style - 'modern', 'core', 'execution_backend', or 'minimal'.
         clear_handlers: Remove existing handlers from root logger.
         logger_name: Name for the logger. If None, returns root logger.
 
@@ -142,7 +161,7 @@ def init_default_logger(
     if show_details:
         console_handler.addFilter(_thread_info_filter)
 
-    handlers = [console_handler]
+    logger.addHandler(console_handler)  # Fixed: add handler to logger, not just to list
 
     # File handler (if requested)
     if output_file is not None:
@@ -162,14 +181,10 @@ def init_default_logger(
         if show_details:
             file_handler.addFilter(_thread_info_filter)
         
-        handlers.append(file_handler)
+        logger.addHandler(file_handler)  # Fixed: add handler to logger
 
-    # Configure logging
-    logging.basicConfig(
-        level=logging.NOTSET,
-        handlers=handlers,
-        force=clear_handlers,
-    )
+    # Set logger level
+    logger.setLevel(logging.NOTSET)  # Fixed: don't use basicConfig, just set logger level
 
     # Capture warnings
     logging.captureWarnings(True)
@@ -187,6 +202,7 @@ def init_default_logger(
     )
 
     return logger
+
 
 # Convenience function for quick setup
 def get_logger(name: str = None, level: Union[int, str] = logging.INFO) -> logging.Logger:

@@ -1203,8 +1203,8 @@ class WorkflowEngine:
         # Shutdown execution backend
         if not skip_execution_backend and self.backend:
             await self.backend.shutdown()
-            logger.debug("Shutting down execution backend")
+            logger.debug("Shutting down execution backend completed")
         else:
             logger.warning("Skipping execution backend shutdown as requested")
         
-        logger.info('Shutdown completed')
+        logger.info('Shutdown completed for all components.')
