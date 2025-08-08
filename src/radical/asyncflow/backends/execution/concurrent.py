@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import subprocess
 from typing import Dict, Callable, Optional, Any, List, Union
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
@@ -6,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 from ...constants import StateMapper
 from .base import Session, BaseExecutionBackend
 
+logger = logging.getLogger(__name__)
 
 class ConcurrentExecutionBackend(BaseExecutionBackend):
     """Simple async-only concurrent execution backend."""
@@ -29,7 +31,7 @@ class ConcurrentExecutionBackend(BaseExecutionBackend):
         if not self._initialized:
             StateMapper.register_backend_states_with_defaults(backend=self)
             self._initialized = True
-            print(f'{type(self.executor).__name__} execution backend started successfully')
+            logger.info(f'{type(self.executor).__name__} execution backend started successfully')
         return self
 
     def get_task_states_map(self):
@@ -159,7 +161,7 @@ class ConcurrentExecutionBackend(BaseExecutionBackend):
         """Shutdown the executor."""
         await self.cancel_all_tasks()
         self.executor.shutdown(wait=True)
-        print('Shutdown complete')
+        logger.info('Concurrent execution backend shutdown complete')
 
     def build_task(self, uid, task_desc, task_specific_kwargs):
         pass
@@ -188,6 +190,13 @@ class ConcurrentExecutionBackend(BaseExecutionBackend):
 
     @classmethod
     async def create(cls, executor: Union[ThreadPoolExecutor, ProcessPoolExecutor]):
-        """Factory method for creating initialized backend."""
+        """Alternative factory method for creating initialized backend.
+        
+        Args:
+            resources: Configuration parameters for Concurrent initialization.
+            
+        Returns:
+            Fully initialized ConcurrentExecutionBackend instance.
+        """
         backend = cls(executor)
         return await backend

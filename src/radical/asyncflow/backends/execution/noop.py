@@ -23,7 +23,6 @@ class NoopExecutionBackend(BaseExecutionBackend):
         self.session = Session()
         self._callback_func: Callable = lambda task, state: None  # default no-op
         StateMapper.register_backend_states_with_defaults(backend=self)
-        print('Noop execution backend started successfully')
 
     def state(self):
         """Get the current state of the no-op execution backend.
@@ -125,4 +124,4 @@ class NoopExecutionBackend(BaseExecutionBackend):
         Performs cleanup operations. Since this is a no-op backend, no actual
         resources need to be cleaned up.
         """
-        print('Dummy shutdown: Nothing to cleanup.')
+        pass

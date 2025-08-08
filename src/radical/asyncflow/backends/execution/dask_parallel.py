@@ -1,6 +1,7 @@
 import asyncio
 from typing import List, Dict, Any, Optional, Callable
 import dask
+import logging
 import typeguard
 from functools import wraps
 from dask.distributed import Client, Future as DaskFuture
@@ -9,10 +10,11 @@ from concurrent.futures import Future as ConcurrentFuture
 from ...constants import StateMapper
 from .base import BaseExecutionBackend, Session
 
+logger = logging.getLogger(__name__)
 
 class DaskExecutionBackend(BaseExecutionBackend):
     """An async-only Dask execution backend for distributed task execution.
-    
+
     Handles task submission, cancellation, and proper async event loop handling
     for distributed task execution using Dask. All functions must be async.
     
@@ -58,9 +60,9 @@ class DaskExecutionBackend(BaseExecutionBackend):
         """
         try:
             self._client = await Client(asynchronous=True, **self._resources)
-            print(f"Dask backend initialized with dashboard at {self._client.dashboard_link}")
+            logger.info(f"Dask backend initialized with dashboard at {self._client.dashboard_link}")
         except Exception as e:
-            print(f"Failed to initialize Dask client: {str(e)}")
+            logger.exception(f"Failed to initialize Dask client: {str(e)}")
             raise
 
     def register_callback(self, callback: Callable) -> None:
@@ -285,13 +287,14 @@ class DaskExecutionBackend(BaseExecutionBackend):
                 
                 # Close the client
                 await self._client.close()
-                print("Dask client shutdown complete")
+                logger.info("Dask client shutdown complete")
             except Exception as e:
-                print(f"Error during shutdown: {str(e)}")
+                logger.exception(f"Error during shutdown: {str(e)}")
             finally:
                 self._client = None
                 self.tasks.clear()
                 self._initialized = False
+                logger.info('Dask execution backend shutdown complete')
 
     def _ensure_initialized(self):
         """Ensure the backend has been properly initialized."""
