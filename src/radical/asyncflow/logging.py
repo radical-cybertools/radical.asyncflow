@@ -42,21 +42,11 @@ class _ColoredFormatter(logging.Formatter):
             detail_info = ''
 
         # Style variations
-        if style == "core":
-            timestamp_fmt = f'{colors["grey"]}%(asctime)s.%(msecs)03d{colors["reset"]}'
-            level_fmt = f'{colors["cyan"]}%(levelname)s{colors["reset"]}'  # Fixed: added color placeholder
-            logger_fmt = f'{colors["bright_purple"]}[%(short_name)s]{colors["reset"]}'
-            separator = ' │ '
-        elif style == "execution_backend":
-            timestamp_fmt = f'{colors["grey"]}%(asctime)s{colors["reset"]}'
-            level_fmt = f'{{level_color}}%(levelname)s{colors["reset"]}'  # Removed brackets and padding
-            logger_fmt = f'{colors["bright_purple"]}(%(short_name)s){colors["reset"]}'
-            separator = ' - '
-        else:  # modern (default)
-            timestamp_fmt = f'{colors["grey"]}%(asctime)s{colors["reset"]}'
-            level_fmt = f'{colors["blue"]}%(levelname)s{colors["reset"]}'  # Fixed: added color placeholder
-            logger_fmt = f'{colors["bright_purple"]}%(short_name)s{colors["reset"]}'
-            separator = ' '
+        timestamp_fmt = f'{colors["grey"]}%(asctime)s.%(msecs)03d{colors["reset"]}'
+        level_fmt = f'{colors["cyan"]}%(levelname)s{colors["reset"]}'  # Fixed: added color placeholder
+        logger_fmt = f'{colors["bright_purple"]}[%(short_name)s]{colors["reset"]}'
+        separator = ' │ '
+
 
         # Date format
         date_format = '%Y-%m-%d %H:%M:%S'
