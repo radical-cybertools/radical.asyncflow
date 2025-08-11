@@ -884,7 +884,7 @@ class WorkflowEngine:
                 tasks = [t for t in objects if t and BLOCK not in t['uid']]
                 blocks = [b for b in objects if b and TASK not in b['uid']]
 
-                logger.debug(f'Submitting {[b["name"] for b in objects]} for execution')
+                logger.info(f'Submitting {[b["name"] for b in objects]} for execution')
 
                 if tasks:
                     await self.backend.submit_tasks(tasks)
