@@ -7,9 +7,11 @@ from radical.asyncflow import RadicalExecutionBackend
 from radical.asyncflow.logging import init_default_logger
 
 logger = logging.getLogger(__name__)
-init_default_logger(logging.INFO)
 
 async def main():
+    
+    init_default_logger(logging.INFO)
+
     # Create backend and workflow
     backend = await RadicalExecutionBackend({'resource': 'local.localhost'})
     flow = await WorkflowEngine.create(backend=backend)

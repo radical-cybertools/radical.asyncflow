@@ -10,6 +10,7 @@ from radical.asyncflow.logging import init_default_logger
 logger = logging.getLogger(__name__)
 
 async def main():
+    
     init_default_logger(logging.INFO)
     
     # Create backend and workflow
