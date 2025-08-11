@@ -34,7 +34,12 @@ class _ColoredFormatter(logging.Formatter):
                 'reset': '\033[0m'       # Reset
             }
         else:
-            colors = {k: '' for k in ['grey', 'green', 'cyan', 'blue', 'yellow', 'red', 'magenta', 'white', 'purple', 'bright_purple', 'bold', 'reset']}
+            colors = {k: '' for k in [
+                'grey', 'green',
+                'cyan', 'blue',
+                'yellow', 'red',
+                'magenta', 'white',
+                'purple', 'bright_purple', 'bold', 'reset']}
 
         # Detail formatting
         if show_details:

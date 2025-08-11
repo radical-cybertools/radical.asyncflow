@@ -18,7 +18,9 @@ from .backends.execution.base import BaseExecutionBackend
 from .backends.execution.noop import NoopExecutionBackend
 from .data import InputFile, OutputFile
 from .errors import DependencyFailure
-from .utils import _get_event_loop_or_raise
+from .utils import get_next_uid
+from .utils import reset_uid_counter
+from .utils import get_event_loop_or_raise
 
 TASK = 'task'
 BLOCK = 'block'
@@ -60,7 +62,7 @@ class WorkflowEngine:
             implicit_data: Whether to enable implicit data dependency linking
         """
         # Get the current running loop - assume it exists
-        self.loop = _get_event_loop_or_raise("WorkflowEngine")
+        self.loop = get_event_loop_or_raise("WorkflowEngine")
 
         # Store backend (already validated by create method)
         self.backend = backend
@@ -75,7 +77,6 @@ class WorkflowEngine:
         self.implicit_data_mode = implicit_data
 
         # Optimization: Track component state changes
-        self._uid_counter = count(1)
         self._ready_queue = deque()
         self._dependents_map = defaultdict(set)
         self._dependency_count = {}
@@ -497,7 +498,8 @@ class WorkflowEngine:
         Returns:
             str: A unique identifier like 'task.000001'.
         """
-        return f"{prefix}.{next(self._uid_counter):06d}"
+        uid = get_next_uid()
+        return f"{prefix}.{uid}"
 
     def _detect_dependencies(self, possible_dependencies):
         """
@@ -580,6 +582,8 @@ class WorkflowEngine:
         self._ready_queue.clear()
         self._dependents_map.clear()
         self._dependency_count.clear()
+
+        reset_uid_counter()
 
     def _notify_dependents(self, comp_uid: str):
         """Notify dependents that a component has completed and update ready queue."""
@@ -1173,6 +1177,13 @@ class WorkflowEngine:
         # Signal components to exit
         self._shutdown_event.set()
 
+        # cancel workflow futures (tasks and blocks)
+        for comp in self.components.values():
+            future = comp['future']
+            comp_desc = comp['description']
+            if not future.done():
+                self.handle_task_cancellation(comp_desc, future)
+
         internal_components = [t for t in (self._run_task, self._submit_task) if t]
 
         # Cancel internal components tasks
@@ -1193,18 +1204,12 @@ class WorkflowEngine:
         except asyncio.CancelledError:
             logger.warning("Internal components shutdown cancelled")
 
-        # cancel workflow futures (tasks and blocks)
-        for comp in self.components.values():
-            future = comp['future']
-            comp_desc = comp['description']
-            if not future.done():
-                self.handle_task_cancellation(comp_desc, future)
-
         # Shutdown execution backend
         if not skip_execution_backend and self.backend:
             await self.backend.shutdown()
+            self._clear()
             logger.debug("Shutting down execution backend completed")
         else:
             logger.warning("Skipping execution backend shutdown as requested")
-        
+
         logger.info('Shutdown completed for all components.')
