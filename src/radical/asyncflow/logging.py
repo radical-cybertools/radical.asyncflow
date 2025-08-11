@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import pathlib
 import sys
@@ -43,42 +44,44 @@ class _ColoredFormatter(logging.Formatter):
 
         # Style variations
         timestamp_fmt = f'{colors["grey"]}%(asctime)s.%(msecs)03d{colors["reset"]}'
-        level_fmt = f'{colors["cyan"]}%(levelname)s{colors["reset"]}'  # Fixed: added color placeholder
+        level_fmt = f'{colors["cyan"]}%(levelname)s{colors["reset"]}'
         logger_fmt = f'{colors["bright_purple"]}[%(short_name)s]{colors["reset"]}'
         separator = ' │ '
 
-
         # Date format
         date_format = '%Y-%m-%d %H:%M:%S'
-        
-        # Build format string - Fixed: removed .format() call that was breaking the formatter
-        if style == "core":
-            base_format = f'{timestamp_fmt}{separator}{detail_info}{{level_color}}%(levelname)s{colors["reset"]}{separator}{logger_fmt}{separator}%(message)s'
-        elif style == "execution_backend":
-            base_format = f'{timestamp_fmt}{separator}{detail_info}{{level_color}}%(levelname)s{colors["reset"]}{separator}{logger_fmt}{separator}%(message)s'
-        else:  # modern
-            base_format = f'{timestamp_fmt}{separator}{detail_info}{{level_color}}%(levelname)s{colors["reset"]}{separator}{logger_fmt}{separator}%(message)s'
-        
-        # Level-specific formatters
+
+        level_colors = {
+            logging.DEBUG: colors['cyan'],
+            logging.INFO: colors['blue'],
+            logging.WARNING: colors['yellow'], 
+            logging.ERROR: colors['red'],
+            logging.CRITICAL: colors['red'] + colors['bold']
+        }
+
+        # Build base format string
+        base_format = f'{timestamp_fmt}{separator}{detail_info}{{level_color}}%(levelname)s{colors["reset"]}{separator}{logger_fmt}{separator}%(message)s'
+
+        # Level-specific formatters with style-dependent colors
         self.level_formatters = {
             logging.DEBUG: logging.Formatter(
-                base_format.format(level_color=colors['cyan']), 
+                base_format.format(level_color=level_colors[logging.DEBUG]), 
                 datefmt=date_format
             ),
             logging.INFO: logging.Formatter(
-                base_format.format(level_color=colors['blue']), 
+                base_format.format(level_color=level_colors[logging.INFO]), 
                 datefmt=date_format
             ),
             logging.WARNING: logging.Formatter(
-                base_format.format(level_color=colors['yellow']), 
+                base_format.format(level_color=level_colors[logging.WARNING]), 
                 datefmt=date_format
             ),
             logging.ERROR: logging.Formatter(
-                base_format.format(level_color=colors['red']), 
+                base_format.format(level_color=level_colors[logging.ERROR]), 
                 datefmt=date_format
             ),
             logging.CRITICAL: logging.Formatter(
-                base_format.format(level_color=colors['red'] + colors['bold']), 
+                base_format.format(level_color=level_colors[logging.CRITICAL]), 
                 datefmt=date_format
             ),
         }
@@ -99,10 +102,79 @@ class _ColoredFormatter(logging.Formatter):
         return self.level_formatters[record.levelno].format(record)
 
 
-def _thread_info_filter(record: logging.LogRecord) -> bool:  # Fixed: should return bool
+class _StructuredFormatter(logging.Formatter):
+    """JSON formatter for structured logging."""
+    
+    def format(self, record: logging.LogRecord) -> str:
+        log_data = {
+            'timestamp': self.formatTime(record),
+            'level': record.levelname,
+            'logger': record.name,
+            'message': record.getMessage(),
+        }
+        
+        # Add any extra fields passed via extra= parameter
+        for key, value in record.__dict__.items():
+            if key not in ('name', 'msg', 'args', 'levelname', 'levelno', 'pathname', 
+                          'filename', 'module', 'lineno', 'funcName', 'created', 
+                          'msecs', 'relativeCreated', 'thread', 'threadName', 
+                          'processName', 'process', 'message', 'exc_info', 'exc_text', 
+                          'stack_info'):
+                log_data[key] = value
+        
+        # Add exception info if present
+        if record.exc_info:
+            log_data['exception'] = self.formatException(record.exc_info)
+            
+        return json.dumps(log_data, default=str)
+
+
+class StructuredLogger:
+    """Drop-in replacement that adds structured logging capabilities."""
+    
+    def __init__(self, logger: logging.Logger):
+        self._logger = logger
+    
+    def info(self, message: str, **kwargs):
+        """Enhanced info() that accepts both old and new usage patterns."""
+        if kwargs:
+            self._logger.info(message, extra=kwargs)
+        else:
+            self._logger.info(message)
+    
+    def error(self, message: str, **kwargs):
+        if kwargs:
+            self._logger.error(message, extra=kwargs)
+        else:
+            self._logger.error(message)
+    
+    def debug(self, message: str, **kwargs):
+        if kwargs:
+            self._logger.debug(message, extra=kwargs)
+        else:
+            self._logger.debug(message)
+    
+    def warning(self, message: str, **kwargs):
+        if kwargs:
+            self._logger.warning(message, extra=kwargs)
+        else:
+            self._logger.warning(message)
+    
+    def critical(self, message: str, **kwargs):
+        if kwargs:
+            self._logger.critical(message, extra=kwargs)
+        else:
+            self._logger.critical(message)
+    
+    # Delegate other methods to underlying logger
+    def __getattr__(self, name):
+        return getattr(self._logger, name)
+
+
+def _thread_info_filter(record: logging.LogRecord) -> bool:
     """Add thread information to log records."""
     record.thread_id = threading.get_native_id()
-    return True  # Fixed: filters must return True to pass the record
+    return True
 
 
 def init_default_logger(
@@ -115,6 +187,8 @@ def init_default_logger(
     style: str = "modern",
     clear_handlers: bool = False,
     logger_name: Optional[str] = None,
+    structured_logging: bool = False,
+    structured_file: Optional[Union[str, pathlib.Path]] = None,
 ) -> logging.Logger:
     """Setup and configure logging with enhanced features.
 
@@ -127,6 +201,8 @@ def init_default_logger(
         style: Format style - 'modern', 'core', 'execution_backend', or 'minimal'.
         clear_handlers: Remove existing handlers from root logger.
         logger_name: Name for the logger. If None, returns root logger.
+        structured_logging: Enable JSON structured logging to file (auto-creates structured.log).
+        structured_file: Custom path for structured JSON log file.
 
     Returns:
         Configured logger instance.
@@ -138,22 +214,24 @@ def init_default_logger(
     if clear_handlers:
         logger.handlers.clear()
     
-    # Console handler
-    console_handler = logging.StreamHandler(sys.stdout)
+    # Console always uses colored formatter (never JSON)
     console_formatter = _ColoredFormatter(
         use_colors=use_colors, 
         show_details=show_details, 
         style=style
     )
+    
+    # Console handler
+    console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setFormatter(console_formatter)
     console_handler.setLevel(log_level)
 
     if show_details:
         console_handler.addFilter(_thread_info_filter)
 
-    logger.addHandler(console_handler)  # Fixed: add handler to logger, not just to list
+    logger.addHandler(console_handler)
 
-    # File handler (if requested)
+    # Regular file handler (if requested) - uses colored formatter without colors
     if output_file is not None:
         file_level = log_level if file_log_level is None else file_log_level
         file_path = pathlib.Path(output_file)
@@ -171,10 +249,35 @@ def init_default_logger(
         if show_details:
             file_handler.addFilter(_thread_info_filter)
         
-        logger.addHandler(file_handler)  # Fixed: add handler to logger
+        logger.addHandler(file_handler)
+
+    # Structured JSON file handler (if requested)
+    if structured_logging:
+        # Auto-generate structured log file name if not provided
+        if structured_file is None:
+            if output_file is not None:
+                # Use same directory as regular log file
+                structured_file = pathlib.Path(output_file).with_suffix('.json')
+            else:
+                # Default to structured.log in current directory
+                structured_file = 'radical.asyncflow.logs.json'
+
+        struct_level = log_level if file_log_level is None else file_log_level
+        struct_path = pathlib.Path(structured_file)
+        struct_path.parent.mkdir(parents=True, exist_ok=True)
+
+        struct_handler = logging.FileHandler(struct_path)
+        struct_formatter = _StructuredFormatter()
+        struct_handler.setFormatter(struct_formatter)
+        struct_handler.setLevel(struct_level)
+        
+        if show_details:
+            struct_handler.addFilter(_thread_info_filter)
+        
+        logger.addHandler(struct_handler)
 
     # Set logger level
-    logger.setLevel(logging.NOTSET)  # Fixed: don't use basicConfig, just set logger level
+    logger.setLevel(logging.NOTSET)
 
     # Capture warnings
     logging.captureWarnings(True)
@@ -183,15 +286,29 @@ def init_default_logger(
     level_name = logging.getLevelName(log_level) if isinstance(log_level, int) else log_level
     file_level_name = logging.getLevelName(file_log_level) if isinstance(file_log_level, int) else file_log_level
     
+    structured_info = f"structured.log" if structured_logging and structured_file is None else str(structured_file) if structured_logging else "disabled"
+    
     logger.info(
-        'Logger configured successfully - Console: %s, File: %s (%s), Style: %s',
+        'Logger configured successfully - Console: %s, File: %s (%s), Structured: %s, Style: %s',
         level_name,
         output_file or 'disabled',
         file_level_name or 'N/A',
+        structured_info,
         style
     )
 
     return logger
+
+
+def get_structured_logger(name: str = None, level: Union[int, str] = logging.INFO) -> StructuredLogger:
+    """Get a structured logger that supports both old and new usage patterns."""
+    # Check if logger already configured, if not configure it with structured logging
+    base_logger = logging.getLogger(name)
+    if not base_logger.handlers:
+        init_default_logger(level, logger_name=name, structured_logging=True)
+        base_logger = logging.getLogger(name)
+    
+    return StructuredLogger(base_logger)
 
 
 # Convenience function for quick setup
