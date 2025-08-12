@@ -1,4 +1,5 @@
 import copy
+import logging
 import threading
 import typeguard
 
@@ -11,6 +12,7 @@ import radical.pilot as rp
 from ...constants import StateMapper
 from .base import BaseExecutionBackend
 
+logger = logging.getLogger(__name__)
 
 def service_ready_callback(future, task, state):
     """Callback function for handling service task readiness.
@@ -132,7 +134,7 @@ class RadicalExecutionBackend(BaseExecutionBackend):
 
         Note:
             - Automatically registers backend states with the global StateMapper
-            - Prints status messages for successful initialization or failures
+            - logs status messages for successful initialization or failures
             - Session UID is generated using radical.utils for uniqueness
         """
         self.resources = resources
@@ -165,7 +167,7 @@ class RadicalExecutionBackend(BaseExecutionBackend):
 
             if self.raptor_config:
                 self.raptor_mode = True
-                print('Enabling Raptor mode for RadicalExecutionBackend')
+                logger.info('Enabling Raptor mode for RadicalExecutionBackend')
                 self.setup_raptor_mode(self.raptor_config)
 
             # register the backend task states to the global state manager
@@ -175,10 +177,10 @@ class RadicalExecutionBackend(BaseExecutionBackend):
                                                 canceled_state=rp.CANCELED,
                                                 running_state=rp.AGENT_EXECUTING)
 
-            print('RadicalPilot execution backend started successfully\n')
+            logger.info('RadicalPilot execution backend started successfully\n')
 
         except Exception:
-            print('RadicalPilot execution backend Failed to start, terminating\n')
+            logger.exception('RadicalPilot execution backend Failed to start, terminating\n')
             raise
 
         except (KeyboardInterrupt, SystemExit) as e:
@@ -636,8 +638,8 @@ class RadicalExecutionBackend(BaseExecutionBackend):
             - Ensures graceful termination of all backend resources
             - Prints confirmation message when shutdown is triggered
         """
-        print('Shutdown is triggered, terminating the resources gracefully')
         self.session.close(download=True)
+        logger.info("Radical Pilot execution backend shutdown complete")
 
     async def __aenter__(self):
         """Async context manager entry."""
@@ -651,6 +653,13 @@ class RadicalExecutionBackend(BaseExecutionBackend):
 
     @classmethod
     async def create(cls, resources: Dict, raptor_config: Optional[Dict] = None):
-        """Alternative factory method for creating initialized backend."""
+        """Alternative factory method for creating initialized backend.
+        
+        Args:
+            resources: Configuration parameters for Radical Pilot initialization.
+            
+        Returns:
+            Fully initialized RadicalExecutionBackend instance.
+        """
         backend = cls(resources, raptor_config)
         return await backend

@@ -25,7 +25,7 @@ class TestGracefulShutdown:
         mock_backend.shutdown = AsyncMock()
         
         # Create engine with mocked backend
-        with patch('radical.asyncflow.workflow_manager._get_event_loop_or_raise') as mock_loop:
+        with patch('radical.asyncflow.workflow_manager.get_event_loop_or_raise') as mock_loop:
             mock_loop.return_value = asyncio.get_event_loop()
 
             engine = WorkflowEngine.__new__(WorkflowEngine)
@@ -34,8 +34,6 @@ class TestGracefulShutdown:
             # Set up basic internal tasks if they don't exist
             if not hasattr(engine, '_run_task') or engine._run_task is None:
                 engine._run_task = asyncio.create_task(self._mock_run_component())
-            if not hasattr(engine, '_submit_task') or engine._submit_task is None:
-                engine._submit_task = asyncio.create_task(self._mock_submit_component())
             
             # Initialize components dict if not exists
             if not hasattr(engine, 'components'):
@@ -52,7 +50,7 @@ class TestGracefulShutdown:
                 print(f"Cleanup error: {e}")
 
             # Cancel any remaining tasks
-            for task in [engine._run_task, engine._submit_task]:
+            for task in [engine._run_task]:
                 if task and not task.done():
                     task.cancel()
                     try:
@@ -65,7 +63,6 @@ class TestGracefulShutdown:
         """Test 1: Manual shutdown completes cleanly without errors."""
         # Arrange: Set up mock tasks that will complete normally
         engine._run_task = asyncio.create_task(self._mock_run_component())
-        engine._submit_task = asyncio.create_task(self._mock_submit_component())
 
         # Act: Call shutdown
         start_time = time.time()
@@ -75,7 +72,6 @@ class TestGracefulShutdown:
         # Assert: Shutdown completed quickly and cleanly
         assert engine._shutdown_event.is_set()
         assert engine._run_task.cancelled() or engine._run_task.done()
-        assert engine._submit_task.cancelled() or engine._submit_task.done()
         assert (end_time - start_time) < 1.0  # Should complete quickly
 
     @pytest.mark.asyncio
@@ -133,7 +129,7 @@ class TestGracefulShutdown:
         engine.shutdown = mock_shutdown
 
         # Act: Simulate signal reception by calling the handler directly
-        await engine._handle_signal(signal.SIGTERM)
+        await engine._handle_shutdown_signal(signal.SIGTERM)
 
         # Wait for shutdown to be called with timeout
         try:
@@ -152,8 +148,7 @@ class TestGracefulShutdown:
         async def slow_task():
             await asyncio.sleep(10)  # Long-running task
 
-        engine._run_task = asyncio.create_task(slow_task())
-        engine._submit_task = asyncio.create_task(slow_task())
+        engine._run_task = asyncio.create_task(slow_task()) 
 
         # Act: Shutdown with timeout
         start_time = time.time()
@@ -164,7 +159,6 @@ class TestGracefulShutdown:
         assert engine._shutdown_event.is_set()
         assert (end_time - start_time) < 7.0  # Should timeout and continue
         assert engine._run_task.cancelled()
-        assert engine._submit_task.cancelled()
 
     @pytest.mark.asyncio
     async def test_backend_shutdown_integration(self, engine):
@@ -176,8 +170,6 @@ class TestGracefulShutdown:
         # Ensure internal tasks are properly set up
         if not hasattr(engine, '_run_task') or engine._run_task is None:
             engine._run_task = asyncio.create_task(self._mock_run_component())
-        if not hasattr(engine, '_submit_task') or engine._submit_task is None:
-            engine._submit_task = asyncio.create_task(self._mock_submit_component())
 
         # Act: Shutdown without skipping backend
         await engine.shutdown(skip_execution_backend=False)
@@ -191,7 +183,6 @@ class TestGracefulShutdown:
         """Test 6: Multiple concurrent shutdown calls are handled safely."""
         # Arrange: Set up normal components
         engine._run_task = asyncio.create_task(self._mock_run_component())
-        engine._submit_task = asyncio.create_task(self._mock_submit_component())
 
         # Act: Call shutdown multiple times concurrently
         shutdown_tasks = [
@@ -224,7 +215,7 @@ class TestGracefulShutdown:
             mock_backend.register_callback = Mock()
             
             # Create engine (will trigger signal handler registration)
-            with patch('radical.asyncflow.workflow_manager._get_event_loop_or_raise') as mock_loop_check:
+            with patch('radical.asyncflow.workflow_manager.get_event_loop_or_raise') as mock_loop_check:
                 mock_loop_check.return_value = mock_loop
                 
                 engine = WorkflowEngine.__new__(WorkflowEngine)
@@ -250,15 +241,6 @@ class TestGracefulShutdown:
         except asyncio.CancelledError:
             return
 
-    async def _mock_submit_component(self):
-        """Mock submit component that responds to shutdown signal."""
-        try:
-            while True:
-                await asyncio.sleep(0.1)
-        except asyncio.CancelledError:
-            return
-
-
 # Additional integration test for real signal handling
 class TestSignalIntegration:
     """Integration tests for signal handling (requires careful setup)."""
@@ -282,13 +264,17 @@ class TestSignalIntegration:
             mock_backend.register_callback = Mock()
             mock_backend.shutdown = AsyncMock()
 
+            async def mock_run_task():
+                await asyncio.sleep(10)  # Long-running task
+
             try:
-                with patch('radical.asyncflow.workflow_manager._get_event_loop_or_raise') as mock_loop:
+                with patch('radical.asyncflow.workflow_manager.get_event_loop_or_raise') as mock_loop:
                     mock_loop.return_value = asyncio.get_event_loop()
-                    
+
                     engine = WorkflowEngine.__new__(WorkflowEngine)
                     engine.__init__(backend=mock_backend)
-                    
+                    engine._run_task = asyncio.create_task(mock_run_task()) 
+
                     # Note: Using SIGUSR1 instead of sending real termination signals
                     # Manual cleanup
                     await engine.shutdown(skip_execution_backend=True)

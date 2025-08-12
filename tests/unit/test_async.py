@@ -13,7 +13,4 @@ async def test_async_context_startup():
 
     # Check that tasks have been scheduled
     assert hasattr(engine, '_run_task'), "Engine did not schedule run task."
-    assert hasattr(engine, '_submit_task'), "Engine did not schedule submit task."
     assert not engine._run_task.done(), "Run task finished prematurely."
-    assert not engine._submit_task.done(), "Submit task finished prematurely."
-

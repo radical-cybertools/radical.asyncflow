@@ -1,27 +1,33 @@
 # flake8: noqa
-import os
-import signal
+from __future__ import annotations
+
 import asyncio
 import inspect
+import logging
+import os
+import signal
 from collections import defaultdict, deque
-from pathlib import Path
-from typing import Callable, Optional, Union, Any
 from functools import wraps
+from itertools import count
+from pathlib import Path
+from typing import Any, Callable, Optional, Union
 
-import radical.utils as ru
 import typeguard
 
+from .backends.execution.base import BaseExecutionBackend
+from .backends.execution.noop import NoopExecutionBackend
 from .data import InputFile, OutputFile
 from .errors import DependencyFailure
-from .backends.execution.noop import NoopExecutionBackend
-from .backends.execution.base import BaseExecutionBackend
-
-from .utils import _get_event_loop_or_raise
+from .utils import get_next_uid
+from .utils import reset_uid_counter
+from .utils import get_event_loop_or_raise
 
 TASK = 'task'
 BLOCK = 'block'
 FUNCTION = 'function'
 EXECUTABLE = 'executable'
+
+logger = logging.getLogger(__name__)
 
 
 class WorkflowEngine:
@@ -56,7 +62,7 @@ class WorkflowEngine:
             implicit_data: Whether to enable implicit data dependency linking
         """
         # Get the current running loop - assume it exists
-        self.loop = _get_event_loop_or_raise("WorkflowEngine")
+        self.loop = get_event_loop_or_raise("WorkflowEngine")
 
         # Store backend (already validated by create method)
         self.backend = backend
@@ -81,10 +87,6 @@ class WorkflowEngine:
         # Setup working directory
         self.work_dir = self.backend.session.path or os.getcwd()
 
-        # Setup logging and profiling
-        self.log = ru.Logger(name='workflow_manager', ns='radical.asyncflow', path=self.work_dir)
-        self.prof = ru.Profiler(name='workflow_manager', ns='radical.asyncflow', path=self.work_dir)
-
         # Register callback with backend
         self.backend.register_callback(self.task_callbacks)
 
@@ -95,7 +97,6 @@ class WorkflowEngine:
 
         # Initialize async task references (will be set in _start_async_components)
         self._run_task = None
-        self._submit_task = None
         self._shutdown_event = asyncio.Event()  # Added shutdown signal
 
         self._setup_signal_handlers()
@@ -109,13 +110,13 @@ class WorkflowEngine:
             try:
                 self.loop.add_signal_handler(
                     sig, lambda s=sig: asyncio.create_task(
-                        self._handle_signal(s), name=f'{sig.name}-task')
+                        self._handle_shutdown_signal(s), name=f'{sig.name}-task')
                 )
-                self.log.debug(f"Registered signal handler for {sig.name}")
+                logger.debug(f"Registered signal handler for {sig.name}")
             except NotImplementedError:
-                self.log.exception(f"Signal {sig.name} not supported on this platform")
+                logger.exception(f"Signal {sig.name} not supported on this platform")
 
-    async def _handle_signal(self, sig: signal.Signals):
+    async def _handle_shutdown_signal(self, sig: signal.Signals, source: str = 'external'):
         """
         Handle received signals by initiating a graceful shutdown.
 
@@ -123,9 +124,11 @@ class WorkflowEngine:
             sig: The signal received (e.g., SIGHUP, SIGTERM, SIGINT)
         """
         if self._shutdown_event.is_set():
+            logger.info(f"Shutdown process already started")
             return
 
-        self.log.info(f"Received signal {sig.name}, initiating graceful shutdown")
+        logger.info(f"Received {source} shutdown signal ({sig.name}), initiating graceful shutdown")
+
         await self.shutdown()
 
     @classmethod
@@ -173,13 +176,11 @@ class WorkflowEngine:
     async def _start_async_components(self):
         """Start internal async components (run and submit tasks)."""
         self._run_task = asyncio.create_task(self.run(), name='run-component')
-        self._submit_task = asyncio.create_task(self.submit(), name='submit-component')
 
-        comps = [self._run_task.get_coro().__name__, 
-                 self._submit_task.get_coro().__name__]
+        comps = [self._run_task.get_coro().__name__]
 
         for comp in comps:
-            self.log.debug(f"Started {comp} component")
+            logger.debug(f"Started {comp} component")
 
     def _update_dependency_tracking(self, comp_uid: str):
         """Update dependency tracking structures for a component."""
@@ -440,7 +441,7 @@ class WorkflowEngine:
 
         self.dependencies[comp_desc['uid']] = comp_deps
 
-        self.log.debug(f"Registered {comp_type}: '{comp_desc['name']}' with id of {comp_desc['uid']}")
+        logger.debug(f"Registered {comp_type}: '{comp_desc['name']}' with id of {comp_desc['uid']}")
 
         # Update dependency tracking
         self._update_dependency_tracking(comp_desc['uid'])
@@ -476,29 +477,28 @@ class WorkflowEngine:
                 # This follows asyncio.Future.cancel() behavior, which is best-effort.
                 # Actual cancellation is handled asynchronously by the backend and delivered to the
                 # WorkflowEngine via callbacks only.
-                self.log.debug(f"Cancellation requested for {uid} (running) from the execution backend")
+                logger.info(f"Cancellation requested for {uid} (running) from the execution backend")
                 asyncio.create_task(self.backend.cancel_task(uid)) # fire and forget (non-blocking)
                 return True
             else:
                 # Task is pending -> cancel locally
-                self.log.debug(f"Cancellation requested for {uid} (pending) locally")
+                logger.info(f"Cancellation requested for {uid} (pending) locally")
                 return fut.original_cancel
 
         return patched_cancel
 
     def _assign_uid(self, prefix: str) -> str:
         """
-        Generates a unique identifier (UID) for a flow component.
+        Generates a unique identifier (UID) for a flow component using a counter.
 
-        This method generates a custom flow component UID based on the format
-        `task.%(item_counter)06d` and assigns it a session-specific namespace
-        using the backend session UID.
+        Args:
+            prefix (str): The prefix to use for the UID.
 
         Returns:
-            str: The generated unique identifier for the flow component.
+            str: A unique identifier like 'task.000001'.
         """
-
-        return ru.generate_id(prefix, ru.ID_SIMPLE)
+        uid = get_next_uid()
+        return f"{prefix}.{uid}"
 
     def _detect_dependencies(self, possible_dependencies):
         """
@@ -574,13 +574,15 @@ class WorkflowEngine:
 
         return tuple(resolved_args), resolved_kwargs
 
-    def _clear(self):
+    def _clear_internal_records(self):
         """Clear workflow components and their dependencies."""
         self.components.clear()
         self.dependencies.clear()
         self._ready_queue.clear()
         self._dependents_map.clear()
         self._dependency_count.clear()
+
+        reset_uid_counter()
 
     def _notify_dependents(self, comp_uid: str):
         """Notify dependents that a component has completed and update ready queue."""
@@ -656,7 +658,7 @@ class WorkflowEngine:
             2. Checks dependency resolution status
             3. Prepares resolved components for execution
             4. Handles data staging between components
-            5. Submits ready components to execution queue
+            5. Submits ready components to execution
 
         Args:
             None
@@ -679,6 +681,7 @@ class WorkflowEngine:
             - Runs indefinitely until cancelled or shutdown is signaled
             - Uses sleep intervals to prevent busy-waiting
             - Handles both implicit and explicit data dependencies
+            - Trigger internal shutdown on loop failure
         """
         while not self._shutdown_event.is_set():
             try:
@@ -716,11 +719,11 @@ class WorkflowEngine:
                         comp_desc = self.components[comp_uid]['description']
 
                         if cancelled_deps:
-                            self.log.info(f"Cancelling {comp_desc['name']} due to cancelled dependencies")
+                            logger.info(f"Cancelling {comp_desc['name']} due to cancelled dependencies")
                             self.handle_task_cancellation(comp_desc, self.components[comp_uid]['future'])
                         else:  # failed_deps
                             chained_exception = self._create_dependency_failure_exception(comp_desc, failed_deps)
-                            self.log.error(f"Dependency failure for {comp_desc['name']}: {chained_exception}")
+                            logger.error(f"Dependency failure for {comp_desc['name']}: {chained_exception}")
                             self.handle_task_failure(comp_desc, self.components[comp_uid]['future'], chained_exception)
 
                         # Common cleanup
@@ -738,13 +741,13 @@ class WorkflowEngine:
 
                             # Link implicit data dependencies
                             if self.implicit_data_mode and not dep_desc['metadata'].get('output_files'):
-                                self.log.debug(f'Linking implicit file(s): from {dep_desc["name"]} to {comp_desc["name"]}')
+                                logger.debug(f'Linking implicit file(s): from {dep_desc["name"]} to {comp_desc["name"]}')
                                 self.backend.link_implicit_data_deps(dep_desc, comp_desc)
 
                             # Link explicit data dependencies
                             for output_file in dep_desc['metadata']['output_files']:
                                 if output_file in comp_desc['metadata']['input_files']:
-                                    self.log.debug(f'Linking explicit file ({output_file}) from {dep_desc["name"]} to {comp_desc["name"]}')
+                                    logger.debug(f'Linking explicit file ({output_file}) from {dep_desc["name"]} to {comp_desc["name"]}')
                                     data_dep = self.backend.link_explicit_data_deps(
                                         src_task=dep_desc,
                                         dst_task=comp_desc,
@@ -759,7 +762,7 @@ class WorkflowEngine:
                         for input_file in comp_desc['metadata']['input_files']:
                             input_basename = Path(input_file).name
                             if input_basename not in staged_targets and input_basename not in dependency_output_files:
-                                self.log.debug(f'Staging {input_file} to {comp_desc["name"]} work dir')
+                                logger.debug(f'Staging {input_file} to {comp_desc["name"]} work dir')
                                 data_dep = self.backend.link_explicit_data_deps(
                                     src_task=None,
                                     dst_task=comp_desc,
@@ -772,7 +775,7 @@ class WorkflowEngine:
                         # Update the component description with resolved values
                         comp_desc['args'], comp_desc['kwargs'] = await self._extract_dependency_values(comp_desc)
                     except Exception as e:
-                        self.log.error(f"Failed to resolve future for {comp_desc['name']}: {e}")
+                        logger.error(f"Failed to resolve future for {comp_desc['name']}: {e}")
                         self.handle_task_failure(comp_desc, self.components[comp_uid]['future'], e)
                         self.resolved.add(comp_uid)
                         self._notify_dependents(comp_uid)
@@ -781,11 +784,11 @@ class WorkflowEngine:
                     to_submit.append(comp_desc)
                     msg = f"Ready to submit: {comp_desc['name']}"
                     msg += f" with resolved dependencies: {[dep['name'] for dep in dependencies]}"
-                    self.log.debug(msg)
+                    logger.debug(msg)
 
                 # Submit ready components
                 if to_submit:
-                    await self.queue.put(to_submit)
+                    await self.submit(to_submit)
                     for comp_desc in to_submit:
                         comp_uid = comp_desc['uid']
                         self.running.append(comp_uid)
@@ -838,72 +841,49 @@ class WorkflowEngine:
                     await asyncio.sleep(0.01)
 
             except asyncio.CancelledError:
-                self.log.debug("Run component cancelled")
+                logger.debug("Run component cancelled")
                 break
             except Exception as e:
-                self.log.exception(f"Error in run loop: {e}")
-                await asyncio.sleep(0.1)
+                logger.exception(f"Error in run loop: {e}")
+                await self._handle_shutdown_signal(signal.SIGUSR1, source='internal')
+                break
 
-    async def submit(self):
+    async def submit(self, objects):
         """Manages asynchronous submission of tasks and blocks to the execution backend.
 
-        Continuously monitors the internal queue, retrieves ready tasks and blocks,
-        and submits them for execution. Separates incoming objects into tasks and
-        blocks based on their UID pattern, and dispatches each to the appropriate
-        backend method.
+        Retrieves and submit ready tasks and blocks for execution. Separates incoming
+        objects into tasks and blocks based on their UID pattern, and dispatches each
+        to the appropriate backend method.
 
         Submission Process:
-            1. Waits for a batch of objects from the queue
+            1. Receive batch of objects
             2. Filters objects into tasks and blocks
             3. Submits tasks via `backend.submit_tasks`
             4. Submits blocks via `_submit_blocks` asynchronously
-            5. Retries on timeout with a short delay
 
         Args:
-            None
+            objects: Tasks and blocks are identified by `uid` field content
 
         Returns:
             None
 
         Raises:
             Exception: If an unexpected error occurs during submission
-
-        Queue Management:
-            - queue (asyncio.Queue): Holds lists of objects ready for execution
-            - Each queue item is a list of dicts representing tasks and/or blocks
-            - Tasks and blocks are identified by `uid` field content
-
-        Note:
-            - Runs indefinitely until cancelled or shutdown is signaled
-            - Uses a 1-second timeout to avoid blocking indefinitely
-            - Handles `asyncio.TimeoutError` gracefully with a sleep interval
         """
-        while not self._shutdown_event.is_set():
-            try:
-                objects = await asyncio.wait_for(self.queue.get(), timeout=1)
-                # Separate tasks and blocks
-                tasks = [t for t in objects if t and BLOCK not in t['uid']]
-                blocks = [b for b in objects if b and TASK not in b['uid']]
+        try:
+            # Separate tasks and blocks
+            tasks = [t for t in objects if t and BLOCK not in t['uid']]
+            blocks = [b for b in objects if b and TASK not in b['uid']]
 
-                self.log.debug(f'Submitting {[b["name"] for b in objects]} for execution')
+            logger.info(f'Submitting {[b["name"] for b in objects]} for execution')
 
-                if tasks:
-                    await self.backend.submit_tasks(tasks)
-                if blocks:
-                    await self._submit_blocks(blocks)
-
-            except asyncio.TimeoutError:
-                # Check shutdown signal during timeout
-                if self._shutdown_event.is_set():
-                    self.log.debug("Submit component exiting due to shutdown signal")
-                    break
-                await asyncio.sleep(0.5)
-            except asyncio.CancelledError:
-                self.log.debug("Submit component cancelled")
-                break
-            except Exception as e:
-                self.log.exception(f"Error in submit component: {e}")
-                raise
+            if tasks:
+                await self.backend.submit_tasks(tasks)
+            if blocks:
+                await self._submit_blocks(blocks)
+        except Exception as e:
+            logger.exception(f"Error in submit component: {e}")
+            raise
 
     async def _submit_blocks(self, blocks: list):
         """Submits workflow blocks for asynchronous execution.
@@ -1006,7 +986,7 @@ class WorkflowEngine:
             else:
                 task_fut.set_result(task['stdout'])
         else:
-            self.log.warning(f'Attempted to handle an already finished task "{task["uid"]}"')
+            logger.warning(f'Attempted to handle an already finished task "{task["uid"]}"')
 
     def handle_task_failure(self, task: dict, task_fut: asyncio.Future, 
                             override_error_message: Union[str, Exception] = None) -> None:
@@ -1028,7 +1008,7 @@ class WorkflowEngine:
             None
         """
         if task_fut.done():
-            self.log.warning(f'Attempted to handle an already failed task "{task["uid"]}"')
+            logger.warning(f'Attempted to handle an already failed task "{task["uid"]}"')
             return
 
         internal_task = self.components[task['uid']]['description']
@@ -1057,7 +1037,7 @@ class WorkflowEngine:
     def handle_task_cancellation(self, task: dict, task_fut: asyncio.Future):
         """Handle task cancellation."""
         if task_fut.done():
-            self.log.warning(f'Attempted to handle an already cancelled task "{task["uid"]}"')
+            logger.warning(f'Attempted to handle an already cancelled task "{task["uid"]}"')
             return
 
         # Restore original cancel method
@@ -1107,7 +1087,7 @@ class WorkflowEngine:
         """
         if state not in self.task_states_map.terminal_states and \
             state != self.task_states_map.RUNNING:
-            self.log.debug(f"Non-relevant task state received: {state}. Skipping state.")
+            logger.debug(f"Non-relevant task state received: {state}. Skipping state.")
             return
 
         task_obj = task
@@ -1117,11 +1097,11 @@ class WorkflowEngine:
             task_dct = task.as_dict()
 
         if task_dct['uid'] not in self.components:
-            self.log.warning(f'Received an unknown task and will skip it: {task_dct["uid"]}')
+            logger.warning(f'Received an unknown task and will skip it: {task_dct["uid"]}')
             return
 
         task_fut = self.components[task_dct['uid']]['future']
-        self.log.info(f'{task_dct["uid"]} is in {state} state')
+        logger.info(f'{task_dct["uid"]} is in {state} state')
 
         if service_callback:
             # service tasks are marked done by a backend specific
@@ -1170,29 +1150,9 @@ class WorkflowEngine:
             asyncio.CancelledError: If the shutdown is cancelled before
                 completion.
         """
-        self.log.debug("Initiating shutdown")
+        logger.info("Initiating shutdown")
         # Signal components to exit
         self._shutdown_event.set()
-
-        internal_components = [t for t in (self._run_task, self._submit_task) if t]
-
-        # Cancel internal components tasks
-        for component in internal_components:
-            if component and not component.done():
-                component_name = component.get_coro().__name__
-                self.log.debug(f"Shutting down {component_name} component")
-                component.cancel()
-
-        # Wait for internal components shutdown to complete
-        try:
-            await asyncio.wait_for(
-                asyncio.gather(*internal_components, return_exceptions=True), 
-                timeout=5.0
-            )
-        except asyncio.TimeoutError:
-            self.log.warning("Timeout waiting for internal components to shutdown")
-        except asyncio.CancelledError:
-            self.log.warning("Internal components shutdown cancelled")
 
         # cancel workflow futures (tasks and blocks)
         for comp in self.components.values():
@@ -1201,9 +1161,25 @@ class WorkflowEngine:
             if not future.done():
                 self.handle_task_cancellation(comp_desc, future)
 
+        # Cancel internal components task
+        if not self._run_task.done():
+            logger.debug(f"Shutting down run component")
+            self._run_task.cancel()
+
+        # Wait for internal components shutdown to complete
+        try:
+            await asyncio.wait_for(self._run_task, timeout=5.0)
+        except asyncio.TimeoutError:
+            logger.warning("Timeout waiting for internal components to shutdown")
+        except asyncio.CancelledError:
+            logger.warning("Internal components shutdown cancelled")
+
         # Shutdown execution backend
         if not skip_execution_backend and self.backend:
             await self.backend.shutdown()
-            self.log.debug("Shutting down execution backend")
+            self._clear_internal_records()
+            logger.debug("Shutting down execution backend completed")
         else:
-            self.log.warning("Skipping execution backend shutdown as requested")
+            logger.warning("Skipping execution backend shutdown as requested")
+
+        logger.info('Shutdown completed for all components.')
