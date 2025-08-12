@@ -129,7 +129,7 @@ class TestGracefulShutdown:
         engine.shutdown = mock_shutdown
 
         # Act: Simulate signal reception by calling the handler directly
-        await engine._handle_signal(signal.SIGTERM)
+        await engine._handle_shutdown_signal(signal.SIGTERM)
 
         # Wait for shutdown to be called with timeout
         try:

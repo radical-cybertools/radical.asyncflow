@@ -110,13 +110,13 @@ class WorkflowEngine:
             try:
                 self.loop.add_signal_handler(
                     sig, lambda s=sig: asyncio.create_task(
-                        self._handle_signal(s), name=f'{sig.name}-task')
+                        self._handle_shutdown_signal(s), name=f'{sig.name}-task')
                 )
                 logger.debug(f"Registered signal handler for {sig.name}")
             except NotImplementedError:
                 logger.exception(f"Signal {sig.name} not supported on this platform")
 
-    async def _handle_signal(self, sig: signal.Signals):
+    async def _handle_shutdown_signal(self, sig: signal.Signals, source: str = 'external'):
         """
         Handle received signals by initiating a graceful shutdown.
 
@@ -124,9 +124,11 @@ class WorkflowEngine:
             sig: The signal received (e.g., SIGHUP, SIGTERM, SIGINT)
         """
         if self._shutdown_event.is_set():
+            logger.info(f"Shutdown process already started")
             return
 
-        logger.info(f"Received signal {sig.name}, initiating graceful shutdown")
+        logger.info(f"Received {source} shutdown signal ({sig.name}), initiating graceful shutdown")
+
         await self.shutdown()
 
     @classmethod
@@ -656,7 +658,7 @@ class WorkflowEngine:
             2. Checks dependency resolution status
             3. Prepares resolved components for execution
             4. Handles data staging between components
-            5. Submits ready components to execution queue
+            5. Submits ready components to execution
 
         Args:
             None
@@ -679,6 +681,7 @@ class WorkflowEngine:
             - Runs indefinitely until cancelled or shutdown is signaled
             - Uses sleep intervals to prevent busy-waiting
             - Handles both implicit and explicit data dependencies
+            - Trigger internal shutdown on loop failure
         """
         while not self._shutdown_event.is_set():
             try:
@@ -842,7 +845,7 @@ class WorkflowEngine:
                 break
             except Exception as e:
                 logger.exception(f"Error in run loop: {e}")
-                await self.shutdown()
+                await self._handle_shutdown_signal(signal.SIGUSR1, source='internal')
                 break
 
     async def submit(self, objects):
