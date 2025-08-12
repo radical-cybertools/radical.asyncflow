@@ -97,7 +97,6 @@ class WorkflowEngine:
 
         # Initialize async task references (will be set in _start_async_components)
         self._run_task = None
-        self._submit_task = None
         self._shutdown_event = asyncio.Event()  # Added shutdown signal
 
         self._setup_signal_handlers()
@@ -175,10 +174,8 @@ class WorkflowEngine:
     async def _start_async_components(self):
         """Start internal async components (run and submit tasks)."""
         self._run_task = asyncio.create_task(self.run(), name='run-component')
-        self._submit_task = asyncio.create_task(self.submit(), name='submit-component')
 
-        comps = [self._run_task.get_coro().__name__, 
-                 self._submit_task.get_coro().__name__]
+        comps = [self._run_task.get_coro().__name__]
 
         for comp in comps:
             logger.debug(f"Started {comp} component")
@@ -575,7 +572,7 @@ class WorkflowEngine:
 
         return tuple(resolved_args), resolved_kwargs
 
-    def _clear(self):
+    def _clear_internal_records(self):
         """Clear workflow components and their dependencies."""
         self.components.clear()
         self.dependencies.clear()
@@ -788,7 +785,7 @@ class WorkflowEngine:
 
                 # Submit ready components
                 if to_submit:
-                    await self.queue.put(to_submit)
+                    await self.submit(to_submit)
                     for comp_desc in to_submit:
                         comp_uid = comp_desc['uid']
                         self.running.append(comp_uid)
@@ -845,68 +842,45 @@ class WorkflowEngine:
                 break
             except Exception as e:
                 logger.exception(f"Error in run loop: {e}")
-                await asyncio.sleep(0.1)
+                await self.shutdown()
+                break
 
-    async def submit(self):
+    async def submit(self, objects):
         """Manages asynchronous submission of tasks and blocks to the execution backend.
 
-        Continuously monitors the internal queue, retrieves ready tasks and blocks,
-        and submits them for execution. Separates incoming objects into tasks and
-        blocks based on their UID pattern, and dispatches each to the appropriate
-        backend method.
+        Retrieves and submit ready tasks and blocks for execution. Separates incoming
+        objects into tasks and blocks based on their UID pattern, and dispatches each
+        to the appropriate backend method.
 
         Submission Process:
-            1. Waits for a batch of objects from the queue
+            1. Receive batch of objects
             2. Filters objects into tasks and blocks
             3. Submits tasks via `backend.submit_tasks`
             4. Submits blocks via `_submit_blocks` asynchronously
-            5. Retries on timeout with a short delay
 
         Args:
-            None
+            objects: Tasks and blocks are identified by `uid` field content
 
         Returns:
             None
 
         Raises:
             Exception: If an unexpected error occurs during submission
-
-        Queue Management:
-            - queue (asyncio.Queue): Holds lists of objects ready for execution
-            - Each queue item is a list of dicts representing tasks and/or blocks
-            - Tasks and blocks are identified by `uid` field content
-
-        Note:
-            - Runs indefinitely until cancelled or shutdown is signaled
-            - Uses a 1-second timeout to avoid blocking indefinitely
-            - Handles `asyncio.TimeoutError` gracefully with a sleep interval
         """
-        while not self._shutdown_event.is_set():
-            try:
-                objects = await asyncio.wait_for(self.queue.get(), timeout=1)
-                # Separate tasks and blocks
-                tasks = [t for t in objects if t and BLOCK not in t['uid']]
-                blocks = [b for b in objects if b and TASK not in b['uid']]
+        try:
+            # Separate tasks and blocks
+            tasks = [t for t in objects if t and BLOCK not in t['uid']]
+            blocks = [b for b in objects if b and TASK not in b['uid']]
 
-                logger.info(f'Submitting {[b["name"] for b in objects]} for execution')
+            logger.info(f'Submitting {[b["name"] for b in objects]} for execution')
 
-                if tasks:
-                    await self.backend.submit_tasks(tasks)
-                if blocks:
-                    await self._submit_blocks(blocks)
-
-            except asyncio.TimeoutError:
-                # Check shutdown signal during timeout
-                if self._shutdown_event.is_set():
-                    logger.debug("Submit component exiting due to shutdown signal")
-                    break
-                await asyncio.sleep(0.5)
-            except asyncio.CancelledError:
-                logger.debug("Submit component cancelled")
-                break
-            except Exception as e:
-                logger.exception(f"Error in submit component: {e}")
-                raise
+            if tasks:
+                await self.backend.submit_tasks(tasks)
+            if blocks:
+                await self._submit_blocks(blocks)
+        except Exception as e:
+            logger.exception(f"Error in submit component: {e}")
+            raise
 
     async def _submit_blocks(self, blocks: list):
         """Submits workflow blocks for asynchronous execution.
@@ -1184,21 +1158,14 @@ class WorkflowEngine:
             if not future.done():
                 self.handle_task_cancellation(comp_desc, future)
 
-        internal_components = [t for t in (self._run_task, self._submit_task) if t]
-
-        # Cancel internal components tasks
-        for component in internal_components:
-            if component and not component.done():
-                component_name = component.get_coro().__name__
-                logger.debug(f"Shutting down {component_name} component")
-                component.cancel()
+        # Cancel internal components task
+        if not self._run_task.done():
+            logger.debug(f"Shutting down run component")
+            self._run_task.cancel()
 
         # Wait for internal components shutdown to complete
         try:
-            await asyncio.wait_for(
-                asyncio.gather(*internal_components, return_exceptions=True), 
-                timeout=5.0
-            )
+            await asyncio.wait_for(self._run_task, timeout=5.0)
         except asyncio.TimeoutError:
             logger.warning("Timeout waiting for internal components to shutdown")
         except asyncio.CancelledError:
@@ -1207,7 +1174,7 @@ class WorkflowEngine:
         # Shutdown execution backend
         if not skip_execution_backend and self.backend:
             await self.backend.shutdown()
-            self._clear()
+            self._clear_internal_records()
             logger.debug("Shutting down execution backend completed")
         else:
             logger.warning("Skipping execution backend shutdown as requested")
