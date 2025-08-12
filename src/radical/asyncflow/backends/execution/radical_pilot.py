@@ -167,7 +167,7 @@ class RadicalExecutionBackend(BaseExecutionBackend):
 
             if self.raptor_config:
                 self.raptor_mode = True
-                ('Enabling Raptor mode for RadicalExecutionBackend')
+                logger.info('Enabling Raptor mode for RadicalExecutionBackend')
                 self.setup_raptor_mode(self.raptor_config)
 
             # register the backend task states to the global state manager

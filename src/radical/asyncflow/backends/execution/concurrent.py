@@ -2,7 +2,7 @@ import asyncio
 import logging
 import subprocess
 from typing import Dict, Callable, Optional, Any, List, Union
-from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
+from concurrent.futures import Executor
 
 from ...constants import StateMapper
 from .base import Session, BaseExecutionBackend
@@ -12,8 +12,8 @@ logger = logging.getLogger(__name__)
 class ConcurrentExecutionBackend(BaseExecutionBackend):
     """Simple async-only concurrent execution backend."""
 
-    def __init__(self, executor: Union[ThreadPoolExecutor, ProcessPoolExecutor]):
-        if not isinstance(executor, (ThreadPoolExecutor, ProcessPoolExecutor)):
+    def __init__(self, executor: Executor):
+        if not isinstance(executor, Executor):
             raise TypeError("Executor must be ThreadPoolExecutor or ProcessPoolExecutor")
 
         self.executor = executor
@@ -189,12 +189,12 @@ class ConcurrentExecutionBackend(BaseExecutionBackend):
         await self.shutdown()
 
     @classmethod
-    async def create(cls, executor: Union[ThreadPoolExecutor, ProcessPoolExecutor]):
+    async def create(cls, executor: Executor):
         """Alternative factory method for creating initialized backend.
         
         Args:
-            resources: Configuration parameters for Concurrent initialization.
-            
+            executor: A concurrent.Executor instance (ThreadPoolExecutor or ProcessPoolExecutor).
+
         Returns:
             Fully initialized ConcurrentExecutionBackend instance.
         """

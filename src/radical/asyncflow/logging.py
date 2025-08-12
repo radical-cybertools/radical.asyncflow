@@ -290,9 +290,9 @@ def init_default_logger(
     # Log configuration info
     level_name = logging.getLevelName(log_level) if isinstance(log_level, int) else log_level
     file_level_name = logging.getLevelName(file_log_level) if isinstance(file_log_level, int) else file_log_level
-    
-    structured_info = f"structured.log" if structured_logging and structured_file is None else str(structured_file) if structured_logging else "disabled"
-    
+
+    structured_info = str(structured_file) if structured_logging else "disabled"
+
     logger.info(
         'Logger configured successfully - Console: %s, File: %s (%s), Structured: %s, Style: %s',
         level_name,
