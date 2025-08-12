@@ -49,14 +49,7 @@ indent-style = "space"
 
 [tool.pytest.ini_options]
 minversion = "6.0"
-addopts = [
-    "-ra",
-    "--strict-markers",
-    "--strict-config",
-    "--cov=radical.asyncflow",
-    "--cov-report=term-missing",
-    "--cov-report=html",
-]
+
 testpaths = ["tests"]
 asyncio_mode = "auto"
 markers = [
