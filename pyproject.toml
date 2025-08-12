@@ -22,6 +22,14 @@ dependencies = ["pydantic"]
 [project.optional-dependencies]
 dask = ["dask[distributed]"]
 radicalpilot = ["radical.pilot"]
+
+# All test deps
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "pytest-cov"
+]
+
 doc = [
     "mkdocs==1.5.3",
     "mkdocs-material==9.5.9",
@@ -32,6 +40,12 @@ doc = [
     "mkdocs-glightbox",
     "mkdocs-material-extensions",
     "mkdocs-minify-plugin"
+]
+
+coverage = [
+    "pytest",
+    "pytest-asyncio",
+    "pytest-cov"
 ]
 
 [tool.ruff]
