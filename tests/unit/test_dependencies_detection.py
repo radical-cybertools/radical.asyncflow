@@ -1,8 +1,8 @@
 import pytest
 
-from radical.asyncflow import WorkflowEngine
-from radical.asyncflow import NoopExecutionBackend
+from radical.asyncflow import NoopExecutionBackend, WorkflowEngine
 from radical.asyncflow.data import InputFile, OutputFile
+
 
 @pytest.mark.asyncio
 async def test_detect_data_dependencies():
@@ -24,7 +24,7 @@ async def test_detect_task_dependencies():
     @engine.function_task
     async def task1():
         return 1
-    
+
     @engine.function_task
     async def task2():
         return 2

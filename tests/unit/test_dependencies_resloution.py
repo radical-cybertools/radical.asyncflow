@@ -1,12 +1,12 @@
 import asyncio
-import pytest
 import time
-import pytest_asyncio
-from unittest.mock import Mock, AsyncMock
-from radical.asyncflow import WorkflowEngine
-from radical.asyncflow import ConcurrentExecutionBackend
-
 from concurrent.futures import ThreadPoolExecutor
+
+import pytest
+import pytest_asyncio
+
+from radical.asyncflow import ConcurrentExecutionBackend, WorkflowEngine
+
 
 class TestFutureResolution:
     """Test suite for Future argument resolution in WorkflowEngine."""
@@ -34,8 +34,10 @@ class TestFutureResolution:
         @flow.function_task
         async def task3(val1, val2):
             # These should be actual values, not Futures
-            assert not isinstance(val1, asyncio.Future), "val1 should be resolved value, not Future"
-            assert not isinstance(val2, asyncio.Future), "val2 should be resolved value, not Future"
+            msg1 = "val1 should be resolved value, not Future"
+            msg2 = "val2 should be resolved value, not Future"
+            assert not isinstance(val1, asyncio.Future), msg1
+            assert not isinstance(val2, asyncio.Future), msg2
             assert val1 == 42, f"Expected 42, got {val1}"
             assert val2 == 24, f"Expected 24, got {val2}"
             return val1 + val2
@@ -58,12 +60,15 @@ class TestFutureResolution:
             return "from_future"
 
         @flow.function_task
-        async def consumer(future_arg, regular_arg, kwarg_future=None, kwarg_regular=None):
+        async def consumer(
+            future_arg,
+            regular_arg, kwarg_future=None, kwarg_regular=None
+            ):
             # Check argument types and values
             assert not isinstance(future_arg, asyncio.Future)
             assert future_arg == "from_future"
             assert regular_arg == "regular_value"
-            assert kwarg_future == "kwarg_from_future" 
+            assert kwarg_future == "kwarg_from_future"
             assert kwarg_regular == "kwarg_regular_value"
             return "success"
 
@@ -156,13 +161,14 @@ class TestFutureResolution:
         }
 
         # Extract values
-        resolved_args, resolved_kwargs = await flow._extract_dependency_values(comp_desc)
+        resolved_args, resolved_kwargs = \
+            await flow._extract_dependency_values(comp_desc)
 
         # Verify resolution
         assert resolved_args == ("value1", "regular_arg", "value2")
         assert resolved_kwargs == {
             'kwarg1': "value1",
-            'kwarg2': "regular_kwarg", 
+            'kwarg2': "regular_kwarg",
             'kwarg3': "value2"
         }
 
@@ -175,7 +181,7 @@ class TestFutureResolution:
             await asyncio.sleep(10)  # Long running task
             return "completed"
 
-        @flow.function_task  
+        @flow.function_task
         async def dependent_task(dep_value):
             return f"Got: {dep_value}"
 
@@ -210,10 +216,10 @@ class TestFutureResolution:
 
         # Measure time for workflow with future resolution
         start_time = time.time()
-        
+
         # Create multiple producers
         p1 = producer(1)
-        p2 = producer(2) 
+        p2 = producer(2)
         p3 = producer(3)
 
         # Consumer depends on all producers
@@ -266,7 +272,11 @@ async def test_real_workflow_scenario():
 
         # Verify final result
         result = await final_result
-        expected = "combined_processed_data_from_api_with_config_a_and_processed_data_from_database_with_config_b"
+        expected = (
+            "combined_processed_data_from_api_with_config_a_"
+            "and_processed_data_from_database_with_config_b"
+        )
+
         assert result == expected
 
     finally:

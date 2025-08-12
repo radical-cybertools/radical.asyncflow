@@ -13,16 +13,18 @@ def reset_uid_counter():
     global _global_task_counter
     _global_task_counter = 0
 
-def get_event_loop_or_raise(context_name: str = "AsyncWorkflowEngine") -> asyncio.AbstractEventLoop:
+def get_event_loop_or_raise(
+    context_name: str = "AsyncWorkflowEngine"
+    ) -> asyncio.AbstractEventLoop:
     """
     Get the current running event loop or raise a helpful error.
-    
+
     Args:
         context_name: Name of the class/context for error messages
-        
+
     Returns:
         asyncio.AbstractEventLoop: The current running event loop
-        
+
     Raises:
         RuntimeError: If no event loop is running with helpful guidance
     """

@@ -1,9 +1,11 @@
-import pytest
 import asyncio
 import time
-from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
-from radical.asyncflow import WorkflowEngine, ConcurrentExecutionBackend
+
+import pytest
+
+from radical.asyncflow import ConcurrentExecutionBackend, WorkflowEngine
+
 
 @pytest.mark.asyncio
 async def test_flow_function_tasks():
@@ -77,7 +79,8 @@ async def test_flow_function_tasks():
 @pytest.mark.asyncio
 async def test_flow_executable_tasks(tmp_path):
     """
-    Integration test using `executable_task`. Each task appends to a workflow-local file.
+    Integration test using `executable_task`. Each task appends
+    to a workflow-local file.
     Final task output is used to validate execution order.
     """
     backend = await ConcurrentExecutionBackend(ThreadPoolExecutor())

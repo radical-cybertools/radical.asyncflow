@@ -1,10 +1,9 @@
-import time
 import asyncio
 import logging
+
 import numpy as np
 
-from radical.asyncflow import WorkflowEngine
-from radical.asyncflow import DaskExecutionBackend
+from radical.asyncflow import DaskExecutionBackend, WorkflowEngine
 from radical.asyncflow.logging import init_default_logger
 
 logger = logging.getLogger(__name__)
@@ -30,7 +29,7 @@ async def main():
     @flow.function_task
     async def analyze_second_batch(*args):
         dataset = args[0]
-        logger.info("Analyzing second batch of data")  
+        logger.info("Analyzing second batch of data")
         return np.mean(dataset[5000:])  # Calculate average of second half
 
     @flow.function_task

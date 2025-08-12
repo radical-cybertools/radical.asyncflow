@@ -17,7 +17,7 @@ import typeguard
 from .backends.execution.base import BaseExecutionBackend
 from .backends.execution.noop import NoopExecutionBackend
 from .data import InputFile, OutputFile
-from .errors import DependencyFailure
+from .errors import DependencyFailureError
 from .utils import get_next_uid
 from .utils import reset_uid_counter
 from .utils import get_event_loop_or_raise
@@ -599,7 +599,7 @@ class WorkflowEngine:
 
     def _create_dependency_failure_exception(self, comp_desc: dict, failed_deps: list):
         """
-        Create a DependencyFailure exception that shows both the immediate failure
+        Create a DependencyFailureError exception that shows both the immediate failure
         and the root cause from failed dependencies.
 
         Args:
@@ -607,7 +607,7 @@ class WorkflowEngine:
             failed_deps (list): List of exceptions from failed dependencies
 
         Returns:
-            DependencyFailure: Exception with detailed failure information
+            DependencyFailureError: Exception with detailed failure information
         """
         # Get the first failed dependency's exception as root cause
         root_exception = failed_deps[0]
@@ -623,7 +623,7 @@ class WorkflowEngine:
             if dep_future.exception() is not None:
                 failed_dep_names.append(dep['name'])
 
-        return DependencyFailure(
+        return DependencyFailureError(
             message=error_message,
             failed_dependencies=failed_dep_names,
             root_cause=root_exception
@@ -1015,7 +1015,7 @@ class WorkflowEngine:
 
         # Determine the appropriate exception to set
         if override_error_message is not None:
-            # If it's already an exception (like DependencyFailure), use it directly
+            # If it's already an exception (like DependencyFailureError), use it directly
             if isinstance(override_error_message, Exception):
                 exception = override_error_message
             else:

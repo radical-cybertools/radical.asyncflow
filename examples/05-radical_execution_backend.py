@@ -1,31 +1,34 @@
-import time
 import asyncio
 import logging
+import time
 
-from radical.asyncflow import WorkflowEngine
-from radical.asyncflow import RadicalExecutionBackend
+from radical.asyncflow import RadicalExecutionBackend, WorkflowEngine
 from radical.asyncflow.logging import init_default_logger
 
 logger = logging.getLogger(__name__)
 
 async def main():
-    
+
     init_default_logger(logging.INFO)
 
     # Create backend and workflow
     backend = await RadicalExecutionBackend({'resource': 'local.localhost'})
     flow = await WorkflowEngine.create(backend=backend)
 
+    task1_resources = {'ranks':1, 'gpus_per_rank':1}
+    task2_resources = {'ranks':1}
+    task3_resources = {'gpus_per_rank':1}
+
     @flow.executable_task
-    async def task1(task_description={'ranks':1, 'gpus_per_rank':1}):
+    async def task1(task_description=task1_resources):
         return '/bin/echo "I got executed at" && /bin/date'
 
     @flow.executable_task
-    async def task2(task1, task_description={'ranks':1}):
+    async def task2(task1, task_description=task2_resources):
         return '/bin/echo "I got executed at" && /bin/date'
 
     @flow.executable_task
-    async def task3(task1, task2, task_description={'gpus_per_rank':1}):
+    async def task3(task1, task2, task_description=task3_resources):
         return '/bin/echo "I got executed at" && /bin/date'
 
     async def run_wf(wf_id):
@@ -38,7 +41,7 @@ async def main():
         return t3_result
 
     # Run workflows concurrently
-    results = await asyncio.gather(*[run_wf(i) for i in range(1)])
+    await asyncio.gather(*[run_wf(i) for i in range(1)])
 
     await flow.shutdown()
 

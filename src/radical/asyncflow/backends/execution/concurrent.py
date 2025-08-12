@@ -1,11 +1,11 @@
 import asyncio
 import logging
 import subprocess
-from typing import Dict, Callable, Optional, Any, List, Union
 from concurrent.futures import Executor
+from typing import Any, Callable, Optional
 
 from ...constants import StateMapper
-from .base import Session, BaseExecutionBackend
+from .base import BaseExecutionBackend, Session
 
 logger = logging.getLogger(__name__)
 
@@ -14,10 +14,11 @@ class ConcurrentExecutionBackend(BaseExecutionBackend):
 
     def __init__(self, executor: Executor):
         if not isinstance(executor, Executor):
-            raise TypeError("Executor must be ThreadPoolExecutor or ProcessPoolExecutor")
+            err = ("Executor must be ThreadPoolExecutor or ProcessPoolExecutor")
+            raise TypeError(err)
 
         self.executor = executor
-        self.tasks: Dict[str, asyncio.Task] = {}
+        self.tasks: dict[str, asyncio.Task] = {}
         self.session = Session()
         self._callback_func: Optional[Callable] = None
         self._initialized = False
@@ -31,7 +32,8 @@ class ConcurrentExecutionBackend(BaseExecutionBackend):
         if not self._initialized:
             StateMapper.register_backend_states_with_defaults(backend=self)
             self._initialized = True
-            logger.info(f'{type(self.executor).__name__} execution backend started successfully')
+            executor_name = type(self.executor).__name__
+            logger.info(f'{executor_name} execution backend started successfully')
         return self
 
     def get_task_states_map(self):
@@ -40,7 +42,7 @@ class ConcurrentExecutionBackend(BaseExecutionBackend):
     def register_callback(self, func: Callable):
         self._callback_func = func
 
-    async def _execute_task(self, task: Dict) -> tuple[Dict, str]:
+    async def _execute_task(self, task: dict) -> tuple[dict, str]:
         """Execute a single task."""
         try:
             if 'function' in task and task['function']:
@@ -57,7 +59,7 @@ class ConcurrentExecutionBackend(BaseExecutionBackend):
             })
             return task, 'FAILED'
 
-    async def _execute_function(self, task: Dict) -> tuple[Dict, str]:
+    async def _execute_function(self, task: dict) -> tuple[dict, str]:
         """Execute function task."""
         func = task['function']
         args = task.get('args', [])
@@ -76,7 +78,7 @@ class ConcurrentExecutionBackend(BaseExecutionBackend):
         })
         return task, 'DONE'
 
-    async def _execute_command(self, task: Dict) -> tuple[Dict, str]:
+    async def _execute_command(self, task: dict) -> tuple[dict, str]:
         """Execute command task."""
         cmd = ' '.join([task['executable']] + task.get('arguments', []))
 
@@ -111,13 +113,13 @@ class ConcurrentExecutionBackend(BaseExecutionBackend):
         state = 'DONE' if task['exit_code'] == 0 else 'FAILED'
         return task, state
 
-    async def _handle_task(self, task: Dict) -> None:
+    async def _handle_task(self, task: dict) -> None:
         """Handle task execution with callback."""
         result_task, state = await self._execute_task(task)
 
         self._callback_func(result_task, state)
 
-    async def submit_tasks(self, tasks: List[Dict[str, Any]]) -> List[asyncio.Task]:
+    async def submit_tasks(self, tasks: list[dict[str, Any]]) -> list[asyncio.Task]:
         """Submit tasks for execution."""
         submitted_tasks = []
 
@@ -137,7 +139,8 @@ class ConcurrentExecutionBackend(BaseExecutionBackend):
             uid (str): The UID of the task to cancel.
 
         Returns:
-            bool: True if the task was found and cancellation was attempted, False otherwise.
+            bool: True if the task was found and cancellation was attempted,
+                  False otherwise.
         """
         if uid in self.tasks:
             task = self.tasks[uid]
@@ -165,8 +168,11 @@ class ConcurrentExecutionBackend(BaseExecutionBackend):
 
     def build_task(self, uid, task_desc, task_specific_kwargs):
         pass
-    
-    def link_explicit_data_deps(self, src_task=None, dst_task=None, file_name=None, file_path=None):
+
+    def link_explicit_data_deps(
+        self, src_task=None,
+        dst_task=None, file_name=None, file_path=None
+        ):
         pass
 
     def link_implicit_data_deps(self, src_task, dst_task):
@@ -191,9 +197,10 @@ class ConcurrentExecutionBackend(BaseExecutionBackend):
     @classmethod
     async def create(cls, executor: Executor):
         """Alternative factory method for creating initialized backend.
-        
+
         Args:
-            executor: A concurrent.Executor instance (ThreadPoolExecutor or ProcessPoolExecutor).
+            executor: A concurrent.Executor instance (ThreadPoolExecutor
+                      or ProcessPoolExecutor).
 
         Returns:
             Fully initialized ConcurrentExecutionBackend instance.

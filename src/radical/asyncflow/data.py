@@ -1,35 +1,35 @@
 import os
-import requests
-
 from pathlib import Path
-from typing import List, Union
+
+import requests
 
 import radical.utils as ru
 
 URL_SCHEMES = [
-    "http",           # Hypertext Transfer Protocol (HTTP)
-    "https",          # Hypertext Transfer Protocol Secure (HTTPS)
-    "ftp",            # File Transfer Protocol (FTP)
-    "ftps",           # File Transfer Protocol Secure (FTPS, FTP over SSL/TLS)
-    "sftp",           # Secure File Transfer Protocol (SFTP, SSH-based)
-    "file",           # Local file system (Access files directly from the file system)
-    "data",           # Data URIs (Inline base64-encoded files, though not common for large files)
-    "s3",             # Amazon S3 (Cloud storage URL, used to expose files stored in S3)
-    "azure",          # Azure Storage (Blob storage URL)
-    "r2",             # Cloudflare R2 (Object storage URL)
-    "gs",             # Google Cloud Storage (Bucket URL)
+    "http",  # Hypertext Transfer Protocol (HTTP)
+    "https",  # Hypertext Transfer Protocol Secure (HTTPS)
+    "ftp",  # File Transfer Protocol (FTP)
+    "ftps",  # File Transfer Protocol Secure (FTPS, FTP over SSL/TLS)
+    "sftp",  # Secure File Transfer Protocol (SFTP, SSH-based)
+    "file",  # Local file system (Access files directly from the file system)
+    "data",  # Data URIs (Inline base64-encoded files)
+    "s3",  # Amazon S3 (Cloud storage URL, used to expose files stored in S3)
+    "azure",  # Azure Storage (Blob storage URL)
+    "r2",  # Cloudflare R2 (Object storage URL)
+    "gs",  # Google Cloud Storage (Bucket URL)
 ]
+
 
 class File:
     """Base class for file handling in task execution systems.
-    
+
     Provides common attributes and functionality for managing files with
     filename and filepath properties.
     """
 
     def __init__(self) -> None:
         """Initialize a File object with default None values.
-        
+
         Sets filename and filepath attributes to None, to be populated
         by subclasses during file resolution.
         """
@@ -39,22 +39,23 @@ class File:
     @staticmethod
     def download_remote_url(url: str) -> Path:
         """Download a remote file to the current directory and return its full path.
-        
+
         Downloads file content from a remote URL using streaming to handle large files
         efficiently. Saves the file with a name derived from the URL.
-        
+
         Args:
             url: The remote URL to download from.
-            
+
         Returns:
             Path: Absolute path to the downloaded file.
-            
+
         Raises:
-            requests.exceptions.RequestException: If the download fails or URL is invalid.
-            
+            requests.exceptions.RequestException: If the download fails
+            or URL is invalid.
+
         Example:
             ::
-            
+
                 file_path = File.download_remote_url("https://example.com/data.txt")
                 print(f"Downloaded to: {file_path}")
         """
@@ -66,7 +67,7 @@ class File:
         file_path = Path(filename)
 
         # Save the file content
-        with open(file_path, 'wb') as f:
+        with open(file_path, "wb") as f:
             for chunk in response.iter_content(chunk_size=8192):
                 f.write(chunk)
 
@@ -74,31 +75,33 @@ class File:
 
 
 class InputFile(File):
-    """Represents an input file that can be sourced from remote URLs, local paths, or task outputs.
-    
+    """Represents an input file that can be sourced from remote URLs, local paths,
+       or task outputs.
+
     Automatically detects the file source type and handles appropriate resolution.
-    Supports remote file downloading, local file path resolution, and task output file references.
+    Supports remote file downloading, local file path resolution, and task output
+    file references.
     """
 
     def __init__(self, file):
         """Initialize an InputFile with automatic source type detection and resolution.
-        
+
         Determines whether the input is a remote URL, local file path, or reference
         to another task's output file, then resolves the appropriate file path.
-        
+
         Args:
             file: Input file specification. Can be:
                 - Remote URL (http, https, ftp, s3, etc.)
                 - Local file path (absolute or relative)
                 - Task output file reference (filename for future resolution)
-                
+
         Raises:
             Exception: If file resolution fails or file source cannot be determined.
-            
+
         Attributes:
             remote_url (str): URL if file is remote, None otherwise.
             local_file (str): Local path if file exists locally, None otherwise.
-            other_task_file (str): Task reference if file is from another task, None otherwise.
+            other_task_file (str): Task reference if file is from another task.
             filepath (Path): Resolved file path.
             filename (str): Extracted filename from the resolved path.
         """
@@ -106,7 +109,7 @@ class InputFile(File):
         self.remote_url = None
         self.local_file = None
         self.other_task_file = None
-        
+
         self.filepath = None  # Ensure that filepath is initialized
 
         # Determine file type (remote, local, or task-produced)
@@ -121,7 +124,7 @@ class InputFile(File):
         # Handle remote file (download and resolve path)
         if self.remote_url:
             self.filepath = self.download_remote_url(self.remote_url)
-        
+
         # Handle local file (ensure it exists and resolve path)
         elif self.local_file:
             self.filepath = Path(self.local_file).resolve()  # Convert to absolute path
@@ -133,8 +136,10 @@ class InputFile(File):
 
         # If file resolution failed, raise an exception with a more descriptive message
         if not self.filepath:
-            raise Exception(f"Failed to resolve InputFile: {file}. "
-                             "Ensure it's a valid URL, local path, or task output.")
+            raise Exception(
+                f"Failed to resolve InputFile: {file}. "
+                "Ensure it's a valid URL, local path, or task output."
+            )
 
         # Set the filename from the resolved filepath
         self.filename = self.filepath.name
@@ -142,34 +147,34 @@ class InputFile(File):
 
 class OutputFile(File):
     """Represents an output file that will be produced by a task.
-    
+
     Handles filename validation and extraction from file paths, ensuring
     proper output file naming for task execution.
     """
 
     def __init__(self, filename):
         """Initialize an OutputFile with filename validation.
-        
+
         Extracts the filename from the provided path and validates that it
         represents a valid file (not a directory or empty path).
-        
+
         Args:
             filename: The output filename or path. Can be a simple filename
                 or a path, but must resolve to a valid filename.
-                
+
         Raises:
             ValueError: If filename is empty or resolves to an invalid file path.
-            
+
         Attributes:
             filename (str): The extracted filename for the output file.
-            
+
         Example:
             ::
-            
+
                 # Valid initializations
                 output1 = OutputFile("result.txt")
                 output2 = OutputFile("path/to/result.txt")
-                
+
                 # Invalid - will raise ValueError
                 output3 = OutputFile("")  # Empty filename
                 output4 = OutputFile("path/")  # Path ends with separator
@@ -182,4 +187,6 @@ class OutputFile(File):
 
         # Edge case: If the filename ends with a separator (e.g., '/')
         if not self.filename:
-            raise ValueError(f"Invalid filename, the path {filename} does not include a file")
+            raise ValueError(
+                f"Invalid filename, the path {filename} does not include a file"
+            )

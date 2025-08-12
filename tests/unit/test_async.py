@@ -1,7 +1,6 @@
-import time
-import pytest
 import asyncio
-import threading
+
+import pytest
 
 from radical.asyncflow import WorkflowEngine
 

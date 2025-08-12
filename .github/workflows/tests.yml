@@ -2,38 +2,112 @@ name: tests
 
 on:
   push:
-    branches: [ main ]
+    branches: [main, test-me-*]
+    tags:
   pull_request:
-    branches: [ main ]
+  workflow_dispatch:
 
 jobs:
-  test:
-    runs-on: ubuntu-latest
-
+  unit:
+    timeout-minutes: 15
     strategy:
+      fail-fast: false
       matrix:
-        python-version: [3.12]
-
+        include:
+        - os: ubuntu-latest
+          python: '3.9'
+          toxenv: py39
+        - os: ubuntu-latest
+          python: '3.10'
+          toxenv: py310
+        - os: ubuntu-latest
+          python: '3.11'
+          toxenv: py311
+        - os: ubuntu-latest
+          python: '3.12'
+          toxenv: py312
+        - os: ubuntu-latest
+          python: '3.13'
+          toxenv: py313
+    runs-on: ${{ matrix.os }}
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v3
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python ${{ matrix.python }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Get pip cache dir
+        id: pip-cache-dir
+        run: echo "PIP_CACHE_DIR=$(pip cache dir)" >> $GITHUB_ENV
+      - name: Use pip cache
+        id: pip-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.PIP_CACHE_DIR }}
+          key: tests-unit-${{ matrix.os }}-pip-${{ matrix.python }}-${{ hashFiles('pyproject.toml') }}
+          restore-keys: |
+            tests-unit-${{ matrix.os }}-pip-${{ matrix.python }}-
+      - name: Install Packages
+        run: python -m pip install --upgrade pip tox
+      - name: Run Unit Tests
+        run: tox -e ${{ matrix.toxenv }} -- -vv
 
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v4
-      with:
-        python-version: ${{ matrix.python-version }}
+  integration:
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - os: ubuntu-latest
+          python: '3.9'
+          toxenv: py39-integration
+        - os: ubuntu-latest
+          python: '3.10'
+          toxenv: py310-integration
+        - os: ubuntu-latest
+          python: '3.11'
+          toxenv: py311-integration
+        - os: ubuntu-latest
+          python: '3.12'
+          toxenv: py312-integration
+        - os: ubuntu-latest
+          python: '3.13'
+          toxenv: py313-integration
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python ${{ matrix.python }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Get pip cache dir
+        id: pip-cache-dir
+        run: echo "PIP_CACHE_DIR=$(pip cache dir)" >> $GITHUB_ENV
+      - name: Use pip cache
+        id: pip-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.PIP_CACHE_DIR }}
+          key: tests-integration-${{ matrix.os }}-pip-${{ matrix.python }}-${{ hashFiles('pyproject.toml') }}
+          restore-keys: |
+            tests-integration-${{ matrix.os }}-pip-${{ matrix.python }}-
+      - name: Install Packages
+        run: python -m pip install --upgrade pip tox
+      - name: Run Integration Tests
+        run: tox -e ${{ matrix.toxenv }} -- -vv
 
-    - name: Install dependencies
-      run: |
-        python -m venv testenv
-        . testenv/bin/activate
-        python -m pip install --upgrade pip setuptools wheel
-        python -m pip install .
-        python -m pip install -r requirements-ci.txt
-        radical-stack
-
-    - name: Run pytest
-      run: |
-        . testenv/bin/activate
-        radical-stack
-        pytest -v tests/
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install tox
+        run: python -m pip install --upgrade pip tox
+      - name: Run linting
+        run: tox -e lint

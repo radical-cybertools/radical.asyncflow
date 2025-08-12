@@ -1,0 +1,87 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "radical.asyncflow"
+version = "0.1.0"
+description = "A High Performance Asynchronous Workflow Scripting Library"
+
+authors = [
+    {name = "Aymen Alsaadi", email = "aymen.alsaadi@rutgers.edu"},
+    {name = "RADICAL Lab"},
+]
+maintainers = [
+    {name = "Aymen Alsaadi", email = "aymen.alsaadi@rutgers.edu"},
+]
+readme = "README.md"
+requires-python = ">=3.9"
+
+dependencies = ["pydantic"]
+
+[project.optional-dependencies]
+dask = ["dask[distributed]"]
+radicalpilot = ["radical.pilot"]
+doc = [
+    "mkdocs==1.5.3",
+    "mkdocs-material==9.5.9",
+    "mkdocstrings[python]>=0.26.1",
+    "mkdocs-gen-files==0.5.0",
+    "mkdocs-literate-nav==0.6.1",
+    "mkdocs-section-index==0.3.8",
+    "mkdocs-glightbox",
+    "mkdocs-material-extensions",
+    "mkdocs-minify-plugin"
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py39"
+fix = true
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "I", "N", "UP"]
+ignore = ["UP007", "UP045"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--strict-config",
+    "--cov=radical.asyncflow",
+    "--cov-report=term-missing",
+    "--cov-report=html",
+]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+]
+
+[tool.coverage.run]
+source = ["radical.asyncflow"]
+omit = ["tests/*"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+]
+
+[tool.codespell]
+skip = """
+.git,
+.github,
+__pycache__,
+build,
+dist,
+.*egg-info
+"""
