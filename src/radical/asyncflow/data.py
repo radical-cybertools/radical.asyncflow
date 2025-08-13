@@ -1,9 +1,8 @@
 import os
 from pathlib import Path
+from urllib.parse import urlparse
 
 import requests
-
-import radical.utils as ru
 
 URL_SCHEMES = [
     "http",  # Hypertext Transfer Protocol (HTTP)
@@ -113,8 +112,8 @@ class InputFile(File):
         self.filepath = None  # Ensure that filepath is initialized
 
         # Determine file type (remote, local, or task-produced)
-        possible_url = ru.Url(file)
-        if possible_url.scheme in URL_SCHEMES:
+        parsed_url = urlparse(file)
+        if parsed_url.scheme in URL_SCHEMES:
             self.remote_url = file
         elif os.path.exists(file):  # Check if it's a local file
             self.local_file = file
