@@ -1,14 +1,14 @@
-import time
-import pytest
 import asyncio
 import signal
 import threading
+import time
+from unittest.mock import AsyncMock, Mock, patch
+
+import pytest
 import pytest_asyncio
 
-from pathlib import Path
-from unittest.mock import Mock, AsyncMock, patch, MagicMock
+from radical.asyncflow import WorkflowEngine
 
-from radical.asyncflow import WorkflowEngine, NoopExecutionBackend
 
 class TestGracefulShutdown:
     """Test suite for graceful shutdown functionality of WorkflowEngine."""
@@ -23,20 +23,22 @@ class TestGracefulShutdown:
         mock_backend.get_task_states_map.return_value = Mock()
         mock_backend.register_callback = Mock()
         mock_backend.shutdown = AsyncMock()
-        
+
         # Create engine with mocked backend
-        with patch('radical.asyncflow.workflow_manager.get_event_loop_or_raise') as mock_loop:
+        with patch(
+            "radical.asyncflow.workflow_manager.get_event_loop_or_raise"
+        ) as mock_loop:
             mock_loop.return_value = asyncio.get_event_loop()
 
             engine = WorkflowEngine.__new__(WorkflowEngine)
             engine.__init__(backend=mock_backend, dry_run=False, implicit_data=True)
-            
+
             # Set up basic internal tasks if they don't exist
-            if not hasattr(engine, '_run_task') or engine._run_task is None:
+            if not hasattr(engine, "_run_task") or engine._run_task is None:
                 engine._run_task = asyncio.create_task(self._mock_run_component())
-            
+
             # Initialize components dict if not exists
-            if not hasattr(engine, 'components'):
+            if not hasattr(engine, "components"):
                 engine.components = {}
 
             yield engine
@@ -81,27 +83,27 @@ class TestGracefulShutdown:
         mock_future1 = asyncio.Future()
         mock_future2 = asyncio.Future()
         mock_future2.set_result("completed")  # One completed task
-        
+
         # Set up the original_cancel methods that should exist
         mock_future1.original_cancel = Mock(return_value=True)
         mock_future2.original_cancel = Mock(return_value=True)
 
         # Create a mock handle_task_cancellation method that calls original_cancel
         def mock_handle_cancellation(task_desc, task_fut):
-            if hasattr(task_fut, 'original_cancel'):
+            if hasattr(task_fut, "original_cancel"):
                 task_fut.original_cancel()
 
         engine.handle_task_cancellation = Mock(side_effect=mock_handle_cancellation)
 
         engine.components = {
-            'task.000001': {
-                'future': mock_future1,
-                'description': {'uid': 'task.000001', 'name': 'test_task_1'}
+            "task.000001": {
+                "future": mock_future1,
+                "description": {"uid": "task.000001", "name": "test_task_1"},
             },
-            'task.000002': {
-                'future': mock_future2,
-                'description': {'uid': 'task.000002', 'name': 'test_task_2'}
-            }
+            "task.000002": {
+                "future": mock_future2,
+                "description": {"uid": "task.000002", "name": "test_task_2"},
+            },
         }
 
         # Act: Shutdown
@@ -144,11 +146,12 @@ class TestGracefulShutdown:
     @pytest.mark.asyncio
     async def test_shutdown_timeout_handling(self, engine):
         """Test 4: Shutdown handles component timeout gracefully."""
+
         # Arrange: Create tasks that won't complete quickly
         async def slow_task():
             await asyncio.sleep(10)  # Long-running task
 
-        engine._run_task = asyncio.create_task(slow_task()) 
+        engine._run_task = asyncio.create_task(slow_task())
 
         # Act: Shutdown with timeout
         start_time = time.time()
@@ -168,7 +171,7 @@ class TestGracefulShutdown:
         engine.backend.shutdown = mock_backend_shutdown
 
         # Ensure internal tasks are properly set up
-        if not hasattr(engine, '_run_task') or engine._run_task is None:
+        if not hasattr(engine, "_run_task") or engine._run_task is None:
             engine._run_task = asyncio.create_task(self._mock_run_component())
 
         # Act: Shutdown without skipping backend
@@ -197,34 +200,37 @@ class TestGracefulShutdown:
         for result in results:
             assert not isinstance(result, Exception), f"Shutdown failed with: {result}"
 
-    @pytest.mark.asyncio 
+    @pytest.mark.asyncio
     async def test_shutdown_signal_registration(self):
         """Bonus test: Verify signal handlers are properly registered."""
-        with patch('signal.signal') as mock_signal, \
-             patch('asyncio.get_event_loop') as mock_get_loop:
-            
+        with (
+            patch("signal.signal") as _,
+            patch("asyncio.get_event_loop") as mock_get_loop,
+        ):
             mock_loop = Mock()
             mock_get_loop.return_value = mock_loop
             mock_loop.add_signal_handler = Mock()
-            
+
             # Mock backend
             mock_backend = Mock()
             mock_backend.session = Mock()
             mock_backend.session.path = "/tmp/test"
             mock_backend.get_task_states_map.return_value = Mock()
             mock_backend.register_callback = Mock()
-            
+
             # Create engine (will trigger signal handler registration)
-            with patch('radical.asyncflow.workflow_manager.get_event_loop_or_raise') as mock_loop_check:
+            with patch(
+                "radical.asyncflow.workflow_manager.get_event_loop_or_raise"
+            ) as mock_loop_check:
                 mock_loop_check.return_value = mock_loop
-                
+
                 engine = WorkflowEngine.__new__(WorkflowEngine)
                 engine.__init__(backend=mock_backend)
-                
+
                 # Assert: Signal handlers were registered
                 expected_signals = [signal.SIGHUP, signal.SIGTERM, signal.SIGINT]
                 assert mock_loop.add_signal_handler.call_count == len(expected_signals)
-                
+
                 # Verify correct signals were registered
                 registered_signals = [
                     call[0][0] for call in mock_loop.add_signal_handler.call_args_list
@@ -241,20 +247,23 @@ class TestGracefulShutdown:
         except asyncio.CancelledError:
             return
 
+
 # Additional integration test for real signal handling
 class TestSignalIntegration:
     """Integration tests for signal handling (requires careful setup)."""
 
     @pytest.mark.asyncio
-    @pytest.mark.skipif(threading.current_thread() != threading.main_thread(), 
-                       reason="Signal handling only works in main thread")
+    @pytest.mark.skipif(
+        threading.current_thread() != threading.main_thread(),
+        reason="Signal handling only works in main thread",
+    )
     async def test_real_signal_handling(self):
         """Test that real signals can trigger shutdown (integration test)."""
         # This test should only run in environments where signal handling is supported
         # and when running in the main thread
 
         shutdown_completed = threading.Event()
-        
+
         async def create_and_test_engine():
             # Create engine with real signal handling
             mock_backend = Mock()
@@ -268,12 +277,14 @@ class TestSignalIntegration:
                 await asyncio.sleep(10)  # Long-running task
 
             try:
-                with patch('radical.asyncflow.workflow_manager.get_event_loop_or_raise') as mock_loop:
+                with patch(
+                    "radical.asyncflow.workflow_manager.get_event_loop_or_raise"
+                ) as mock_loop:
                     mock_loop.return_value = asyncio.get_event_loop()
 
                     engine = WorkflowEngine.__new__(WorkflowEngine)
                     engine.__init__(backend=mock_backend)
-                    engine._run_task = asyncio.create_task(mock_run_task()) 
+                    engine._run_task = asyncio.create_task(mock_run_task())
 
                     # Note: Using SIGUSR1 instead of sending real termination signals
                     # Manual cleanup

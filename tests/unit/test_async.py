@@ -1,7 +1,6 @@
-import time
-import pytest
 import asyncio
-import threading
+
+import pytest
 
 from radical.asyncflow import WorkflowEngine
 
@@ -12,5 +11,5 @@ async def test_async_context_startup():
     await asyncio.sleep(0.1)  # Give some time for the loop to process startup tasks
 
     # Check that tasks have been scheduled
-    assert hasattr(engine, '_run_task'), "Engine did not schedule run task."
+    assert hasattr(engine, "_run_task"), "Engine did not schedule run task."
     assert not engine._run_task.done(), "Run task finished prematurely."

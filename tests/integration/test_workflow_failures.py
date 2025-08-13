@@ -1,9 +1,10 @@
-import pytest
 import asyncio
-
-from radical.asyncflow import WorkflowEngine
 from concurrent.futures import ThreadPoolExecutor
-from radical.asyncflow import ConcurrentExecutionBackend
+
+import pytest
+
+from radical.asyncflow import ConcurrentExecutionBackend, WorkflowEngine
+
 
 @pytest.mark.asyncio
 async def test_task_failure_handling():
@@ -78,7 +79,7 @@ async def test_awaiting_failed_task_propagates_exception():
         # The test will fail at await task1(), so task2 should never run
         with pytest.raises(ValueError, match="Intentional failure in task1"):
             await task2(await task1())
-    
+
     finally:
         await flow.shutdown()
 
@@ -116,9 +117,10 @@ async def test_independent_workflow_failures_do_not_affect_others():
     try:
         # Run 5 workflows concurrently, workflow 0 should fail
         results = await asyncio.gather(*[run_wf(i) for i in range(5)])
-        
+
         # Assert workflow 0 failed with the expected message
-        assert "Workflow 0 failed: Intentional failure in workflow 0 task1" in results[0]
+        expected_msg = "Workflow 0 failed: Intentional failure in workflow 0 task1"
+        assert expected_msg in results[0]
 
         # All other workflows should succeed
         for i in range(1, 5):

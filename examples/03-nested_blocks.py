@@ -1,11 +1,9 @@
-import time
 import asyncio
 import logging
-
+import time
 from concurrent.futures import ThreadPoolExecutor
 
-from radical.asyncflow import WorkflowEngine
-from radical.asyncflow import ConcurrentExecutionBackend
+from radical.asyncflow import ConcurrentExecutionBackend, WorkflowEngine
 from radical.asyncflow.logging import init_default_logger
 
 logger = logging.getLogger(__name__)
