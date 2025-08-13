@@ -22,6 +22,7 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+
 def service_ready_callback(future: asyncio.Future, task, state) -> None:
     """Callback for handling service task readiness.
 
@@ -32,6 +33,7 @@ def service_ready_callback(future: asyncio.Future, task, state) -> None:
         task: Task with wait_info() method.
         state: Current task state (unused).
     """
+
     def wait_and_set() -> None:
         try:
             info = task.wait_info()  # synchronous call
@@ -40,6 +42,7 @@ def service_ready_callback(future: asyncio.Future, task, state) -> None:
             future.set_exception(e)
 
     threading.Thread(target=wait_and_set, daemon=True).start()
+
 
 class RadicalExecutionBackend(BaseExecutionBackend):
     """Radical Pilot-based execution backend for large-scale HPC task execution.
@@ -386,9 +389,8 @@ class RadicalExecutionBackend(BaseExecutionBackend):
         elif task_desc["function"]:
             if is_service:
                 error_msg = (
-                    "RadicalExecutionBackend does not support "
-                    "function service tasks"
-                    )
+                    "RadicalExecutionBackend does not support function service tasks"
+                )
                 rp_task["exception"] = ValueError(error_msg)
                 self._callback_func(rp_task, rp.FAILED)
                 return None
@@ -400,8 +402,10 @@ class RadicalExecutionBackend(BaseExecutionBackend):
 
         if rp_task.mode in [
             rp.TASK_FUNCTION,
-            rp.TASK_EVAL, rp.TASK_PROC, rp.TASK_METHOD
-            ]:
+            rp.TASK_EVAL,
+            rp.TASK_PROC,
+            rp.TASK_METHOD,
+        ]:
             if not self.raptor_mode:
                 error_msg = f"Raptor mode not enabled, cannot register {rp_task.mode}"
                 rp_task["exception"] = RuntimeError(error_msg)
@@ -534,7 +538,7 @@ class RadicalExecutionBackend(BaseExecutionBackend):
         src_uid = src_task["uid"]
 
         cmd1 = f"export SRC_TASK_ID={src_uid}"
-        cmd2 = "export SRC_TASK_SANDBOX=\"$RP_PILOT_SANDBOX/$SRC_TASK_ID\""
+        cmd2 = 'export SRC_TASK_SANDBOX="$RP_PILOT_SANDBOX/$SRC_TASK_ID"'
         cmd3 = """files=$(cd "$SRC_TASK_SANDBOX" && ls | grep -ve "^$SRC_TASK_ID")
                 for f in $files
                 do

@@ -25,7 +25,8 @@ class TestGracefulShutdown:
         mock_backend.shutdown = AsyncMock()
 
         # Create engine with mocked backend
-        with patch('radical.asyncflow.workflow_manager.get_event_loop_or_raise'
+        with patch(
+            "radical.asyncflow.workflow_manager.get_event_loop_or_raise"
         ) as mock_loop:
             mock_loop.return_value = asyncio.get_event_loop()
 
@@ -33,11 +34,11 @@ class TestGracefulShutdown:
             engine.__init__(backend=mock_backend, dry_run=False, implicit_data=True)
 
             # Set up basic internal tasks if they don't exist
-            if not hasattr(engine, '_run_task') or engine._run_task is None:
+            if not hasattr(engine, "_run_task") or engine._run_task is None:
                 engine._run_task = asyncio.create_task(self._mock_run_component())
 
             # Initialize components dict if not exists
-            if not hasattr(engine, 'components'):
+            if not hasattr(engine, "components"):
                 engine.components = {}
 
             yield engine
@@ -89,20 +90,20 @@ class TestGracefulShutdown:
 
         # Create a mock handle_task_cancellation method that calls original_cancel
         def mock_handle_cancellation(task_desc, task_fut):
-            if hasattr(task_fut, 'original_cancel'):
+            if hasattr(task_fut, "original_cancel"):
                 task_fut.original_cancel()
 
         engine.handle_task_cancellation = Mock(side_effect=mock_handle_cancellation)
 
         engine.components = {
-            'task.000001': {
-                'future': mock_future1,
-                'description': {'uid': 'task.000001', 'name': 'test_task_1'}
+            "task.000001": {
+                "future": mock_future1,
+                "description": {"uid": "task.000001", "name": "test_task_1"},
             },
-            'task.000002': {
-                'future': mock_future2,
-                'description': {'uid': 'task.000002', 'name': 'test_task_2'}
-            }
+            "task.000002": {
+                "future": mock_future2,
+                "description": {"uid": "task.000002", "name": "test_task_2"},
+            },
         }
 
         # Act: Shutdown
@@ -145,6 +146,7 @@ class TestGracefulShutdown:
     @pytest.mark.asyncio
     async def test_shutdown_timeout_handling(self, engine):
         """Test 4: Shutdown handles component timeout gracefully."""
+
         # Arrange: Create tasks that won't complete quickly
         async def slow_task():
             await asyncio.sleep(10)  # Long-running task
@@ -169,7 +171,7 @@ class TestGracefulShutdown:
         engine.backend.shutdown = mock_backend_shutdown
 
         # Ensure internal tasks are properly set up
-        if not hasattr(engine, '_run_task') or engine._run_task is None:
+        if not hasattr(engine, "_run_task") or engine._run_task is None:
             engine._run_task = asyncio.create_task(self._mock_run_component())
 
         # Act: Shutdown without skipping backend
@@ -201,9 +203,10 @@ class TestGracefulShutdown:
     @pytest.mark.asyncio
     async def test_shutdown_signal_registration(self):
         """Bonus test: Verify signal handlers are properly registered."""
-        with patch('signal.signal') as _, \
-             patch('asyncio.get_event_loop') as mock_get_loop:
-
+        with (
+            patch("signal.signal") as _,
+            patch("asyncio.get_event_loop") as mock_get_loop,
+        ):
             mock_loop = Mock()
             mock_get_loop.return_value = mock_loop
             mock_loop.add_signal_handler = Mock()
@@ -216,7 +219,8 @@ class TestGracefulShutdown:
             mock_backend.register_callback = Mock()
 
             # Create engine (will trigger signal handler registration)
-            with patch('radical.asyncflow.workflow_manager.get_event_loop_or_raise'
+            with patch(
+                "radical.asyncflow.workflow_manager.get_event_loop_or_raise"
             ) as mock_loop_check:
                 mock_loop_check.return_value = mock_loop
 
@@ -243,13 +247,16 @@ class TestGracefulShutdown:
         except asyncio.CancelledError:
             return
 
+
 # Additional integration test for real signal handling
 class TestSignalIntegration:
     """Integration tests for signal handling (requires careful setup)."""
 
     @pytest.mark.asyncio
-    @pytest.mark.skipif(threading.current_thread() != threading.main_thread(),
-                       reason="Signal handling only works in main thread")
+    @pytest.mark.skipif(
+        threading.current_thread() != threading.main_thread(),
+        reason="Signal handling only works in main thread",
+    )
     async def test_real_signal_handling(self):
         """Test that real signals can trigger shutdown (integration test)."""
         # This test should only run in environments where signal handling is supported
@@ -270,7 +277,8 @@ class TestSignalIntegration:
                 await asyncio.sleep(10)  # Long-running task
 
             try:
-                with patch('radical.asyncflow.workflow_manager.get_event_loop_or_raise'
+                with patch(
+                    "radical.asyncflow.workflow_manager.get_event_loop_or_raise"
                 ) as mock_loop:
                     mock_loop.return_value = asyncio.get_event_loop()
 

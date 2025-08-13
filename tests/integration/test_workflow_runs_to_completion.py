@@ -49,14 +49,14 @@ async def test_flow_function_tasks():
         """
         Runs a chain of function tasks where each builds upon shared state.
         """
-        print(f'\n[WF {wf_id}] Start: {time.time():.2f}')
+        print(f"\n[WF {wf_id}] Start: {time.time():.2f}")
         s1 = await task1()
         s2 = await task2(s1)
         s3 = await task3(s2)
         s4 = await task4(s3)
         s5 = await task5(s4)
 
-        print(f'[WF {wf_id}] Done: {time.time():.2f} — Final state: {s5}')
+        print(f"[WF {wf_id}] Done: {time.time():.2f} — Final state: {s5}")
         return s5
 
     try:
@@ -65,15 +65,12 @@ async def test_flow_function_tasks():
 
         # Validation: all steps completed and final value is correct
         for res in results:
-            assert res["steps"] == ["task1",
-                                    "task2", "task3",
-                                    "task4", "task5"]
+            assert res["steps"] == ["task1", "task2", "task3", "task4", "task5"]
             assert res["value"] == 25
 
     finally:
         await flow.shutdown()
         print("Workflow engine shutdown complete.")
-
 
 
 @pytest.mark.asyncio
@@ -114,7 +111,7 @@ async def test_flow_executable_tasks(tmp_path):
         wf_file = tmp_path / f"workflow_{wf_id}.log"
         wf_file_path = str(wf_file)
 
-        print(f'\n[WF {wf_id}] Start: {time.time():.2f}')
+        print(f"\n[WF {wf_id}] Start: {time.time():.2f}")
 
         t1 = task1(wf_file_path)
         t2 = task2(wf_file_path, t1)
@@ -124,7 +121,7 @@ async def test_flow_executable_tasks(tmp_path):
 
         await t5
 
-        print(f'[WF {wf_id}] Done: {time.time():.2f}')
+        print(f"[WF {wf_id}] Done: {time.time():.2f}")
         return wf_file_path
 
     try:
@@ -134,8 +131,9 @@ async def test_flow_executable_tasks(tmp_path):
         for path in file_paths:
             with open(path) as f:
                 lines = [line.strip() for line in f.readlines()]
-                assert lines == ["task1", "task2", "task3", "task4", "task5"], \
-                                 f"Unexpected task sequence in {path}: {lines}"
+                assert lines == ["task1", "task2", "task3", "task4", "task5"], (
+                    f"Unexpected task sequence in {path}: {lines}"
+                )
 
     finally:
         await flow.shutdown()
@@ -188,7 +186,7 @@ async def test_flow_mixed_function_and_executable_tasks(tmp_path):
         wf_file = tmp_path / f"wf_{wf_id}.log"
         wf_file_path = str(wf_file)
 
-        print(f'\n[WF {wf_id}] Start: {time.time():.2f}')
+        print(f"\n[WF {wf_id}] Start: {time.time():.2f}")
 
         s1 = await f_task1()
         s2 = await f_task2(s1)
@@ -198,7 +196,7 @@ async def test_flow_mixed_function_and_executable_tasks(tmp_path):
         t3 = e_task3(wf_file_path, t2)
         await t3
 
-        print(f'[WF {wf_id}] Done: {time.time():.2f} — Final state: {s3}')
+        print(f"[WF {wf_id}] Done: {time.time():.2f} — Final state: {s3}")
         return s3, wf_file
 
     try:

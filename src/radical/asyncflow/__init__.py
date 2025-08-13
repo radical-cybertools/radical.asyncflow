@@ -9,7 +9,7 @@ from .backends.execution.radical_pilot import RadicalExecutionBackend
 from .data import InputFile, OutputFile
 from .workflow_manager import WorkflowEngine
 
-__version__ = importlib_metadata.version('radical.asyncflow')
+__version__ = importlib_metadata.version("radical.asyncflow")
 
 __all__ = [
     "ConcurrentExecutionBackend",

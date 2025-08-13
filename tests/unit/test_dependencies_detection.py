@@ -17,6 +17,7 @@ async def test_detect_data_dependencies():
     assert 42 not in input_deps
     assert "string" not in input_deps
 
+
 @pytest.mark.asyncio
 async def test_detect_task_dependencies():
     engine = await WorkflowEngine.create(backend=NoopExecutionBackend())
@@ -35,4 +36,4 @@ async def test_detect_task_dependencies():
     task_deps, _, _ = engine._detect_dependencies([task])
 
     assert len(task_deps) == 1
-    assert task1 in task_deps[0]['args']
+    assert task1 in task_deps[0]["args"]

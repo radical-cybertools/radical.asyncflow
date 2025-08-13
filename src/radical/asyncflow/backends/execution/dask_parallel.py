@@ -40,8 +40,7 @@ class DaskExecutionBackend(BaseExecutionBackend):
         """
 
         if dask is None:
-            raise ImportError(
-                "Dask is required for DaskExecutionBackend.")
+            raise ImportError("Dask is required for DaskExecutionBackend.")
 
         self.tasks = {}
         self._client = None
@@ -69,10 +68,7 @@ class DaskExecutionBackend(BaseExecutionBackend):
             Exception: If Dask client initialization fails.
         """
         try:
-            self._client = await dask.Client(
-                asynchronous=True,
-                **self._resources
-                )
+            self._client = await dask.Client(asynchronous=True, **self._resources)
             dashboard_link = self._client.dashboard_link
             logger.info(f"Dask backend initialized with dashboard at {dashboard_link}")
         except Exception as e:
@@ -159,9 +155,7 @@ class DaskExecutionBackend(BaseExecutionBackend):
 
             # Filter out future objects as they are not picklable
             filtered_args = [
-                arg
-                for arg in task["args"]
-                if not isinstance(arg, asyncio.Future)
+                arg for arg in task["args"] if not isinstance(arg, asyncio.Future)
             ]
             task["args"] = tuple(filtered_args)
             try:
@@ -170,9 +164,7 @@ class DaskExecutionBackend(BaseExecutionBackend):
                 task["exception"] = e
                 self._callback_func(task, "FAILED")
 
-    async def _submit_to_dask(
-        self, task: dict[str, Any], fn: Callable, *args
-    ) -> None:
+    async def _submit_to_dask(self, task: dict[str, Any], fn: Callable, *args) -> None:
         """Submit function to Dask and register completion callback.
 
         Submits the wrapped function to Dask client and registers a callback

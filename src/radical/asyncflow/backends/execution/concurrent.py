@@ -9,12 +9,13 @@ from .base import BaseExecutionBackend, Session
 
 logger = logging.getLogger(__name__)
 
+
 class ConcurrentExecutionBackend(BaseExecutionBackend):
     """Simple async-only concurrent execution backend."""
 
     def __init__(self, executor: Executor):
         if not isinstance(executor, Executor):
-            err = ("Executor must be ThreadPoolExecutor or ProcessPoolExecutor")
+            err = "Executor must be ThreadPoolExecutor or ProcessPoolExecutor"
             raise TypeError(err)
 
         self.executor = executor
@@ -33,7 +34,7 @@ class ConcurrentExecutionBackend(BaseExecutionBackend):
             StateMapper.register_backend_states_with_defaults(backend=self)
             self._initialized = True
             executor_name = type(self.executor).__name__
-            logger.info(f'{executor_name} execution backend started successfully')
+            logger.info(f"{executor_name} execution backend started successfully")
         return self
 
     def get_task_states_map(self):
@@ -45,25 +46,27 @@ class ConcurrentExecutionBackend(BaseExecutionBackend):
     async def _execute_task(self, task: dict) -> tuple[dict, str]:
         """Execute a single task."""
         try:
-            if 'function' in task and task['function']:
+            if "function" in task and task["function"]:
                 return await self._execute_function(task)
             else:
                 return await self._execute_command(task)
         except Exception as e:
-            task.update({
-                'stderr': str(e),
-                'stdout': None,
-                'exit_code': 1,
-                'exception': e,
-                'return_value': None
-            })
-            return task, 'FAILED'
+            task.update(
+                {
+                    "stderr": str(e),
+                    "stdout": None,
+                    "exit_code": 1,
+                    "exception": e,
+                    "return_value": None,
+                }
+            )
+            return task, "FAILED"
 
     async def _execute_function(self, task: dict) -> tuple[dict, str]:
         """Execute function task."""
-        func = task['function']
-        args = task.get('args', [])
-        kwargs = task.get('kwargs', {})
+        func = task["function"]
+        args = task.get("args", [])
+        kwargs = task.get("kwargs", {})
 
         if asyncio.iscoroutinefunction(func):
             result = await func(*args, **kwargs)
@@ -71,46 +74,43 @@ class ConcurrentExecutionBackend(BaseExecutionBackend):
             loop = asyncio.get_running_loop()
             result = await loop.run_in_executor(self.executor, func, *args, **kwargs)
 
-        task.update({
-            'return_value': result,
-            'stdout': str(result),
-            'exit_code': 0
-        })
-        return task, 'DONE'
+        task.update({"return_value": result, "stdout": str(result), "exit_code": 0})
+        return task, "DONE"
 
     async def _execute_command(self, task: dict) -> tuple[dict, str]:
         """Execute command task."""
-        cmd = ' '.join([task['executable']] + task.get('arguments', []))
+        cmd = " ".join([task["executable"]] + task.get("arguments", []))
 
         try:
             process = await asyncio.create_subprocess_shell(
-                cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
+                cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
             )
             stdout, stderr = await process.communicate()
 
-            task.update({
-                'stdout': stdout.decode(),
-                'stderr': stderr.decode(),
-                'exit_code': process.returncode
-            })
+            task.update(
+                {
+                    "stdout": stdout.decode(),
+                    "stderr": stderr.decode(),
+                    "exit_code": process.returncode,
+                }
+            )
 
         except Exception:
             # Fallback to thread executor
             loop = asyncio.get_running_loop()
             result = await loop.run_in_executor(
-                self.executor,
-                subprocess.run, cmd, True, True
+                self.executor, subprocess.run, cmd, True, True
             )
 
-            task.update({
-                'stdout': result.stdout,
-                'stderr': result.stderr,
-                'exit_code': result.returncode
-            })
+            task.update(
+                {
+                    "stdout": result.stdout,
+                    "stderr": result.stderr,
+                    "exit_code": result.returncode,
+                }
+            )
 
-        state = 'DONE' if task['exit_code'] == 0 else 'FAILED'
+        state = "DONE" if task["exit_code"] == 0 else "FAILED"
         return task, state
 
     async def _handle_task(self, task: dict) -> None:
@@ -127,8 +127,8 @@ class ConcurrentExecutionBackend(BaseExecutionBackend):
             future = asyncio.create_task(self._handle_task(task))
             submitted_tasks.append(future)
 
-            self.tasks[task['uid']] = task
-            self.tasks[task['uid']]['future'] = future
+            self.tasks[task["uid"]] = task
+            self.tasks[task["uid"]]["future"] = future
 
         return submitted_tasks
 
@@ -144,9 +144,9 @@ class ConcurrentExecutionBackend(BaseExecutionBackend):
         """
         if uid in self.tasks:
             task = self.tasks[uid]
-            future = task['future']
+            future = task["future"]
             if future and future.cancel():
-                self._callback_func(task, 'CANCELED')
+                self._callback_func(task, "CANCELED")
                 return True
         return False
 
@@ -154,7 +154,7 @@ class ConcurrentExecutionBackend(BaseExecutionBackend):
         """Cancel all running tasks."""
         cancelled_count = 0
         for task in self.tasks.values():
-            future = task['future']
+            future = task["future"]
             future.cancel()
             cancelled_count += 1
         self.tasks.clear()
@@ -164,15 +164,14 @@ class ConcurrentExecutionBackend(BaseExecutionBackend):
         """Shutdown the executor."""
         await self.cancel_all_tasks()
         self.executor.shutdown(wait=True)
-        logger.info('Concurrent execution backend shutdown complete')
+        logger.info("Concurrent execution backend shutdown complete")
 
     def build_task(self, uid, task_desc, task_specific_kwargs):
         pass
 
     def link_explicit_data_deps(
-        self, src_task=None,
-        dst_task=None, file_name=None, file_path=None
-        ):
+        self, src_task=None, dst_task=None, file_name=None, file_path=None
+    ):
         pass
 
     def link_implicit_data_deps(self, src_task, dst_task):

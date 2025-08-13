@@ -17,7 +17,7 @@ maintainers = [
 readme = "README.md"
 requires-python = ">=3.9"
 
-dependencies = ["pydantic"]
+dependencies = ["pydantic", "typeguard"]
 
 [project.optional-dependencies]
 dask = ["dask[distributed]"]

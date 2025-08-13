@@ -61,9 +61,8 @@ class TestFutureResolution:
 
         @flow.function_task
         async def consumer(
-            future_arg,
-            regular_arg, kwarg_future=None, kwarg_regular=None
-            ):
+            future_arg, regular_arg, kwarg_future=None, kwarg_regular=None
+        ):
             # Check argument types and values
             assert not isinstance(future_arg, asyncio.Future)
             assert future_arg == "from_future"
@@ -83,10 +82,10 @@ class TestFutureResolution:
 
         # Execute with mixed arguments
         result_future = consumer(
-            future_result,                    # Future argument
-            "regular_value",                  # Regular argument
-            kwarg_future=kwarg_future,        # Future keyword argument
-            kwarg_regular="kwarg_regular_value"  # Regular keyword argument
+            future_result,  # Future argument
+            "regular_value",  # Regular argument
+            kwarg_future=kwarg_future,  # Future keyword argument
+            kwarg_regular="kwarg_regular_value",  # Regular keyword argument
         )
 
         result = await result_future
@@ -152,24 +151,21 @@ class TestFutureResolution:
 
         # Create component description with mixed args
         comp_desc = {
-            'args': (future1, "regular_arg", future2),
-            'kwargs': {
-                'kwarg1': future1,
-                'kwarg2': "regular_kwarg",
-                'kwarg3': future2
-            }
+            "args": (future1, "regular_arg", future2),
+            "kwargs": {"kwarg1": future1, "kwarg2": "regular_kwarg", "kwarg3": future2},
         }
 
         # Extract values
-        resolved_args, resolved_kwargs = \
-            await flow._extract_dependency_values(comp_desc)
+        resolved_args, resolved_kwargs = await flow._extract_dependency_values(
+            comp_desc
+        )
 
         # Verify resolution
         assert resolved_args == ("value1", "regular_arg", "value2")
         assert resolved_kwargs == {
-            'kwarg1': "value1",
-            'kwarg2': "regular_kwarg",
-            'kwarg3': "value2"
+            "kwarg1": "value1",
+            "kwarg2": "regular_kwarg",
+            "kwarg3": "value2",
         }
 
     @pytest.mark.asyncio
@@ -235,6 +231,7 @@ class TestFutureResolution:
         # Verify reasonable performance (should complete quickly in dry-run mode)
         assert execution_time < 1.0, f"Execution took too long: {execution_time}s"
 
+
 # Additional integration test
 @pytest.mark.asyncio
 async def test_real_workflow_scenario():
@@ -244,6 +241,7 @@ async def test_real_workflow_scenario():
     flow = await WorkflowEngine.create(backend=backend)
 
     try:
+
         @flow.function_task
         async def fetch_data(source):
             """Simulate data fetching."""

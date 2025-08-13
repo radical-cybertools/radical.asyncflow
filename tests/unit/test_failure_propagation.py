@@ -16,6 +16,7 @@ async def flow():
     await asyncio.sleep(0)  # allow any pending tasks to finish
     await flow.shutdown(skip_execution_backend=True)
 
+
 @pytest.mark.asyncio
 async def test_dependency_failure_exception_creation(flow):
     @flow.function_task
@@ -46,6 +47,7 @@ async def test_dependency_failure_exception_creation(flow):
     assert isinstance(dep_failure.root_cause, ValueError)
     assert str(dep_failure.root_cause) == "Original task failure"
 
+
 @pytest.mark.asyncio
 async def test_multiple_dependency_failures(flow):
     @flow.function_task
@@ -75,6 +77,7 @@ async def test_multiple_dependency_failures(flow):
     assert "failing_task1" in dep_failure.failed_dependencies
     assert "failing_task2" in dep_failure.failed_dependencies
     assert isinstance(dep_failure.root_cause, (ValueError, RuntimeError))
+
 
 @pytest.mark.asyncio
 async def test_chain_of_dependency_failures(flow):
@@ -113,6 +116,7 @@ async def test_chain_of_dependency_failures(flow):
         assert isinstance(root_cause, ValueError)
         assert str(root_cause) == "Root failure"
 
+
 @pytest.mark.asyncio
 async def test_partial_dependency_failure(flow):
     @flow.function_task
@@ -141,6 +145,7 @@ async def test_partial_dependency_failure(flow):
     dep_failure = t3.exception()
     assert "failing_task" in dep_failure.failed_dependencies
     assert "successful_task" not in dep_failure.failed_dependencies
+
 
 @pytest.mark.asyncio
 async def test_block_dependency_failure(flow):
@@ -187,13 +192,14 @@ async def test_async_dependency_failure_propagation(flow):
     assert isinstance(dep_failure.root_cause, ValueError)
     assert str(dep_failure.root_cause) == "Async task failed"
 
+
 @pytest.mark.asyncio
 async def test_handle_task_failure_with_dependency_failure(flow):
     mock_task = {
-        'uid': 'task.000001',
-        'name': 'test_task',
-        'function': lambda: None,
-        'exception': ValueError("Original error")
+        "uid": "task.000001",
+        "name": "test_task",
+        "function": lambda: None,
+        "exception": ValueError("Original error"),
     }
 
     mock_future = asyncio.Future()
@@ -201,18 +207,19 @@ async def test_handle_task_failure_with_dependency_failure(flow):
     dep_failure = DependencyFailureError(
         message="Test dependency failure",
         failed_dependencies=["dep1", "dep2"],
-        root_cause=ValueError("Root cause")
+        root_cause=ValueError("Root cause"),
     )
 
-    flow.components[mock_task['uid']] = {
-        'future': mock_future,
-        'description': mock_task
+    flow.components[mock_task["uid"]] = {
+        "future": mock_future,
+        "description": mock_task,
     }
 
     flow.handle_task_failure(mock_task, mock_future, dep_failure)
 
     assert mock_future.exception() is dep_failure
     assert isinstance(mock_future.exception(), DependencyFailureError)
+
 
 @pytest.mark.asyncio
 async def test_exception_chaining_in_dependency_failure(flow):
@@ -236,13 +243,14 @@ async def test_exception_chaining_in_dependency_failure(flow):
     assert isinstance(dep_failure.__cause__, ValueError)
     assert str(dep_failure.__cause__) == "Original error"
 
+
 @pytest.mark.asyncio
 async def test_dependency_failure_string_representation():
     root_cause = ValueError("Root error")
     dep_failure = DependencyFailureError(
         message="Cannot execute task",
         failed_dependencies=["task1", "task2"],
-        root_cause=root_cause
+        root_cause=root_cause,
     )
 
     str_repr = str(dep_failure)

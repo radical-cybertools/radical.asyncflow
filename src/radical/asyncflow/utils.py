@@ -2,20 +2,23 @@ import asyncio
 
 _global_task_counter = 0
 
+
 def get_next_uid():
     """Return the next unique task ID."""
     global _global_task_counter
     _global_task_counter += 1
     return f"{_global_task_counter:06d}"
 
+
 def reset_uid_counter():
     """Reset the counter to zero (only call when backend shuts down)."""
     global _global_task_counter
     _global_task_counter = 0
 
+
 def get_event_loop_or_raise(
-    context_name: str = "AsyncWorkflowEngine"
-    ) -> asyncio.AbstractEventLoop:
+    context_name: str = "AsyncWorkflowEngine",
+) -> asyncio.AbstractEventLoop:
     """
     Get the current running event loop or raise a helpful error.
 

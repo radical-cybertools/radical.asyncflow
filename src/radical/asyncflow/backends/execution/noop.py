@@ -29,7 +29,7 @@ class NoopExecutionBackend(BaseExecutionBackend):
         Returns:
             str: Always returns 'IDLE' as this backend performs no actual work.
         """
-        return 'IDLE'
+        return "IDLE"
 
     def task_state_cb(self, task: dict, state: str) -> None:
         """Callback function invoked when a task's state changes.
@@ -87,12 +87,13 @@ class NoopExecutionBackend(BaseExecutionBackend):
                 receive dummy stdout and return_value before being marked as DONE.
         """
         for task in tasks:
-            task['stdout'] = 'Dummy Output'
-            task['return_value'] = 'Dummy Output'
-            self._callback_func(task, 'DONE')
+            task["stdout"] = "Dummy Output"
+            task["return_value"] = "Dummy Output"
+            self._callback_func(task, "DONE")
 
-    def link_explicit_data_deps(self, src_task=None, dst_task=None, file_name=None,
-                               file_path=None):
+    def link_explicit_data_deps(
+        self, src_task=None, dst_task=None, file_name=None, file_path=None
+    ):
         """Handle explicit data dependencies between tasks.
 
         Args:

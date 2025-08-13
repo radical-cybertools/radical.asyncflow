@@ -59,16 +59,16 @@ class _ColoredFormatter(logging.Formatter):
         # Detail formatting
         if show_details:
             detail_info = (
-                f'{colors["green"]}[TID:{colors["white"]}%(thread_id)s'
-                f'{colors["green"]} PID:{colors["white"]}%(process)d'
-                f'{colors["green"]}]{colors["reset"]} '
+                f"{colors['green']}[TID:{colors['white']}%(thread_id)s"
+                f"{colors['green']} PID:{colors['white']}%(process)d"
+                f"{colors['green']}]{colors['reset']} "
             )
         else:
             detail_info = ""
 
         # Style variations
-        timestamp_fmt = f'{colors["grey"]}%(asctime)s.%(msecs)03d{colors["reset"]}'
-        logger_fmt = f'{colors["bright_purple"]}[%(short_name)s]{colors["reset"]}'
+        timestamp_fmt = f"{colors['grey']}%(asctime)s.%(msecs)03d{colors['reset']}"
+        logger_fmt = f"{colors['bright_purple']}[%(short_name)s]{colors['reset']}"
         separator = " │ "
 
         # Date format
@@ -119,9 +119,7 @@ class _ColoredFormatter(logging.Formatter):
             if record.name == "__main__":
                 record.short_name = "main"
             elif "backends.execution" in record.name:
-                record.short_name = (
-                    f"execution.backend({record.name.split('.')[-1]})"
-                )
+                record.short_name = f"execution.backend({record.name.split('.')[-1]})"
             else:
                 # Get the last component of the logger name
                 record.short_name = record.name.split(".")[-1]

@@ -104,7 +104,8 @@ class StateMapper:
         if self.backend_module not in self._backend_registry:
             raise ValueError(
                 f"Backend '{self.backend_module}' not registered. "
-                f"Available backends: {list(self._backend_registry.keys())}")
+                f"Available backends: {list(self._backend_registry.keys())}"
+            )
 
         self._state_map = self._backend_registry[self.backend_module]
         self._reverse_map = {v: k for k, v in self._state_map.items()}

@@ -96,9 +96,8 @@ class BaseExecutionBackend(ABC):
 
     @abstractmethod
     def link_explicit_data_deps(
-        self, src_task=None,
-        dst_task=None, file_name=None, file_path=None
-        ):
+        self, src_task=None, dst_task=None, file_name=None, file_path=None
+    ):
         """Link explicit data dependencies between tasks or files.
 
         Creates explicit dependency relationships based on specified file names
