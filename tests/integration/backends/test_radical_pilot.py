@@ -1,12 +1,15 @@
-import pytest
 import asyncio
+
+import pytest
 import pytest_asyncio
+
 from radical.asyncflow import (
-    WorkflowEngine,
-    OutputFile,
     InputFile,
+    OutputFile,
     RadicalExecutionBackend,
+    WorkflowEngine,
 )
+
 
 @pytest_asyncio.fixture(scope="module")
 async def backend():
@@ -28,17 +31,20 @@ async def test_async_bag_of_tasks(backend):
     results = await asyncio.gather(*tasks)
 
     assert len(results) == bag_size
-    for i, result in enumerate(results):
+    for _, result in enumerate(results):
         assert result is not None
         assert isinstance(result, (str, bytes))
-    
+
     await flow.shutdown(skip_execution_backend=True)
 
 @pytest.mark.asyncio
 async def test_radical_backend_reject_service_task_function(backend):
     flow = await WorkflowEngine.create(backend=backend)
 
-    with pytest.raises(ValueError, match="RadicalExecutionBackend does not support function service tasks"):
+    with pytest.raises(
+        ValueError,
+        match="RadicalExecutionBackend does not support function service tasks"
+        ):
         @flow.function_task(service=True)
         async def bad_task2():
             return True
@@ -156,7 +162,7 @@ async def test_async_cancel_before_start(backend):
     await t1
     with pytest.raises(asyncio.CancelledError):
         await t2
-    
+
     await flow.shutdown(skip_execution_backend=True)
 
 @pytest.mark.asyncio

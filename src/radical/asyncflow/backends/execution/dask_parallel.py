@@ -3,13 +3,16 @@ import logging
 from functools import wraps
 from typing import Any, Callable, Optional
 
-import dask
 import typeguard
-from dask.distributed import Client
-from dask.distributed import Future as DaskFuture
 
 from ...constants import StateMapper
 from .base import BaseExecutionBackend, Session
+
+try:
+    import dask.distributed as dask
+except ImportError:
+    dask = None
+
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +38,11 @@ class DaskExecutionBackend(BaseExecutionBackend):
             resources: Dictionary of resource requirements for tasks. Contains
                 configuration parameters for the Dask client initialization.
         """
+
+        if dask is None:
+            raise ImportError(
+                "Dask is required for DaskExecutionBackend.")
+
         self.tasks = {}
         self._client = None
         self.session = Session()
@@ -61,7 +69,10 @@ class DaskExecutionBackend(BaseExecutionBackend):
             Exception: If Dask client initialization fails.
         """
         try:
-            self._client = await Client(asynchronous=True, **self._resources)
+            self._client = await dask.Client(
+                asynchronous=True,
+                **self._resources
+                )
             dashboard_link = self._client.dashboard_link
             logger.info(f"Dask backend initialized with dashboard at {dashboard_link}")
         except Exception as e:
@@ -173,13 +184,13 @@ class DaskExecutionBackend(BaseExecutionBackend):
             *args: Arguments to pass to the function.
         """
 
-        async def on_done(f: DaskFuture):
+        async def on_done(f: dask.Future):
             task_uid = task["uid"]
             try:
                 result = await f
                 task["return_value"] = result
                 self._callback_func(task, "DONE")
-            except dask.distributed.client.FutureCancelledError:
+            except dask.client.FutureCancelledError:
                 self._callback_func(task, "CANCELED")
             except Exception as e:
                 task["exception"] = e

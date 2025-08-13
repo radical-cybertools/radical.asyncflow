@@ -6,11 +6,19 @@ from typing import Callable, Optional
 
 import typeguard
 
-import radical.pilot as rp
-import radical.utils as ru
-
 from ...constants import StateMapper
 from .base import BaseExecutionBackend
+
+try:
+    import radical.pilot as rp
+except ImportError:
+    rp = None
+
+try:
+    import radical.utils as ru
+except ImportError:
+    ru = None
+
 
 logger = logging.getLogger(__name__)
 
@@ -128,6 +136,12 @@ class RadicalExecutionBackend(BaseExecutionBackend):
             - logs status messages for successful initialization or failures
             - Session UID is generated using radical.utils for uniqueness
         """
+
+        if rp is None or ru is None:
+            raise ImportError(
+                "Radical.Pilot and Radical.utils are required for "
+                "RadicalExecutionBackend."
+            )
 
         self.resources = resources
         self.raptor_config = raptor_config or {}
@@ -324,7 +338,7 @@ class RadicalExecutionBackend(BaseExecutionBackend):
 
     def build_task(
         self, uid: str, task_desc: dict, task_backend_specific_kwargs: dict
-    ) -> Optional[rp.TaskDescription]:
+    ) -> "Optional[rp.TaskDescription]":
         """Build a RadicalPilot task description from workflow task parameters.
 
         Converts a workflow task description into a RadicalPilot TaskDescription,
@@ -581,7 +595,7 @@ class RadicalExecutionBackend(BaseExecutionBackend):
             return True
         return False
 
-    def get_nodelist(self) -> Optional[rp.NodeList]:
+    def get_nodelist(self) -> "Optional[rp.NodeList]":
         """Get information about allocated compute nodes.
 
         Retrieves the nodelist from the active resource pilot, providing
