@@ -23,6 +23,11 @@ dependencies = [
     "requests"
 ]
 
+[project.urls]
+Homepage = "https://github.com/radical-cybertools/radical.asyncflow"
+Issues = "https://github.com/radical-cybertools/radical.asyncflow/issues"
+Documentation = "https://radical-cybertools.github.io/radical.asyncflow"
+
 [project.optional-dependencies]
 dask = ["dask[distributed]"]
 radicalpilot = ["radical.pilot"]
