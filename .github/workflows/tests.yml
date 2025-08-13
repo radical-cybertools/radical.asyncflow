@@ -61,19 +61,19 @@ jobs:
         include:
         - os: ubuntu-latest
           python: '3.9'
-          toxenv: py39-integration
+          toxenv: py39-all
         - os: ubuntu-latest
           python: '3.10'
-          toxenv: py310-integration
+          toxenv: py310-all
         - os: ubuntu-latest
           python: '3.11'
-          toxenv: py311-integration
+          toxenv: py311-all
         - os: ubuntu-latest
           python: '3.12'
-          toxenv: py312-integration
+          toxenv: py312-all
         - os: ubuntu-latest
           python: '3.13'
-          toxenv: py313-integration
+          toxenv: py313-all
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
