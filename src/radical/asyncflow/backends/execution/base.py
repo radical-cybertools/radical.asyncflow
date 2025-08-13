@@ -11,7 +11,7 @@ class BaseExecutionBackend(ABC):
     """
 
     @abstractmethod
-    def submit_tasks(self, tasks: list[dict]) -> None:
+    async def submit_tasks(self, tasks: list[dict]) -> None:
         """Submit a list of tasks for execution.
 
         Args:
@@ -22,7 +22,7 @@ class BaseExecutionBackend(ABC):
         pass
 
     @abstractmethod
-    def shutdown(self) -> None:
+    async def shutdown(self) -> None:
         """Gracefully shutdown the execution backend.
 
         This method should clean up resources, terminate running tasks if necessary,
@@ -112,7 +112,7 @@ class BaseExecutionBackend(ABC):
         pass
 
     @abstractmethod
-    def cancel_task(self, uid: str) -> bool:
+    async def cancel_task(self, uid: str) -> bool:
         """
         Cancel a task in the execution backend.
 
