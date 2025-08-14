@@ -41,12 +41,12 @@ Radical Asyncflow package is available on [PyPI](https://pypi.org/project/radica
 pip install radical-asyncflow
 ```
 
-For development and developers:
+For developers:
 
-```
+```shell
 git clone https://github.com/radical-cybertools/radical.asyncflow
 cd radical.asyncflow
-pip install .
+pip install -e .[dev,lint,doc]
 ```
 
 
