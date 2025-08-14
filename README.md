@@ -35,6 +35,20 @@ Currently, RAF supports the following execution backends:
 - Noop with `dry_run`
 - Custom implementations
 
+## ⚙️ Installation
+Radical Asyncflow package is available on [PyPI](https://pypi.org/project/radical-asyncflow/).
+```
+pip install radical-asyncflow
+```
+
+For development and developers:
+
+```
+git clone https://github.com/radical-cybertools/radical.asyncflow
+cd radical.asyncflow
+pip install .
+```
+
 
 ## 📚 Documentation
 👉 [AsyncFlow Documentation and API References](https://radical-cybertools.github.io/radical.asyncflow)
