@@ -333,8 +333,18 @@ class RadicalExecutionBackend(BaseExecutionBackend):
 
         def backend_callback(task, state) -> None:
             service_callback = None
+
             if task.mode == rp.TASK_SERVICE and state == rp.AGENT_EXECUTING:
                 service_callback = service_ready_callback
+
+            elif task.mode == rp.TASK_EXECUTABLE and state == rp.FAILED:
+                task = task.as_dict()
+                stderr = task.get("stderr")
+                exception = task.get("exception")
+                if stderr or exception:
+                    task["stderr"] = ", ".join(filter(None, [stderr, exception]))
+                    task["exception"] = ""
+
             func(task, state, service_callback=service_callback)
 
         self.task_manager.register_callback(backend_callback)

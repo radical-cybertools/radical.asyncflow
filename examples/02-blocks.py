@@ -45,7 +45,7 @@ async def main():
         await b2
 
     # Run workflows concurrently
-    await asyncio.gather(*[run_blocks(i) for i in range(2)])
+    await asyncio.gather(*[run_blocks(i) for i in range(10)])
 
     await flow.shutdown()
 

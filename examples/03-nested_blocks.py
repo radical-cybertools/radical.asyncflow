@@ -65,7 +65,7 @@ async def main():
         await bob2
         logger.info(f'WORKFLOW: Block of blocks-{i} is finished at {time.time()}')
 
-    await asyncio.gather(*[run_block_of_blocks(i) for i in range(2)])
+    await asyncio.gather(*[run_block_of_blocks(i) for i in range(10)])
 
     await flow.shutdown()
 
