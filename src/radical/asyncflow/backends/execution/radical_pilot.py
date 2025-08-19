@@ -339,10 +339,10 @@ class RadicalExecutionBackend(BaseExecutionBackend):
 
             elif task.mode == rp.TASK_EXECUTABLE and state == rp.FAILED:
                 task = task.as_dict()
-                stderr = task["stderr"]
-                exception = task["exception"]
+                stderr = task.get("stderr")
+                exception = task.get("exception")
                 if stderr and exception:
-                    # Concatenate both nicely with labels
+                    # Concatenate both stderr and exception
                     task["stderr"] = f"{stderr}, {exception}"
                     task["exception"] = ""
 
