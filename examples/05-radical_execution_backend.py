@@ -25,7 +25,7 @@ async def main():
 
     @flow.executable_task
     async def task2(task1, task_description=task2_resources):
-        return '/bin/echo "I got executed at" && /bin/date'
+        return 'python3 -c "import aymen as mp"'
 
     @flow.executable_task
     async def task3(task1, task2, task_description=task3_resources):
@@ -41,7 +41,7 @@ async def main():
         return t3_result
 
     # Run workflows concurrently
-    await asyncio.gather(*[run_wf(i) for i in range(1)])
+    await asyncio.gather(*[run_wf(i) for i in range(10)])
 
     await flow.shutdown()
 

@@ -341,9 +341,8 @@ class RadicalExecutionBackend(BaseExecutionBackend):
                 task = task.as_dict()
                 stderr = task.get("stderr")
                 exception = task.get("exception")
-                if stderr and exception:
-                    # Concatenate both stderr and exception
-                    task["stderr"] = f"{stderr}, {exception}"
+                if stderr or exception:
+                    task["stderr"] = ", ".join(filter(None, [stderr, exception]))
                     task["exception"] = ""
 
             func(task, state, service_callback=service_callback)
