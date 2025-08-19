@@ -339,12 +339,12 @@ class RadicalExecutionBackend(BaseExecutionBackend):
 
             elif task.mode == rp.TASK_EXECUTABLE and state == rp.FAILED:
                 task = task.as_dict()
-                stderr = task['stderr']
-                exception = task['exception']
+                stderr = task["stderr"]
+                exception = task["exception"]
                 if stderr and exception:
                     # Concatenate both nicely with labels
-                    task['stderr'] = f"{stderr}, {exception}"
-                    task['exception'] = ""
+                    task["stderr"] = f"{stderr}, {exception}"
+                    task["exception"] = ""
 
             func(task, state, service_callback=service_callback)
 
