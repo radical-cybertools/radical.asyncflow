@@ -1155,8 +1155,6 @@ class WorkflowEngine:
             )
             return
 
-        internal_task = self.components[task["uid"]]["description"]
-
         # Determine the appropriate exception to set
         if override_error_message is not None:
             # If it's already an exception (like DependencyFailureError),
