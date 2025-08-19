@@ -31,7 +31,7 @@ Currently, RAF supports the following execution backends:
 
 - [Radical.Pilot](https://radicalpilot.readthedocs.io/en/stable/#)
 - [Dask.Parallel](https://docs.dask.org/en/stable/)
-- [ThreadPoolExecutor](https://docs.python.org/3/library/concurrent.futures.html#threadpoolexecutor)
+- [Concurrent.Executor](https://docs.python.org/3/library/concurrent.futures.html#executor-objects)
 - Noop with `dry_run`
 - Custom implementations
 
