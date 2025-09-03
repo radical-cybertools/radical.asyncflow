@@ -253,13 +253,14 @@ class DragonExecutionBackend(BaseExecutionBackend):
                 else:
                     await self._submit_function_task(task)
             except Exception as e:
-                task["exception"] = e
+                task["exception" if is_exec_task else "stderr"] = e
                 self._callback_func(task, "FAILED")
 
     async def _submit_executable_task(self, task: dict[str, Any]) -> None:
         uid = task["uid"]
         backend_kwargs = task.get('task_backend_specific_kwargs', {})
         ranks = int(backend_kwargs.get("ranks", 1))
+        mpi = (backend_kwargs.get("mpi", False))
 
         # Wait for available slots
         while self._free_slots < ranks:
@@ -269,10 +270,10 @@ class DragonExecutionBackend(BaseExecutionBackend):
         self._free_slots -= ranks
 
         try:
-            if ranks > 1:
+            if mpi:
                 await self._launch_mpi_executable(task)
             else:
-                await self._launch_single_executable(task)
+                await self._launch_regular_executable(task)
         except Exception:
             self._free_slots += ranks
             raise
@@ -314,13 +315,17 @@ class DragonExecutionBackend(BaseExecutionBackend):
         }
         self._callback_func(task, "RUNNING")
 
-    async def _launch_single_executable(self, task: dict[str, Any]) -> None:
+    async def _launch_regular_executable(self, task: dict[str, Any]) -> None:
         uid = task["uid"]
         executable = task["executable"]
         args = list(task.get("args", []))
+        backend_kwargs = task.get('task_backend_specific_kwargs', {})
+        ranks = int(backend_kwargs.get("ranks", 1))
 
-        logger.debug(f"Launching single executable task {uid} via ProcessGroup")
+        logger.debug(f"Launching regular executable task {uid} via ProcessGroup with {ranks} ranks")
         try:
+            pg = ProcessGroup()
+
             template = ProcessTemplate(
                 target=executable,
                 args=args,
@@ -331,15 +336,14 @@ class DragonExecutionBackend(BaseExecutionBackend):
                 env=os.environ.copy(),
             )
 
-            group = ProcessGroup(restart=False, policy=None)
-            group.add_process(nproc=1, template=template)
-            group.init()
-            group.start()
+            pg.add_process(nproc=ranks, template=template)
+            pg.init()
+            pg.start()
 
             self._running_tasks[uid] = {
                 "type": "executable",
-                "group": group,
-                "ranks": 1,
+                "group": pg,
+                "ranks": ranks,
                 "start_time": time.time(),
             }
         except Exception as e:
@@ -354,6 +358,8 @@ class DragonExecutionBackend(BaseExecutionBackend):
         function = task["function"]
         args = task.get("args", ())
         kwargs = task.get("kwargs", {})
+        backend_kwargs = task.get('task_backend_specific_kwargs', {})
+        ranks = int(backend_kwargs.get("ranks", 1))
 
         # Wait for available slots
         while self._free_slots < 1:
@@ -370,7 +376,7 @@ class DragonExecutionBackend(BaseExecutionBackend):
                 ('cloudpickle', cloudpickle.dumps),
                 ('pickle', pickle.dumps)
             ]
-            
+
             serialization_error = None
             for name, serializer in serializers:
                 try:

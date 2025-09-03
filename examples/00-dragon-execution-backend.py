@@ -53,7 +53,7 @@ async def main():
         logger.info(f'Workflow {wf_id} completed at {time.time()}, result: {result}')
 
     # Run workflows concurrently
-    await asyncio.gather(*[run_wf(i) for i in range(1)])
+    await asyncio.gather(*[run_wf(i) for i in range(1024)])
 
     await flow.shutdown()
 

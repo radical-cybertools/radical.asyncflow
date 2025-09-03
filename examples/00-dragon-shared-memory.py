@@ -21,7 +21,7 @@ async def main():
     # Create a Dragon distributed dictionary (shared memory store)
     # 2 managers, 1 node, 1GB total size
 
-    shared_dict = DDict(2, 1, 1 * 1024 * 1024 * 1024)
+    shared_dict = DDict(2, 3, 1 * 1024 * 1024 * 1024)
 
     @flow.function_task
     async def add_to_dict(client_id):
