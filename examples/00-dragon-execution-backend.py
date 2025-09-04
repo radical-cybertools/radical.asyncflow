@@ -8,11 +8,11 @@ from radical.asyncflow.logging import init_default_logger
 
 
 async def main():
-
     logger = logging.getLogger(__name__)
     init_default_logger(logging.DEBUG)
 
     backend = await DragonExecutionBackend()
+    init_default_logger(logging.DEBUG)
     flow = await WorkflowEngine.create(backend=backend)
 
     @flow.function_task

@@ -9,10 +9,9 @@ logger = logging.getLogger(__name__)
 
 
 async def main():
-    init_default_logger(logging.INFO)
-
     # Create backend and workflow
     backend = await DragonExecutionBackend()
+    init_default_logger(logging.DEBUG)
     flow = await WorkflowEngine.create(backend=backend)
 
     task1_resources = {"ranks": 256}

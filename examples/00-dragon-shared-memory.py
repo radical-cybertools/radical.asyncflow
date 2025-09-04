@@ -10,10 +10,9 @@ from radical.asyncflow.logging import init_default_logger
 logger = logging.getLogger(__name__)
 
 async def main():
-    init_default_logger(logging.DEBUG)
-
     # Initialize Dragon backend and workflow engine
     backend = await DragonExecutionBackend()
+    init_default_logger(logging.DEBUG)
     flow = await WorkflowEngine.create(backend=backend)
 
     from dragon.data.ddict import DDict
