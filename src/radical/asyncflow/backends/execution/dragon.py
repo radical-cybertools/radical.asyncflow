@@ -58,15 +58,244 @@ class TaskInfo:
     group: Optional[ProcessGroup] = None
 
 
-class ResultCollector:
-    """Unified result collection for all task types."""
+class CollectionState(Enum):
+    PENDING = "pending"
+    COLLECTING = "collecting" 
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+@dataclass
+class ProcessOutput:
+    stdout: str = ""
+    stderr: str = ""
+    exit_code: int = 0
+    collection_state: CollectionState = CollectionState.COMPLETED
+    error: Optional[str] = None
+
+class AsyncCollector:
+    """Eager async stdio collector - collects results immediately when process completes."""
+
+    def __init__(self, logger: logging.Logger, buffer_size: int = 65536, timeout: float = 30.0):
+        self.logger = logger
+        self.buffer_size = buffer_size
+        self.timeout = timeout
+        
+    async def collect_process_output(self, process) -> ProcessOutput:
+        """Collect output from process immediately - called when process completes."""
+        try:
+            stdout_conn = getattr(process, 'stdout_conn', None)
+            stderr_conn = getattr(process, 'stderr_conn', None)
+            exit_code = getattr(process, 'exitcode', 0) or 0
+
+            # Collect stdout and stderr concurrently with timeout
+            try:
+                stdout, stderr = await asyncio.wait_for(
+                    asyncio.gather(
+                        self._collect_stream(stdout_conn, "stdout"),
+                        self._collect_stream(stderr_conn, "stderr"),
+                        return_exceptions=True
+                    ),
+                    timeout=self.timeout
+                )
+            except asyncio.TimeoutError:
+                self.logger.warning(f"Timeout collecting process output after {self.timeout}s")
+                return ProcessOutput(
+                    stdout="",
+                    stderr="Output collection timeout",
+                    exit_code=exit_code,
+                    collection_state=CollectionState.FAILED,
+                    error=f"Collection timeout after {self.timeout}s"
+                )
+            
+            # Handle collection exceptions
+            if isinstance(stdout, Exception):
+                stdout = f"Error collecting stdout: {stdout}"
+            if isinstance(stderr, Exception):
+                stderr = f"Error collecting stderr: {stderr}"
+            
+            return ProcessOutput(
+                stdout=stdout,
+                stderr=stderr,
+                exit_code=exit_code,
+                collection_state=CollectionState.COMPLETED
+            )
+            
+        except Exception as e:
+            self.logger.exception(f"Unexpected error in collect_process_output: {e}")
+            return ProcessOutput(
+                stdout="",
+                stderr=f"Collection error: {e}",
+                exit_code=getattr(process, 'exitcode', 1) or 1,
+                collection_state=CollectionState.FAILED,
+                error=str(e)
+            )
     
-    def __init__(self, ddict_manager: DDict, logger: logging.Logger):
+    async def collect_group_output(self, group) -> ProcessOutput:
+        """Collect output from all processes in group concurrently."""
+        try:
+            # Create collection tasks for all processes concurrently
+            collection_tasks = []
+            process_info = []
+            
+            for puid, exit_code in group.inactive_puids:
+                proc = Process(None, ident=puid)
+                task = self._collect_process_streams(proc, exit_code)
+                collection_tasks.append(task)
+                process_info.append((puid, exit_code))
+            
+            if not collection_tasks:
+                return ProcessOutput()
+            
+            # Wait for all collections with timeout
+            try:
+                results = await asyncio.wait_for(
+                    asyncio.gather(*collection_tasks, return_exceptions=True),
+                    timeout=self.timeout
+                )
+            except asyncio.TimeoutError:
+                return ProcessOutput(
+                    stdout="",
+                    stderr="Group collection timeout",
+                    exit_code=1,
+                    collection_state=CollectionState.FAILED,
+                    error=f"Group collection timeout after {self.timeout}s"
+                )
+            
+            # Aggregate results
+            stdout_parts = []
+            stderr_parts = []
+            exit_codes = []
+            
+            for i, (result, (puid, exit_code)) in enumerate(zip(results, process_info)):
+                if isinstance(result, Exception):
+                    stdout_parts.append(f"Rank {i}: Error collecting output")
+                    stderr_parts.append(f"Rank {i}: {result}")
+                    exit_codes.append(1)
+                else:
+                    stdout, stderr = result
+                    stdout_parts.append(f"Rank {i}: {stdout}")
+                    stderr_parts.append(f"Rank {i}: {stderr}")
+                    exit_codes.append(exit_code)
+            
+            return ProcessOutput(
+                stdout="\n".join(stdout_parts),
+                stderr="\n".join(stderr_parts),
+                exit_code=max(exit_codes) if exit_codes else 0,
+                collection_state=CollectionState.COMPLETED
+            )
+            
+        except Exception as e:
+            self.logger.exception(f"Unexpected error in collect_group_output: {e}")
+            return ProcessOutput(
+                stdout="",
+                stderr=f"Group collection error: {e}",
+                exit_code=1,
+                collection_state=CollectionState.FAILED,
+                error=str(e)
+            )
+    
+    async def _collect_process_streams(self, process, exit_code: int) -> Tuple[str, str]:
+        """Collect stdout/stderr from a single process in group."""
+        stdout_conn = getattr(process, 'stdout_conn', None)
+        stderr_conn = getattr(process, 'stderr_conn', None)
+        
+        stdout, stderr = await asyncio.gather(
+            self._collect_stream(stdout_conn, "stdout"),
+            self._collect_stream(stderr_conn, "stderr"),
+            return_exceptions=True
+        )
+        
+        if isinstance(stdout, Exception):
+            stdout = f"Error: {stdout}"
+        if isinstance(stderr, Exception):
+            stderr = f"Error: {stderr}"
+        
+        return stdout, stderr
+    
+    async def _collect_stream(self, conn, stream_name: str) -> str:
+        """Non-blocking stream collection with cooperative yielding."""
+        if not conn:
+            return ""
+        
+        chunks = []
+        total_size = 0
+        max_size = 10 * 1024 * 1024  # 10MB limit
+        retry_count = 0
+        max_retries = 100  # Prevent infinite loops
+        
+        try:
+            while total_size < max_size and retry_count < max_retries:
+                try:
+                    # Non-blocking check for data
+                    if hasattr(conn, 'poll') and not conn.poll(0):
+                        retry_count += 1
+                        await asyncio.sleep(0.001)  # Brief yield
+                        continue
+                    
+                    # Reset retry count when data is available
+                    retry_count = 0
+                    
+                    # Try to read data
+                    chunk = conn.recv()
+                    if not chunk:  # EOF
+                        break
+                    
+                    chunk_str = str(chunk) if chunk else ""
+                    chunks.append(chunk_str)
+                    total_size += len(chunk_str)
+                    
+                    # Yield control every few chunks
+                    if len(chunks) % 20 == 0:
+                        await asyncio.sleep(0)
+                        
+                except (BlockingIOError, OSError) as e:
+                    if "would block" in str(e).lower():
+                        retry_count += 1
+                        await asyncio.sleep(0.001)
+                        continue
+                    else:
+                        # Real I/O error
+                        break
+                except EOFError:
+                    # Normal end of stream
+                    break
+                except Exception as e:
+                    self.logger.warning(f"Unexpected error reading {stream_name}: {e}")
+                    break
+            
+            if retry_count >= max_retries:
+                self.logger.warning(f"Max retries reached collecting {stream_name}")
+            
+            return "".join(chunks)
+            
+        except Exception as e:
+            self.logger.warning(f"Error collecting {stream_name}: {e}")
+            raise  # Re-raise to be handled by caller
+        finally:
+            self._safe_close(conn)
+    
+    def _safe_close(self, conn):
+        """Safely close connection, ignoring errors."""
+        try:
+            if hasattr(conn, 'close'):
+                conn.close()
+        except Exception:
+            pass
+
+
+class ResultCollector:
+    """ResultCollector for result collection."""
+    
+    def __init__(self, ddict_manager, logger: logging.Logger):
         self.ddict = ddict_manager
         self.logger = logger
+        self.stdio_collector = AsyncCollector(logger, timeout=30.0)
     
-    async def collect_results(self, uid: str, task_info: TaskInfo, task: dict) -> bool:
-        """Collect results for any task type. Returns True if task completed."""
+    async def collect_results(self, uid: str, task_info, task: dict) -> bool:
+        """
+        Collect results immediately when task completes.
+        Returns True when task is complete WITH results already collected.
+        """
         try:
             if task_info.task_type.name.startswith("SINGLE_"):
                 return await self._collect_single_task_results(uid, task_info, task)
@@ -75,43 +304,59 @@ class ResultCollector:
         except Exception as e:
             self.logger.exception(f"Error collecting results for task {uid}: {e}")
             self._set_task_failed(task, str(e))
-            return True
+            return True  # Task is "done" (with failure)
     
-    async def _collect_single_task_results(self, uid: str, task_info: TaskInfo, task: dict) -> bool:
-        """Collect results from single-rank tasks."""
+    async def _collect_single_task_results(self, uid: str, task_info, task: dict) -> bool:
+        """Collect single task results - only return True when COMPLETE with results."""
         process = task_info.process
-        if not process or process.is_alive:
-            return False
+        if not process:
+            return True  # No process, consider done
+            
+        if process.is_alive:
+            return False  # Still running
         
-        if task_info.task_type == TaskType.SINGLE_FUNCTION:
+        # Process is complete, collect results NOW
+        if task_info.task_type.name.endswith("_FUNCTION"):
             await self._collect_function_results_from_ddict(uid, 1, task)
-        else:  # SINGLE_EXECUTABLE
-            self._collect_executable_results_from_process(process, task)
+        else:  # executable
+            output = await self.stdio_collector.collect_process_output(process)
+            self._set_executable_results(task, output)
         
-        self._cleanup_process(process)
-        return True
+        return True  # Complete with results
     
-    async def _collect_group_task_results(self, uid: str, task_info: TaskInfo, task: dict) -> bool:
-        """Collect results from multi-rank/MPI tasks."""
+    async def _collect_group_task_results(self, uid: str, task_info, task: dict) -> bool:
+        """Collect group task results - only return True when COMPLETE with results."""
         group = task_info.group
-        if not group or not group.inactive_puids:
-            return False
-        
+        if not group:
+            return True  # No group, consider done
+
+        if not hasattr(group, 'inactive_puids') or not group.inactive_puids:
+            return False  # Still running
+
+        # Group is complete, collect results NOW
         if task_info.task_type.name.endswith("_FUNCTION"):
             await self._collect_function_results_from_ddict(uid, task_info.ranks, task)
         else:  # executable
-            self._collect_executable_results_from_group(group, task)
-        
-        self._cleanup_group(group)
-        return True
+            output = await self.stdio_collector.collect_group_output(group)
+            self._set_executable_results(task, output)
+
+        return True  # Complete with results
     
-    async def _collect_function_results_from_ddict(self, uid: str, ranks: int, task: dict) -> None:
-        """Collect function results from DDict for any number of ranks."""
-        # Wait for completion flags
+    def _set_executable_results(self, task: dict, output: ProcessOutput):
+        """Set task results from collected output."""
+        task.update({
+            "stdout": output.stdout,
+            "stderr": output.stderr,
+            "exit_code": output.exit_code,
+            "return_value": None,
+            "exception": output.error  # Include collection errors
+        })
+    
+    async def _collect_function_results_from_ddict(self, uid: str, ranks: int, task: dict):
+        """Collect function results from DDict - existing logic."""
         completion_keys = [f"{uid}_rank_{rank}_completed" for rank in range(ranks)]
         await self._wait_for_completion_keys(completion_keys)
 
-        # Collect results from all ranks
         results = []
         stdout_parts = {}
         stderr_parts = {}
@@ -123,84 +368,43 @@ class ResultCollector:
             stdout_parts[rank] = result_data.get('stdout', '')
             stderr_parts[rank] = result_data.get('stderr', '')
 
-        # Process and set task results
         self._set_function_task_results(task, results, stdout_parts, stderr_parts, ranks)
-        
-        # Cleanup DDict entries
         self._cleanup_ddict_entries(uid, ranks)
     
-    def _collect_executable_results_from_process(self, process: Process, task: dict) -> None:
-        """Collect results from single executable process."""
-        stdout = self._get_stdio(getattr(process, 'stdout_conn', None))
-        stderr = self._get_stdio(getattr(process, 'stderr_conn', None))
-        exit_code = getattr(process, 'exitcode', 0) or 0
-        
-        task.update({
-            "stdout": stdout,
-            "stderr": stderr,
-            "exit_code": exit_code,
-            "return_value": None,
-            "exception": None
-        })
-    
-    def _collect_executable_results_from_group(self, group: ProcessGroup, task: dict) -> None:
-        """Collect results from executable process group."""
-        stdout_parts = []
-        stderr_parts = []
-        exit_codes = []
-        
-        for puid, exit_code in group.inactive_puids:
-            proc = Process(None, ident=puid)
-            stdout_parts.append(self._get_stdio(getattr(proc, "stdout_conn", None)))
-            stderr_parts.append(self._get_stdio(getattr(proc, "stderr_conn", None)))
-            exit_codes.append(exit_code)
-        
-        task.update({
-            "stdout": "\n".join(stdout_parts),
-            "stderr": "\n".join(stderr_parts),
-            "exit_code": max(exit_codes) if exit_codes else 0,
-            "return_value": None,
-            "exception": None
-        })
-    
-    async def _wait_for_completion_keys(self, completion_keys: List[str], timeout: int = 30) -> None:
-        """Wait for all completion keys to appear in DDict."""
+    async def _wait_for_completion_keys(self, completion_keys, timeout: int = 30):
+        """Wait for DDict completion keys."""
         wait_count = 0
         max_wait = timeout * 10  # Check every 0.1 seconds
         
         while wait_count < max_wait:
-            completed_count = sum(1 for key in completion_keys if key in self.ddict)
-            if completed_count >= len(completion_keys):
+            completed = sum(1 for key in completion_keys if key in self.ddict)
+            if completed >= len(completion_keys):
                 break
             await asyncio.sleep(0.1)
             wait_count += 1
     
     def _get_ddict_result(self, result_key: str, rank: int) -> dict:
-        """Get result data from DDict with error handling."""
+        """Get result from DDict with error handling."""
         try:
             if result_key in self.ddict:
                 return self.ddict[result_key]
         except Exception as e:
             self.logger.warning(f"Error reading DDict result for rank {rank}: {e}")
 
-        # Return failure result if key not found or error occurred
         return {
             'success': False,
-            'exception': f'No result found in DDict for rank {rank}',
+            'exception': f'No result found for rank {rank}',
             'exit_code': 1,
             'rank': rank,
             'stdout': '',
-            'stderr': f'No result found in DDict for rank {rank}'
+            'stderr': f'No result found for rank {rank}'
         }
-
-    def _set_function_task_results(self, task: dict, results: List[dict], 
-                                   stdout_parts: Dict[int, str], stderr_parts: Dict[int, str], 
-                                   ranks: int) -> None:
-        """Set task results based on collected function results."""
+    
+    def _set_function_task_results(self, task: dict, results, stdout_parts, stderr_parts, ranks: int):
+        """Set aggregated function results."""
         all_successful = all(r.get('success', False) for r in results)
         max_exit_code = max((r.get('exit_code', 1) for r in results), default=0)
         
-        # Combine stdout/stderr from all ranks
         combined_stdout = "\n".join(f"Rank {i}: {stdout_parts.get(i, '')}" for i in range(ranks))
         combined_stderr = "\n".join(f"Rank {i}: {stderr_parts.get(i, '')}" for i in range(ranks))
         
@@ -214,9 +418,9 @@ class ResultCollector:
                 for r in results if not r.get('success', False)
             )
         })
-
-    def _cleanup_ddict_entries(self, uid: str, ranks: int) -> None:
-        """Clean up DDict entries for all ranks of a task."""
+    
+    def _cleanup_ddict_entries(self, uid: str, ranks: int):
+        """Clean up DDict entries."""
         try:
             for rank in range(ranks):
                 result_key = f"{uid}_rank_{rank}"
@@ -226,49 +430,16 @@ class ResultCollector:
                 if completion_key in self.ddict:
                     del self.ddict[completion_key]
         except Exception as e:
-            self.logger.warning(f"Error cleaning up DDict entries for task {uid}: {e}")
-    
-    def _cleanup_process(self, process: Process) -> None:
-        """Clean up a single process."""
-        if process:
-            try:
-                process.join(timeout=1.0)
-            except Exception:
-                pass
-    
-    def _cleanup_group(self, group: ProcessGroup) -> None:
-        """Clean up a process group."""
-        try:
-            group.close()
-        except Exception as e:
-            self.logger.debug(f"ProcessGroup close warning: {e}")
-    
-    def _set_task_failed(self, task: dict, error_msg: str) -> None:
-        """Set task as failed with error information."""
+            self.logger.warning(f"Error cleaning DDict entries for {uid}: {e}")
+
+    def _set_task_failed(self, task: dict, error_msg: str):
+        """Mark task as failed."""
         task.update({
             "exception": error_msg,
             "exit_code": 1,
             "stderr": task.get("stderr", "") + f"\nError: {error_msg}",
             "return_value": None
         })
-
-    @staticmethod
-    def _get_stdio(conn) -> str:
-        """Get stdio content from connection."""
-        if not conn:
-            return ""
-        
-        data = ""
-        try:
-            while True:
-                data += conn.recv()
-        except EOFError:
-            return data
-        finally:
-            try:
-                conn.close()
-            except Exception:
-                pass
 
 
 class TaskLauncher:
@@ -693,32 +864,32 @@ class DragonExecutionBackend(BaseExecutionBackend):
         while not self._shutdown_event.is_set():
             try:
                 completed_tasks = []
-                
+
                 for uid, task_info in list(self._running_tasks.items()):
                     task = self.tasks.get(uid)
                     if not task:
                         completed_tasks.append(uid)
                         continue
-                    
-                    # Check if task completed using unified collector
+
+                    # This will return True only when results are FULLY collected
                     if await self._result_collector.collect_results(uid, task_info, task):
                         completed_tasks.append(uid)
-                        
+
                         # Determine task status and notify callback
                         if task.get("exception") or task.get("exit_code", 0) != 0:
                             self._callback_func(task, "FAILED")
                         else:
                             self._callback_func(task, "DONE")
-                        
+
                         # Free up slots
                         self._free_slots += task_info.ranks
-                
+
                 # Clean up completed tasks
                 for uid in completed_tasks:
                     self._running_tasks.pop(uid, None)
-                
+
                 await asyncio.sleep(0.1)
-                
+
             except Exception as e:
                 logger.exception(f"Error in task monitoring: {e}")
                 await asyncio.sleep(1)
@@ -726,7 +897,7 @@ class DragonExecutionBackend(BaseExecutionBackend):
     async def cancel_task(self, uid: str) -> bool:
         """Cancel a specific running task."""
         self._ensure_initialized()
-        
+
         task_info = self._running_tasks.get(uid)
         if not task_info:
             return False
@@ -737,7 +908,7 @@ class DragonExecutionBackend(BaseExecutionBackend):
                 # Clean up DDict entries
                 self._result_collector._cleanup_ddict_entries(uid, task_info.ranks)
             return success
-            
+
         except Exception as e:
             logger.exception(f"Error cancelling task {uid}: {e}")
             return False
@@ -753,7 +924,7 @@ class DragonExecutionBackend(BaseExecutionBackend):
                     if task_info.process.is_alive:
                         task_info.process.kill()
                 return True
-                
+
             elif task_info.group:
                 # Process group cancellation
                 if not task_info.group.inactive_puids:
@@ -764,10 +935,10 @@ class DragonExecutionBackend(BaseExecutionBackend):
                         except Exception as e:
                             logger.warning(f"Failed to terminate process {puid}: {e}")
                 return True
-                
+
         except Exception as e:
             logger.warning(f"Failed to cancel task: {e}")
-        
+
         return False
 
     async def cancel_all_tasks(self) -> int:
@@ -787,29 +958,29 @@ class DragonExecutionBackend(BaseExecutionBackend):
         uid = task.get("uid")
         if not uid:
             return False, "Task must have a 'uid' field"
-        
+
         function = task.get("function")
         executable = task.get("executable")
-        
+
         if not function and not executable:
             return False, "Task must specify either 'function' or 'executable'"
-        
+
         if function and executable:
             return False, "Task cannot specify both 'function' and 'executable'"
-        
+
         if function and not callable(function):
             return False, "Task 'function' must be callable"
-        
+
         backend_kwargs = task.get('task_backend_specific_kwargs', {})
         ranks = backend_kwargs.get("ranks", 1)
-        
+
         try:
             ranks = int(ranks)
             if ranks < 1:
                 return False, "Task 'ranks' must be >= 1"
         except (ValueError, TypeError):
             return False, "Task 'ranks' must be a valid integer"
-        
+
         return True, ""
 
     def _ensure_initialized(self):
