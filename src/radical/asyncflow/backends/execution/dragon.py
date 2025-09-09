@@ -58,18 +58,11 @@ class TaskInfo:
     group: Optional[ProcessGroup] = None
 
 
-class CollectionState(Enum):
-    PENDING = "pending"
-    COLLECTING = "collecting" 
-    COMPLETED = "completed"
-    FAILED = "failed"
-
 @dataclass
 class ProcessOutput:
     stdout: str = ""
     stderr: str = ""
     exit_code: int = 0
-    collection_state: CollectionState = CollectionState.COMPLETED
     error: Optional[str] = None
 
 class AsyncCollector:
@@ -103,7 +96,6 @@ class AsyncCollector:
                     stdout="",
                     stderr="Output collection timeout",
                     exit_code=exit_code,
-                    collection_state=CollectionState.FAILED,
                     error=f"Collection timeout after {self.timeout}s"
                 )
             
@@ -117,7 +109,6 @@ class AsyncCollector:
                 stdout=stdout,
                 stderr=stderr,
                 exit_code=exit_code,
-                collection_state=CollectionState.COMPLETED
             )
             
         except Exception as e:
@@ -126,7 +117,6 @@ class AsyncCollector:
                 stdout="",
                 stderr=f"Collection error: {e}",
                 exit_code=getattr(process, 'exitcode', 1) or 1,
-                collection_state=CollectionState.FAILED,
                 error=str(e)
             )
     
@@ -157,7 +147,6 @@ class AsyncCollector:
                     stdout="",
                     stderr="Group collection timeout",
                     exit_code=1,
-                    collection_state=CollectionState.FAILED,
                     error=f"Group collection timeout after {self.timeout}s"
                 )
             
@@ -181,7 +170,6 @@ class AsyncCollector:
                 stdout="\n".join(stdout_parts),
                 stderr="\n".join(stderr_parts),
                 exit_code=max(exit_codes) if exit_codes else 0,
-                collection_state=CollectionState.COMPLETED
             )
             
         except Exception as e:
@@ -190,7 +178,6 @@ class AsyncCollector:
                 stdout="",
                 stderr=f"Group collection error: {e}",
                 exit_code=1,
-                collection_state=CollectionState.FAILED,
                 error=str(e)
             )
     
@@ -351,7 +338,7 @@ class ResultCollector:
             "return_value": None,
             "exception": output.error  # Include collection errors
         })
-    
+
     async def _collect_function_results_from_ddict(self, uid: str, ranks: int, task: dict):
         """Collect function results from DDict - existing logic."""
         completion_keys = [f"{uid}_rank_{rank}_completed" for rank in range(ranks)]
