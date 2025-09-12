@@ -176,7 +176,6 @@ class SharedMemoryManager:
             f"meta_{ref_id}",
             {
                 "node": node_id,
-                "offset": allocation.offset,
                 "size": len(payload),
                 "backend_id": self.backend_id,
                 "in_shared_memory": True,
@@ -195,13 +194,13 @@ class SharedMemoryManager:
         """Resolve reference to actual data."""
         if ref.backend_id != self.backend_id:
             raise ValueError(f"Cannot resolve reference from different backend: {ref.backend_id}")
-        
+
         meta_key = f"meta_{ref.ref_id}"
         if meta_key not in self.ddict:
             raise KeyError(f"Reference metadata not found: {ref.ref_id}")
-        
+
         metadata = self.ddict[meta_key]
-        
+
         if metadata['in_shared_memory']:
             return await self._retrieve_from_shared_memory(ref.ref_id, metadata)
         else:
@@ -213,17 +212,14 @@ class SharedMemoryManager:
     async def _retrieve_from_shared_memory(self, ref_id: str, metadata: dict) -> Any:
         """Retrieve data from shared memory."""
         allocation = self.managed_allocations.get(ref_id)
+
         if not allocation:
-            # Reconstruct allocation from pool
-            node_id = metadata['node']
-            offset = metadata['offset']
-            pool = self.memory_pools[node_id]
-            allocation = pool.get_alloc_at_offset(offset)
-        
+            raise KeyError(f"Memory allocation not found for reference {ref_id}")
+
         size = metadata['size']
         mem_view = allocation.get_memview()
         serialized_data = bytes(mem_view[:size])
-        
+
         return self._deserialize(serialized_data)
     
     def cleanup_reference(self, ref: DataReference):
@@ -231,7 +227,7 @@ class SharedMemoryManager:
         try:
             meta_key = f"meta_{ref.ref_id}"
             data_key = f"data_{ref.ref_id}"
-            
+
             if meta_key in self.ddict:
                 del self.ddict[meta_key]
             if data_key in self.ddict:
@@ -240,7 +236,7 @@ class SharedMemoryManager:
                 del self.managed_allocations[ref.ref_id]
         except Exception as e:
             self.logger.warning(f"Error cleaning up reference {ref.ref_id}: {e}")
-    
+
     # DDict operations moved here
     def store_task_data(self, key: str, data: Any) -> None:
         """Store data in shared DDict."""
