@@ -68,26 +68,26 @@ class ProcessOutput:
 
 class DataReference:
     """Reference to data stored in shared memory."""
-    
+
     def __init__(self, ref_id: str, backend_id: str):
         self._ref_id = ref_id
         self._backend_id = backend_id
         self._is_resolved = False
-    
+
     @property
     def ref_id(self) -> str:
         return self._ref_id
-    
+
     @property
     def backend_id(self) -> str:
         return self._backend_id
-    
+
     def __repr__(self) -> str:
         return f"DataReference(ref_id='{self._ref_id}', backend_id='{self._backend_id}')"
 
 class SharedMemoryManager:
     """Manages data in shared memory with fallback to DDict."""
-    
+
     def __init__(self, ddict: DDict, system: System, logger: logging.Logger):
         self.ddict = ddict
         self.system = system
@@ -95,7 +95,7 @@ class SharedMemoryManager:
         self.memory_pools: Dict[int, MemoryPool] = {}
         self.managed_allocations: Dict[str, Any] = {}
         self.backend_id = f"dragon_{uuid.uuid4().hex[:8]}"
-        
+
     async def initialize(self):
         """Initialize memory pools per node."""
         try:
@@ -110,7 +110,7 @@ class SharedMemoryManager:
         except Exception as e:
             self.logger.warning(f"Failed to initialize memory pools: {e}")
             self.memory_pools.clear()
-    
+
     def should_use_shared_memory(self, data: Any) -> bool:
         """Determine if data should be stored in shared memory based
            on the size thresold of SHARED_MEMORY_THRESHOLD."""
@@ -153,7 +153,7 @@ class SharedMemoryManager:
 
     async def _store_in_shared_memory(self, ref_id: str, data: Any, node_id: int):
         """Store data in managed memory and record metadata in DDict."""
-        
+
         # Choose best representation of payload
         if isinstance(data, (bytes, bytearray, memoryview)):
             payload = data
@@ -189,7 +189,7 @@ class SharedMemoryManager:
             'backend_id': self.backend_id,
             'in_shared_memory': False
         })
-    
+
     async def resolve_reference(self, ref: DataReference) -> Any:
         """Resolve reference to actual data."""
         if ref.backend_id != self.backend_id:
@@ -208,7 +208,7 @@ class SharedMemoryManager:
             if data_key not in self.ddict:
                 raise KeyError(f"Reference data not found: {ref.ref_id}")
             return self.ddict[data_key]
-    
+
     async def _retrieve_from_shared_memory(self, ref_id: str, metadata: dict) -> Any:
         """Retrieve data from shared memory."""
         allocation = self.managed_allocations.get(ref_id)
@@ -221,7 +221,7 @@ class SharedMemoryManager:
         serialized_data = bytes(mem_view[:size])
 
         return self._deserialize(serialized_data)
-    
+
     def cleanup_reference(self, ref: DataReference):
         """Clean up reference data."""
         try:
@@ -268,7 +268,7 @@ class SharedMemoryManager:
                 self.ddict.clear()
         except Exception as e:
             self.logger.warning(f"Error clearing DDict data: {e}")
-    
+
     def _serialize(self, data: Any) -> bytes:
         """Serialize data using best available method."""
         for serializer in [cloudpickle.dumps, dill.dumps, pickle.dumps]:
@@ -277,7 +277,7 @@ class SharedMemoryManager:
             except Exception:
                 continue
         raise RuntimeError("Failed to serialize data")
-    
+
     def _deserialize(self, data: bytes) -> Any:
         """Deserialize data using best available method."""
         for deserializer in [cloudpickle.loads, dill.loads, pickle.loads]:
@@ -294,7 +294,7 @@ class AsyncCollector:
         self.logger = logger
         self.buffer_size = buffer_size
         self.timeout = timeout
-        
+
     async def collect_process_output(self, process) -> ProcessOutput:
         """Collect output from process immediately - called when process completes."""
         try:
@@ -320,19 +320,19 @@ class AsyncCollector:
                     exit_code=exit_code,
                     error=f"Collection timeout after {self.timeout}s"
                 )
-            
+
             # Handle collection exceptions
             if isinstance(stdout, Exception):
                 stdout = f"Error collecting stdout: {stdout}"
             if isinstance(stderr, Exception):
                 stderr = f"Error collecting stderr: {stderr}"
-            
+
             return ProcessOutput(
                 stdout=stdout,
                 stderr=stderr,
                 exit_code=exit_code,
             )
-            
+
         except Exception as e:
             self.logger.exception(f"Unexpected error in collect_process_output: {e}")
             return ProcessOutput(
@@ -341,23 +341,23 @@ class AsyncCollector:
                 exit_code=getattr(process, 'exitcode', 1) or 1,
                 error=str(e)
             )
-    
+
     async def collect_group_output(self, group) -> ProcessOutput:
         """Collect output from all processes in group concurrently."""
         try:
             # Create collection tasks for all processes concurrently
             collection_tasks = []
             process_info = []
-            
+
             for puid, exit_code in group.inactive_puids:
                 proc = Process(None, ident=puid)
                 task = self._collect_process_streams(proc, exit_code)
                 collection_tasks.append(task)
                 process_info.append((puid, exit_code))
-            
+
             if not collection_tasks:
                 return ProcessOutput()
-            
+
             # Wait for all collections with timeout
             try:
                 results = await asyncio.wait_for(
@@ -371,12 +371,12 @@ class AsyncCollector:
                     exit_code=1,
                     error=f"Group collection timeout after {self.timeout}s"
                 )
-            
+
             # Aggregate results
             stdout_parts = []
             stderr_parts = []
             exit_codes = []
-            
+
             for i, (result, (puid, exit_code)) in enumerate(zip(results, process_info)):
                 if isinstance(result, Exception):
                     stdout_parts.append(f"Rank {i}: Error collecting output")
@@ -387,13 +387,13 @@ class AsyncCollector:
                     stdout_parts.append(f"Rank {i}: {stdout}")
                     stderr_parts.append(f"Rank {i}: {stderr}")
                     exit_codes.append(exit_code)
-            
+
             return ProcessOutput(
                 stdout="\n".join(stdout_parts),
                 stderr="\n".join(stderr_parts),
                 exit_code=max(exit_codes) if exit_codes else 0,
             )
-            
+
         except Exception as e:
             self.logger.exception(f"Unexpected error in collect_group_output: {e}")
             return ProcessOutput(
@@ -402,36 +402,36 @@ class AsyncCollector:
                 exit_code=1,
                 error=str(e)
             )
-    
+
     async def _collect_process_streams(self, process, exit_code: int) -> Tuple[str, str]:
         """Collect stdout/stderr from a single process in group."""
         stdout_conn = getattr(process, 'stdout_conn', None)
         stderr_conn = getattr(process, 'stderr_conn', None)
-        
+
         stdout, stderr = await asyncio.gather(
             self._collect_stream(stdout_conn, "stdout"),
             self._collect_stream(stderr_conn, "stderr"),
             return_exceptions=True
         )
-        
+
         if isinstance(stdout, Exception):
             stdout = f"Error: {stdout}"
         if isinstance(stderr, Exception):
             stderr = f"Error: {stderr}"
-        
+
         return stdout, stderr
-    
+
     async def _collect_stream(self, conn, stream_name: str) -> str:
         """Non-blocking stream collection with cooperative yielding."""
         if not conn:
             return ""
-        
+
         chunks = []
         total_size = 0
         max_size = 10 * 1024 * 1024  # 10MB limit
         retry_count = 0
         max_retries = 100  # Prevent infinite loops
-        
+
         try:
             while total_size < max_size and retry_count < max_retries:
                 try:
@@ -440,23 +440,23 @@ class AsyncCollector:
                         retry_count += 1
                         await asyncio.sleep(0.001)  # Brief yield
                         continue
-                    
+
                     # Reset retry count when data is available
                     retry_count = 0
-                    
+
                     # Try to read data
                     chunk = conn.recv()
                     if not chunk:  # EOF
                         break
-                    
+
                     chunk_str = str(chunk) if chunk else ""
                     chunks.append(chunk_str)
                     total_size += len(chunk_str)
-                    
+
                     # Yield control every few chunks
                     if len(chunks) % 20 == 0:
                         await asyncio.sleep(0)
-                        
+
                 except (BlockingIOError, OSError) as e:
                     if "would block" in str(e).lower():
                         retry_count += 1
@@ -471,18 +471,18 @@ class AsyncCollector:
                 except Exception as e:
                     self.logger.warning(f"Unexpected error reading {stream_name}: {e}")
                     break
-            
+
             if retry_count >= max_retries:
                 self.logger.warning(f"Max retries reached collecting {stream_name}")
-            
+
             return "".join(chunks)
-            
+
         except Exception as e:
             self.logger.warning(f"Error collecting {stream_name}: {e}")
             raise  # Re-raise to be handled by caller
         finally:
             self._safe_close(conn)
-    
+
     def _safe_close(self, conn):
         """Safely close connection, ignoring errors."""
         try:
@@ -493,13 +493,13 @@ class AsyncCollector:
 
 class ResultCollector:
     """ResultCollector for result collection with shared memory optimization."""
-    
+
     def __init__(self, shared_memory_manager: SharedMemoryManager, logger: logging.Logger):
         self.shared_memory = shared_memory_manager
         self.ddict = shared_memory_manager.ddict
         self.logger = logger
         self.stdio_collector = AsyncCollector(logger, timeout=30.0)
-    
+
     async def collect_results(self, uid: str, task_info, task: dict) -> bool:
         """
         Collect results immediately when task completes.
@@ -514,25 +514,25 @@ class ResultCollector:
             self.logger.exception(f"Error collecting results for task {uid}: {e}")
             self._set_task_failed(task, str(e))
             return True  # Task is "done" (with failure)
-    
+
     async def _collect_single_task_results(self, uid: str, task_info, task: dict) -> bool:
         """Collect single task results - only return True when COMPLETE with results."""
         process = task_info.process
         if not process:
             return True  # No process, consider done
-            
+
         if process.is_alive:
             return False  # Still running
-        
+
         # Process is complete, collect results NOW
         if task_info.task_type.name.endswith("_FUNCTION"):
             await self._collect_function_results_from_ddict(uid, 1, task)
         else:  # executable
             output = await self.stdio_collector.collect_process_output(process)
             self._set_executable_results(task, output)
-        
+
         return True  # Complete with results
-    
+
     async def _collect_group_task_results(self, uid: str, task_info, task: dict) -> bool:
         """Collect group task results - only return True when COMPLETE with results."""
         group = task_info.group
@@ -550,7 +550,7 @@ class ResultCollector:
             self._set_executable_results(task, output)
 
         return True  # Complete with results
-    
+
     def _set_executable_results(self, task: dict, output: ProcessOutput):
         """Set task results from collected output."""
         task.update({
@@ -570,14 +570,14 @@ class ResultCollector:
         stdout_parts = {}
         stderr_parts = {}
         return_values = []
-        
+
         for rank in range(ranks):
             result_key = f"{uid}_rank_{rank}"
             result_data = self._get_ddict_result(result_key, rank)
             results.append(result_data)
             stdout_parts[rank] = result_data.get('stdout', '')
             stderr_parts[rank] = result_data.get('stderr', '')
-            
+
             # Optimize return value storage
             if result_data.get('success', False) and result_data.get('return_value') is not None:
                 referenced_value = await self._store_return_value_in_shared_memory(
@@ -589,7 +589,7 @@ class ResultCollector:
 
         self._set_function_task_results(task, results, stdout_parts, stderr_parts, return_values, ranks)
         self._cleanup_ddict_entries(uid, ranks)
-    
+
     async def _store_return_value_in_shared_memory(self, value: Any, uid: str, rank: int) -> Any:
         """Optimize storage of return value using shared memory."""
         if self.shared_memory.should_use_shared_memory(value):
@@ -606,7 +606,7 @@ class ResultCollector:
         """Wait for DDict completion keys."""
         wait_count = 0
         max_wait = timeout * 10  # Check every 0.1 seconds
-        
+
         while wait_count < max_wait:
             completed = sum(1 for key in completion_keys if key in self.ddict)
             if completed >= len(completion_keys):
@@ -635,10 +635,10 @@ class ResultCollector:
         """Set aggregated function results with return values."""
         all_successful = all(r.get('success', False) for r in results)
         max_exit_code = max((r.get('exit_code', 1) for r in results), default=0)
-        
+
         combined_stdout = "\n".join(f"Rank {i}: {stdout_parts.get(i, '')}" for i in range(ranks))
         combined_stderr = "\n".join(f"Rank {i}: {stderr_parts.get(i, '')}" for i in range(ranks))
-        
+
         task.update({
             "stdout": combined_stdout,
             "stderr": combined_stderr,
@@ -649,7 +649,7 @@ class ResultCollector:
                 for r in results if not r.get('success', False)
             )
         })
-    
+
     def _cleanup_ddict_entries(self, uid: str, ranks: int):
         """Clean up DDict entries."""
         try:
@@ -674,98 +674,98 @@ class ResultCollector:
 
 class TaskLauncher:
     """Unified task launching for all task types."""
-    
+
     def __init__(self, ddict: DDict, working_dir: str, logger: logging.Logger):
         self.ddict = ddict
         self.working_dir = working_dir
         self.logger = logger
-    
+
     async def launch_task(self, task: dict) -> TaskInfo:
         """Launch any type of task and return TaskInfo."""
         task_type = self._determine_task_type(task)
-        
+
         if task_type.name.startswith("SINGLE_"):
             return await self._launch_single_task(task, task_type)
         else:
             return await self._launch_group_task(task, task_type)
-    
+
     def _determine_task_type(self, task: dict) -> TaskType:
         """Determine task type based on task configuration."""
         backend_kwargs = task.get('task_backend_specific_kwargs', {})
         ranks = int(backend_kwargs.get("ranks", 1))
         mpi = backend_kwargs.get("mpi", False)
         is_function = bool(task.get("function"))
-        
+
         if ranks == 1 and not mpi:
             return TaskType.SINGLE_FUNCTION if is_function else TaskType.SINGLE_EXECUTABLE
         elif mpi:
             return TaskType.MPI_FUNCTION if is_function else TaskType.MPI_EXECUTABLE
         else:  # ranks > 1 and not MPI
             return TaskType.MULTI_FUNCTION if is_function else TaskType.MULTI_EXECUTABLE
-    
+
     async def _launch_single_task(self, task: dict, task_type: TaskType) -> TaskInfo:
         """Launch single-rank task."""
         uid = task["uid"]
-        
+
         if task_type == TaskType.SINGLE_FUNCTION:
             process = await self._create_function_process(task, 0)
         else:  # SINGLE_EXECUTABLE
             process = self._create_executable_process(task)
-        
+
         process.start()
         self.logger.debug(f"Started single-rank Dragon process for task {uid}")
-        
+
         return TaskInfo(
             task_type=task_type,
             ranks=1,
             start_time=time.time(),
             process=process
         )
-    
+
     async def _launch_group_task(self, task: dict, task_type: TaskType) -> TaskInfo:
         """Launch multi-rank or MPI task."""
         uid = task["uid"]
         backend_kwargs = task.get('task_backend_specific_kwargs', {})
         ranks = int(backend_kwargs.get("ranks", 1))
-        
+
         group = ProcessGroup(restart=False, policy=None)
-        
+
         if task_type.name.endswith("_FUNCTION"):
             await self._add_function_processes_to_group(group, task, ranks)
         else:  # executable
             self._add_executable_processes_to_group(group, task, ranks)
-        
+
         group.init()
         group.start()
-        
+
         self.logger.debug(f"Started group task {uid} with {ranks} ranks")
-        
+
         return TaskInfo(
             task_type=task_type,
             ranks=ranks,
             start_time=time.time(),
             group=group
         )
-    
+
     async def _create_function_process(self, task: dict, rank: int) -> Process:
         """Create a single function process."""
         uid = task["uid"]
         function = task["function"]
         args = task.get("args", ())
         kwargs = task.get("kwargs", {})
-        
+
         func_data = await self._serialize_function_data(function, args, kwargs)
-        
+
         return Process(
             target=_function_worker,
             args=(self.ddict, rank, func_data, uid, rank)
         )
-    
+
     def _create_executable_process(self, task: dict) -> Process:
         """Create a single executable process."""
         executable = task["executable"]
         args = list(task.get("args", []))
-        
+
         return Process(
             target=executable,
             args=args,
@@ -775,20 +775,20 @@ class TaskLauncher:
             stdin=Popen.DEVNULL,
             env=os.environ.copy(),
         )
-    
+
     async def _add_function_processes_to_group(self, group: ProcessGroup, task: dict, ranks: int) -> None:
         """Add function processes to process group."""
         uid = task["uid"]
         function = task["function"]
         args = task.get("args", ())
         kwargs = task.get("kwargs", {})
-        
+
         func_data = await self._serialize_function_data(function, args, kwargs)
-        
+
         for rank in range(ranks):
             env = os.environ.copy()
             env["DRAGON_RANK"] = str(rank)
-            
+
             template = ProcessTemplate(
                 target=_function_worker,
                 args=(self.ddict, rank, func_data, uid, rank),
@@ -799,16 +799,16 @@ class TaskLauncher:
                 stdin=Popen.DEVNULL,
             )
             group.add_process(nproc=1, template=template)
-    
+
     def _add_executable_processes_to_group(self, group: ProcessGroup, task: dict, ranks: int) -> None:
         """Add executable processes to process group."""
         executable = task["executable"]
         args = list(task.get("args", []))
-        
+
         for rank in range(ranks):
             env = os.environ.copy()
             env["DRAGON_RANK"] = str(rank)
-            
+
             template = ProcessTemplate(
                 target=executable,
                 args=args,
@@ -819,7 +819,7 @@ class TaskLauncher:
                 stdin=Popen.DEVNULL,
             )
             group.add_process(nproc=1, template=template)
-    
+
     async def _serialize_function_data(self, function: Callable, args: tuple, kwargs: dict) -> bytes:
         """Serialize function data using multiple serialization methods."""
         serializers = [
@@ -827,13 +827,13 @@ class TaskLauncher:
             ('cloudpickle', cloudpickle.dumps),
             ('pickle', pickle.dumps)
         ]
-        
+
         func_info = {
             'function': function,
             'args': args,
             'kwargs': kwargs
         }
-        
+
         for name, serializer in serializers:
             try:
                 func_data = serializer(func_info)
@@ -842,7 +842,7 @@ class TaskLauncher:
             except Exception as e:
                 self.logger.debug(f"Failed to serialize with {name}: {e}")
                 continue
-        
+
         raise RuntimeError("Could not serialize function with any available method")
 
 
@@ -853,35 +853,35 @@ def _function_worker(d: DDict, client_id: int, func_data: bytes, task_uid: str, 
     import traceback
     import dill
     import cloudpickle
-    
+
     # Set environment variable for rank
     os.environ["DRAGON_RANK"] = str(rank)
-    
+
     # Capture stdout/stderr
     old_out, old_err = sys.stdout, sys.stderr
     out_buf, err_buf = io.StringIO(), io.StringIO()
 
     try:
         sys.stdout, sys.stderr = out_buf, err_buf
-        
+
         # FIXME: Keep the serializer type when we serialize and use it to Deserialize function data
         func_info = None
         deserializers = [dill.loads, cloudpickle.loads, pickle.loads]
-        
+
         for deserializer in deserializers:
             try:
                 func_info = deserializer(func_data)
                 break
             except Exception:
                 continue
-        
+
         if func_info is None:
             raise RuntimeError("Could not deserialize function")
-        
+
         function = func_info['function']
         args = func_info.get('args', ())
         kwargs = func_info.get('kwargs', {})
-        
+
         # Execute function
         if asyncio.iscoroutinefunction(function):
             result = asyncio.run(function(*args, **kwargs))
@@ -913,21 +913,21 @@ def _function_worker(d: DDict, client_id: int, func_data: bytes, task_uid: str, 
             'rank': rank,
             'task_uid': task_uid
         }
-        
+
     finally:
         # Restore stdout/stderr
         sys.stdout, sys.stderr = old_out, old_err
-        
+
         # Store results in DDict
         try:
             result_key = f"{task_uid}_rank_{rank}"
             completion_key = f"{task_uid}_rank_{rank}_completed"
-            
+
             d.pput(result_key, result_data)
             d.pput(completion_key, True)
         except Exception:
             pass
-        
+
         # Detach from DDict
         try:
             d.detach()
@@ -1008,7 +1008,7 @@ class DragonExecutionBackend(BaseExecutionBackend):
 
             # Initialize DDict
             logger.debug("Creating DDict with proper parameters...")
-            
+
             #FIXME: make it dynamic and per user
             self._ddict = DDict(
                 n_nodes=nnodes,
@@ -1058,10 +1058,10 @@ class DragonExecutionBackend(BaseExecutionBackend):
         """Resolve data reference to actual data."""
         if not self._initialized:
             raise RuntimeError("Backend not initialized")
-        
+
         if not isinstance(ref, DataReference):
             raise TypeError("Expected DataReference object")
-        
+
         return await self._shared_memory.resolve_reference(ref)
 
     async def submit_tasks(self, tasks: list[dict[str, Any]]) -> None:
@@ -1154,7 +1154,7 @@ class DragonExecutionBackend(BaseExecutionBackend):
             if success:
                 # Clean up DDict entries
                 self._result_collector._cleanup_ddict_entries(uid, task_info.ranks)
-                
+
                 # Clean up any data references for this task
                 try:
                     task_result = self.tasks.get(uid, {}).get("return_value")
@@ -1327,7 +1327,7 @@ class DragonExecutionBackend(BaseExecutionBackend):
                 logger.warning(f"Error cleaning up system allocation: {e}")
 
             logger.info("Dragon execution backend shutdown complete")
-            
+
         except Exception as e:
             logger.exception(f"Error during shutdown: {e}")
         finally:
