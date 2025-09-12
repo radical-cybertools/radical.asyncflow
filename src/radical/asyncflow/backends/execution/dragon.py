@@ -5,6 +5,7 @@ import time
 import pickle
 import dill
 import cloudpickle
+import uuid
 from typing import Any, Callable, Optional, Dict, List, Tuple
 from enum import Enum
 from dataclasses import dataclass
@@ -23,6 +24,7 @@ try:
     from dragon.data.ddict.ddict import DDict
     from dragon.native.machine import System
     from dragon.infrastructure.facts import PMIBackend
+    from dragon.managed_memory import MemoryPool
 except ImportError:  # pragma: no cover - environment without Dragon
     dragon = None
     Process = None
@@ -33,10 +35,11 @@ except ImportError:  # pragma: no cover - environment without Dragon
     Queue = None
     DDict = None
     System = None
-
+    MemoryPool = None
 
 logger = logging.getLogger(__name__)
 
+SHARED_MEMORY_THRESHOLD = 1024 * 1024  # 1MB
 
 class TaskType(Enum):
     """Enumeration of supported task types."""
@@ -47,7 +50,6 @@ class TaskType(Enum):
     MPI_FUNCTION = "mpi_function"
     MPI_EXECUTABLE = "mpi_executable"
 
-
 @dataclass
 class TaskInfo:
     """Container for task runtime information."""
@@ -57,13 +59,237 @@ class TaskInfo:
     process: Optional[Process] = None
     group: Optional[ProcessGroup] = None
 
-
 @dataclass
 class ProcessOutput:
     stdout: str = ""
     stderr: str = ""
     exit_code: int = 0
     error: Optional[str] = None
+
+class DataReference:
+    """Reference to data stored in shared memory."""
+    
+    def __init__(self, ref_id: str, backend_id: str):
+        self._ref_id = ref_id
+        self._backend_id = backend_id
+        self._is_resolved = False
+    
+    @property
+    def ref_id(self) -> str:
+        return self._ref_id
+    
+    @property
+    def backend_id(self) -> str:
+        return self._backend_id
+    
+    def __repr__(self) -> str:
+        return f"DataReference(ref_id='{self._ref_id}', backend_id='{self._backend_id}')"
+
+class SharedMemoryManager:
+    """Manages data in shared memory with fallback to DDict."""
+    
+    def __init__(self, ddict: DDict, system: System, logger: logging.Logger):
+        self.ddict = ddict
+        self.system = system
+        self.logger = logger
+        self.memory_pools: Dict[int, MemoryPool] = {}
+        self.managed_allocations: Dict[str, Any] = {}
+        self.backend_id = f"dragon_{uuid.uuid4().hex[:8]}"
+        
+    async def initialize(self):
+        """Initialize memory pools per node."""
+        try:
+            for node_id in range(self.system.nnodes):
+                pool_size = int(os.environ.get('DRAGON_MEMORY_POOL_SIZE', 2 * 1024**3))
+                self.memory_pools[node_id] = MemoryPool(
+                    size=pool_size,
+                    fname=f"dragon_pool_{node_id}_{self.backend_id}",
+                    uid=node_id + hash(self.backend_id) % 10000,
+                )
+                self.logger.debug(f"Initialized memory pool on node {node_id}")
+        except Exception as e:
+            self.logger.warning(f"Failed to initialize memory pools: {e}")
+            self.memory_pools.clear()
+    
+    def should_use_shared_memory(self, data: Any) -> bool:
+        """Determine if data should be stored in shared memory based
+           on the size thresold of SHARED_MEMORY_THRESHOLD."""
+        if not self.memory_pools:
+            return False
+
+        try:
+            estimated_size = self._estimate_size(data)
+            return estimated_size >= SHARED_MEMORY_THRESHOLD
+        except Exception:
+            return False
+
+    def _estimate_size(self, data: Any) -> int:
+        """Estimate serialized size of data."""
+        if isinstance(data, (str, bytes)):
+            return len(data)
+        elif isinstance(data, (list, tuple, dict)) and hasattr(data, '__len__'):
+            return len(data) * 100  # Rough estimate
+
+        try:
+            return len(pickle.dumps(data))
+        except Exception:
+            return 1000
+
+    async def store_data(self, data: Any, node_id: int = 0) -> DataReference:
+        """Store data and return reference."""
+        ref_id = f"ref_{uuid.uuid4().hex}"
+
+        if self.should_use_shared_memory(data):
+            try:
+                await self._store_in_shared_memory(ref_id, data, node_id)
+                self.logger.debug(f"Stored data {ref_id} in shared memory")
+            except Exception as e:
+                self.logger.warning(f"Shared memory storage failed for {ref_id}: {e}, using DDict")
+                self._store_in_ddict(ref_id, data)
+        else:
+            self._store_in_ddict(ref_id, data)
+
+        return DataReference(ref_id, self.backend_id)
+
+    async def _store_in_shared_memory(self, ref_id: str, data: Any, node_id: int):
+        """Store data in managed memory and record metadata in DDict."""
+        
+        # Choose best representation of payload
+        if isinstance(data, (bytes, bytearray, memoryview)):
+            payload = data
+        elif hasattr(data, "tobytes"):  # NumPy, torch, etc.
+            payload = data.tobytes()
+        else:
+            payload = self._serialize(data)
+
+        # Allocate from the target node's pool
+        pool = self.memory_pools[node_id]
+        allocation = pool.alloc(len(payload))
+
+        # Copy into managed memory
+        mem_view = allocation.get_memview()
+        mem_view[:len(payload)] = payload
+
+        # Store allocation and metadata
+        self.managed_allocations[ref_id] = allocation
+        self.ddict.pput(
+            f"meta_{ref_id}",
+            {
+                "node": node_id,
+                "offset": allocation.offset,
+                "size": len(payload),
+                "backend_id": self.backend_id,
+                "in_shared_memory": True,
+            },
+        )
+
+    def _store_in_ddict(self, ref_id: str, data: Any):
+        """Store data directly in DDict."""
+        self.ddict.pput(f"data_{ref_id}", data)
+        self.ddict.pput(f"meta_{ref_id}", {
+            'backend_id': self.backend_id,
+            'in_shared_memory': False
+        })
+    
+    async def resolve_reference(self, ref: DataReference) -> Any:
+        """Resolve reference to actual data."""
+        if ref.backend_id != self.backend_id:
+            raise ValueError(f"Cannot resolve reference from different backend: {ref.backend_id}")
+        
+        meta_key = f"meta_{ref.ref_id}"
+        if meta_key not in self.ddict:
+            raise KeyError(f"Reference metadata not found: {ref.ref_id}")
+        
+        metadata = self.ddict[meta_key]
+        
+        if metadata['in_shared_memory']:
+            return await self._retrieve_from_shared_memory(ref.ref_id, metadata)
+        else:
+            data_key = f"data_{ref.ref_id}"
+            if data_key not in self.ddict:
+                raise KeyError(f"Reference data not found: {ref.ref_id}")
+            return self.ddict[data_key]
+    
+    async def _retrieve_from_shared_memory(self, ref_id: str, metadata: dict) -> Any:
+        """Retrieve data from shared memory."""
+        allocation = self.managed_allocations.get(ref_id)
+        if not allocation:
+            # Reconstruct allocation from pool
+            node_id = metadata['node']
+            offset = metadata['offset']
+            pool = self.memory_pools[node_id]
+            allocation = pool.get_alloc_at_offset(offset)
+        
+        size = metadata['size']
+        mem_view = allocation.get_memview()
+        serialized_data = bytes(mem_view[:size])
+        
+        return self._deserialize(serialized_data)
+    
+    def cleanup_reference(self, ref: DataReference):
+        """Clean up reference data."""
+        try:
+            meta_key = f"meta_{ref.ref_id}"
+            data_key = f"data_{ref.ref_id}"
+            
+            if meta_key in self.ddict:
+                del self.ddict[meta_key]
+            if data_key in self.ddict:
+                del self.ddict[data_key]
+            if ref.ref_id in self.managed_allocations:
+                del self.managed_allocations[ref.ref_id]
+        except Exception as e:
+            self.logger.warning(f"Error cleaning up reference {ref.ref_id}: {e}")
+    
+    # DDict operations moved here
+    def store_task_data(self, key: str, data: Any) -> None:
+        """Store data in shared DDict."""
+        self.ddict.pput(key, data)
+
+    def get_task_data(self, key: str, default=None) -> Any:
+        """Retrieve data from shared DDict."""
+        try:
+            if key in self.ddict:
+                return self.ddict[key]
+            return default
+        except Exception:
+            return default
+
+    def list_task_data_keys(self) -> list:
+        """List all keys in the shared DDict."""
+        try:
+            return list(self.ddict.keys())
+        except Exception:
+            return []
+
+    def clear_task_data(self, key: str = None) -> None:
+        """Clear specific key or all data from shared DDict."""
+        try:
+            if key:
+                if key in self.ddict:
+                    del self.ddict[key]
+            else:
+                self.ddict.clear()
+        except Exception as e:
+            self.logger.warning(f"Error clearing DDict data: {e}")
+    
+    def _serialize(self, data: Any) -> bytes:
+        """Serialize data using best available method."""
+        for serializer in [cloudpickle.dumps, dill.dumps, pickle.dumps]:
+            try:
+                return serializer(data)
+            except Exception:
+                continue
+        raise RuntimeError("Failed to serialize data")
+    
+    def _deserialize(self, data: bytes) -> Any:
+        """Deserialize data using best available method."""
+        for deserializer in [cloudpickle.loads, dill.loads, pickle.loads]:
+            try:
+                return deserializer(data)
+            except Exception:
+                continue
+        raise RuntimeError("Failed to deserialize data")
 
 class AsyncCollector:
     """Eager async stdio collector - collects results immediately when process completes."""
@@ -269,12 +495,12 @@ class AsyncCollector:
         except Exception:
             pass
 
-
 class ResultCollector:
-    """ResultCollector for result collection."""
+    """ResultCollector for result collection with shared memory optimization."""
     
-    def __init__(self, ddict_manager, logger: logging.Logger):
-        self.ddict = ddict_manager
+    def __init__(self, shared_memory_manager: SharedMemoryManager, logger: logging.Logger):
+        self.shared_memory = shared_memory_manager
+        self.ddict = shared_memory_manager.ddict
         self.logger = logger
         self.stdio_collector = AsyncCollector(logger, timeout=30.0)
     
@@ -340,13 +566,14 @@ class ResultCollector:
         })
 
     async def _collect_function_results_from_ddict(self, uid: str, ranks: int, task: dict):
-        """Collect function results from DDict - existing logic."""
+        """Collect function results from DDict with shared memory optimization."""
         completion_keys = [f"{uid}_rank_{rank}_completed" for rank in range(ranks)]
         await self._wait_for_completion_keys(completion_keys)
 
         results = []
         stdout_parts = {}
         stderr_parts = {}
+        return_values = []
         
         for rank in range(ranks):
             result_key = f"{uid}_rank_{rank}"
@@ -354,10 +581,31 @@ class ResultCollector:
             results.append(result_data)
             stdout_parts[rank] = result_data.get('stdout', '')
             stderr_parts[rank] = result_data.get('stderr', '')
+            
+            # Optimize return value storage
+            if result_data.get('success', False) and result_data.get('return_value') is not None:
+                referenced_value = await self._store_return_value_in_shared_memory(
+                    result_data['return_value'], uid, rank
+                )
+                return_values.append(referenced_value)
+            else:
+                return_values.append(result_data.get('return_value'))
 
-        self._set_function_task_results(task, results, stdout_parts, stderr_parts, ranks)
+        self._set_function_task_results(task, results, stdout_parts, stderr_parts, return_values, ranks)
         self._cleanup_ddict_entries(uid, ranks)
     
+    async def _store_return_value_in_shared_memory(self, value: Any, uid: str, rank: int) -> Any:
+        """Optimize storage of return value using shared memory."""
+        if self.shared_memory.should_use_shared_memory(value):
+            try:
+                ref = await self.shared_memory.store_data(value, node_id=0)
+                self.logger.debug(f"Created reference for {uid}_rank_{rank} result")
+                return ref
+            except Exception as e:
+                self.logger.warning(f"Failed to create reference for {uid}_rank_{rank}: {e}")
+
+        return value
+
     async def _wait_for_completion_keys(self, completion_keys, timeout: int = 30):
         """Wait for DDict completion keys."""
         wait_count = 0
@@ -369,7 +617,7 @@ class ResultCollector:
                 break
             await asyncio.sleep(0.1)
             wait_count += 1
-    
+
     def _get_ddict_result(self, result_key: str, rank: int) -> dict:
         """Get result from DDict with error handling."""
         try:
@@ -386,9 +634,9 @@ class ResultCollector:
             'stdout': '',
             'stderr': f'No result found for rank {rank}'
         }
-    
-    def _set_function_task_results(self, task: dict, results, stdout_parts, stderr_parts, ranks: int):
-        """Set aggregated function results."""
+
+    def _set_function_task_results(self, task: dict, results, stdout_parts, stderr_parts, return_values, ranks: int):
+        """Set aggregated function results with return values."""
         all_successful = all(r.get('success', False) for r in results)
         max_exit_code = max((r.get('exit_code', 1) for r in results), default=0)
         
@@ -399,7 +647,7 @@ class ResultCollector:
             "stdout": combined_stdout,
             "stderr": combined_stderr,
             "exit_code": max_exit_code,
-            "return_value": [r.get('return_value') for r in results] if results else None,
+            "return_value": return_values[0] if len(return_values) == 1 else return_values,
             "exception": None if all_successful else "; ".join(
                 str(r.get('exception', 'Unknown error')) 
                 for r in results if not r.get('success', False)
@@ -428,12 +676,11 @@ class ResultCollector:
             "return_value": None
         })
 
-
 class TaskLauncher:
     """Unified task launching for all task types."""
     
-    def __init__(self, ddict_manager: DDict, working_dir: str, logger: logging.Logger):
-        self.ddict = ddict_manager
+    def __init__(self, ddict: DDict, working_dir: str, logger: logging.Logger):
+        self.ddict = ddict
         self.working_dir = working_dir
         self.logger = logger
     
@@ -693,7 +940,7 @@ def _function_worker(d: DDict, client_id: int, func_data: bytes, task_uid: str, 
 
 
 class DragonExecutionBackend(BaseExecutionBackend):
-    """Dragon execution backend for distributed task execution with DDict integration."""
+    """Dragon execution backend for distributed task execution with DDict integration and shared memory optimization."""
 
     @typeguard.typechecked
     def __init__(self, resources: Optional[dict] = None):
@@ -719,8 +966,11 @@ class DragonExecutionBackend(BaseExecutionBackend):
         self._running_tasks: dict[str, TaskInfo] = {}
 
         # Dragon components
-        self._ddict_manager: Optional[DDict] = None
+        self._ddict: Optional[DDict] = None
         self._system_alloc: Optional[System] = None
+
+        # Shared memory manager
+        self._shared_memory: Optional[SharedMemoryManager] = None
 
         # Utilities
         self._result_collector: Optional[ResultCollector] = None
@@ -764,7 +1014,7 @@ class DragonExecutionBackend(BaseExecutionBackend):
             logger.debug("Creating DDict with proper parameters...")
             
             #FIXME: make it dynamic and per user
-            self._ddict_manager = DDict(
+            self._ddict = DDict(
                 n_nodes=nnodes,
                 total_mem=nnodes * int(4 * 1024 * 1024 * 1024),  # 4GB per node
                 wait_for_keys=True,
@@ -773,9 +1023,13 @@ class DragonExecutionBackend(BaseExecutionBackend):
             )
             logger.debug("DDict created successfully")
 
+            # Initialize shared memory manager
+            self._shared_memory = SharedMemoryManager(self._ddict, self._system_alloc, logger)
+            await self._shared_memory.initialize()
+
             # Initialize utilities
-            self._result_collector = ResultCollector(self._ddict_manager, logger)
-            self._task_launcher = TaskLauncher(self._ddict_manager, self._working_dir, logger)
+            self._result_collector = ResultCollector(self._shared_memory, logger)
+            self._task_launcher = TaskLauncher(self._ddict, self._working_dir, logger)
 
             # Start task monitoring
             logger.debug("Starting task monitoring...")
@@ -803,6 +1057,16 @@ class DragonExecutionBackend(BaseExecutionBackend):
 
     def get_task_states_map(self):
         return StateMapper(backend=self)
+
+    async def get_data_from_reference(self, ref: DataReference) -> Any:
+        """Resolve data reference to actual data."""
+        if not self._initialized:
+            raise RuntimeError("Backend not initialized")
+        
+        if not isinstance(ref, DataReference):
+            raise TypeError("Expected DataReference object")
+        
+        return await self._shared_memory.resolve_reference(ref)
 
     async def submit_tasks(self, tasks: list[dict[str, Any]]) -> None:
         self._ensure_initialized()
@@ -894,6 +1158,14 @@ class DragonExecutionBackend(BaseExecutionBackend):
             if success:
                 # Clean up DDict entries
                 self._result_collector._cleanup_ddict_entries(uid, task_info.ranks)
+                
+                # Clean up any data references for this task
+                try:
+                    task_result = self.tasks.get(uid, {}).get("return_value")
+                    if isinstance(task_result, DataReference):
+                        self._shared_memory.cleanup_reference(task_result)
+                except Exception as e:
+                    logger.warning(f"Error cleaning up references for task {uid}: {e}")
             return success
 
         except Exception as e:
@@ -981,42 +1253,28 @@ class DragonExecutionBackend(BaseExecutionBackend):
     def get_ddict(self) -> DDict:
         """Get the shared DDict for cross-task data sharing."""
         self._ensure_initialized()
-        return self._ddict_manager
+        return self._ddict
 
+    # Data management methods delegated to SharedMemoryManager
     def store_task_data(self, key: str, data: Any) -> None:
         """Store data in shared DDict for cross-task access."""
         self._ensure_initialized()
-        self._ddict_manager.pput(key, data)
+        self._shared_memory.store_task_data(key, data)
 
     def get_task_data(self, key: str, default=None) -> Any:
         """Retrieve data from shared DDict."""
         self._ensure_initialized()
-        try:
-            if key in self._ddict_manager:
-                return self._ddict_manager[key]
-            return default
-        except Exception:
-            return default
+        return self._shared_memory.get_task_data(key, default)
 
     def list_task_data_keys(self) -> list:
         """List all keys in the shared DDict."""
         self._ensure_initialized()
-        try:
-            return list(self._ddict_manager.keys())
-        except Exception:
-            return []
+        return self._shared_memory.list_task_data_keys()
 
     def clear_task_data(self, key: str = None) -> None:
         """Clear specific key or all data from shared DDict."""
         self._ensure_initialized()
-        try:
-            if key:
-                if key in self._ddict_manager:
-                    del self._ddict_manager[key]
-            else:
-                self._ddict_manager.clear()
-        except Exception as e:
-            logger.warning(f"Error clearing DDict data: {e}")
+        self._shared_memory.clear_task_data(key)
 
     def link_explicit_data_deps(self, src_task=None, dst_task=None, file_name=None, file_path=None):
         """Link explicit data dependencies between tasks."""
@@ -1042,7 +1300,7 @@ class DragonExecutionBackend(BaseExecutionBackend):
         """Shutdown the backend and cleanup resources."""
         if not self._initialized:
             return
-        
+
         try:
             self._shutdown_event.set()
             await self.cancel_all_tasks()
@@ -1056,10 +1314,10 @@ class DragonExecutionBackend(BaseExecutionBackend):
 
             # Clean up DDict
             try:
-                if self._ddict_manager:
-                    self._ddict_manager.clear()
-                    self._ddict_manager.destroy()
-                    self._ddict_manager = None
+                if self._ddict:
+                    self._ddict.clear()
+                    self._ddict.destroy()
+                    self._ddict = None
                 logger.debug("DDict cleaned up and destroyed")
             except Exception as e:
                 logger.warning(f"Error cleaning up DDict: {e}")
