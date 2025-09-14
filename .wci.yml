@@ -19,5 +19,5 @@ release:
 documentation:
   general: https://radical-cybertools.github.io/radical.asyncflow/
   installation: https://radical-cybertools.github.io/radical.asyncflow/install/
-  tutorial: https://github.com/radical-cybertools/radical.asyncflow/tree/main/examples/tutorials
+  tutorial: https://radical-cybertools.github.io/radical.asyncflow/basic/index.html
 
