@@ -709,7 +709,7 @@ class TaskLauncher:
 
         if task_type == TaskType.SINGLE_FUNCTION:
             process = await self._create_function_process(task, 0)
-        else:  # SINGLE_EXECUTABLE
+        else:
             process = self._create_executable_process(task)
 
         process.start()
@@ -732,7 +732,7 @@ class TaskLauncher:
 
         if task_type.name.endswith("_FUNCTION"):
             await self._add_function_processes_to_group(group, task, ranks)
-        else:  # executable
+        else:
             self._add_executable_processes_to_group(group, task, ranks)
 
         group.init()
@@ -754,11 +754,11 @@ class TaskLauncher:
         args = task.get("args", ())
         kwargs = task.get("kwargs", {})
 
-        func_data = await self._serialize_function_data(function, args, kwargs)
+        func = await self._serialize_function(function, args, kwargs)
 
         return Process(
             target=_function_worker,
-            args=(self.ddict, rank, func_data, uid, rank)
+            args=(self.ddict, rank, func, uid, rank)
         )
 
     def _create_executable_process(self, task: dict) -> Process:
@@ -783,7 +783,7 @@ class TaskLauncher:
         args = task.get("args", ())
         kwargs = task.get("kwargs", {})
 
-        func_data = await self._serialize_function_data(function, args, kwargs)
+        func = await self._serialize_function(function, args, kwargs)
 
         for rank in range(ranks):
             env = os.environ.copy()
@@ -791,7 +791,7 @@ class TaskLauncher:
 
             template = ProcessTemplate(
                 target=_function_worker,
-                args=(self.ddict, rank, func_data, uid, rank),
+                args=(self.ddict, rank, func, uid, rank),
                 env=env,
                 cwd=self.working_dir,
                 stdout=Popen.PIPE,
@@ -820,7 +820,7 @@ class TaskLauncher:
             )
             group.add_process(nproc=1, template=template)
 
-    async def _serialize_function_data(self, function: Callable, args: tuple, kwargs: dict) -> bytes:
+    async def _serialize_function(self, function: Callable, args: tuple, kwargs: dict) -> bytes:
         """Serialize function data using multiple serialization methods."""
         serializers = [
             ('dill', dill.dumps),
@@ -836,9 +836,9 @@ class TaskLauncher:
 
         for name, serializer in serializers:
             try:
-                func_data = serializer(func_info)
+                func = serializer(func_info)
                 self.logger.debug(f"Successfully serialized function with {name}")
-                return func_data
+                return func
             except Exception as e:
                 self.logger.debug(f"Failed to serialize with {name}: {e}")
                 continue
@@ -846,7 +846,7 @@ class TaskLauncher:
         raise RuntimeError("Could not serialize function with any available method")
 
 
-def _function_worker(d: DDict, client_id: int, func_data: bytes, task_uid: str, rank: int = 0):
+def _function_worker(d: DDict, client_id: int, func: bytes, task_uid: str, rank: int = 0):
     """Worker function to execute user functions in separate Dragon processes."""
     import io
     import sys
@@ -870,7 +870,7 @@ def _function_worker(d: DDict, client_id: int, func_data: bytes, task_uid: str, 
 
         for deserializer in deserializers:
             try:
-                func_info = deserializer(func_data)
+                func_info = deserializer(func)
                 break
             except Exception:
                 continue
