@@ -691,15 +691,18 @@ class TaskLauncher:
 
     def _determine_task_type(self, task: dict) -> TaskType:
         """Determine task type based on task configuration."""
+
+        is_function = bool(task.get("function"))
         backend_kwargs = task.get('task_backend_specific_kwargs', {})
         ranks = int(backend_kwargs.get("ranks", 1))
-        mpi = backend_kwargs.get("mpi", False)
-        is_function = bool(task.get("function"))
+        mpi = backend_kwargs.get("pmi", None)
 
-        if ranks == 1 and not mpi:
-            return TaskType.SINGLE_FUNCTION if is_function else TaskType.SINGLE_EXECUTABLE
-        elif mpi:
+        if mpi:
+            if ranks < 2:
+                raise ValueError("MPI tasks must have ranks > 1")
             return TaskType.MPI_FUNCTION if is_function else TaskType.MPI_EXECUTABLE
+        if ranks == 1:
+            return TaskType.SINGLE_FUNCTION if is_function else TaskType.SINGLE_EXECUTABLE
         else:  # ranks > 1 and not MPI
             return TaskType.MULTI_FUNCTION if is_function else TaskType.MULTI_EXECUTABLE
 
@@ -726,7 +729,7 @@ class TaskLauncher:
         """Launch multi-rank or MPI task."""
         uid = task["uid"]
         backend_kwargs = task.get('task_backend_specific_kwargs', {})
-        ranks = int(backend_kwargs.get("ranks", 1))
+        ranks = int(backend_kwargs.get("ranks", 2))
 
         group = ProcessGroup(restart=False, policy=None)
 
