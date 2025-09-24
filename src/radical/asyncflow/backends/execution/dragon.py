@@ -1170,8 +1170,8 @@ class DragonExecutionBackend(BaseExecutionBackend):
             success = await self._cancel_task_by_info(task_info)
             
             if success:
-                # Only mark as cancelled after successful termination
-                task_info.cancelled = True
+                # Only mark as canceled after successful termination
+                task_info.canceled = True
 
                 # Clean up DDict entries
                 self._result_collector._cleanup_ddict_entries(uid, task_info.ranks)
