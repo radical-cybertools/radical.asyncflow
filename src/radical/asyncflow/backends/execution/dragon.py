@@ -56,6 +56,7 @@ class TaskInfo:
     task_type: TaskType
     ranks: int
     start_time: float
+    canceled: bool = False
     process: Optional[Process] = None
     group: Optional[ProcessGroup] = None
 
@@ -506,6 +507,16 @@ class ResultCollector:
         Returns True when task is complete WITH results already collected.
         """
         try:
+            if task_info.canceled:
+                # Mark task as canceled and return True (task is "done")
+                task.update({
+                    "canceled": True,
+                    "exception": "Task was canceled",
+                    "exit_code": -1,
+                    "return_value": None
+                })
+                return True
+
             if task_info.task_type.name.startswith("SINGLE_"):
                 return await self._collect_single_task_results(uid, task_info, task)
             else:
@@ -513,7 +524,7 @@ class ResultCollector:
         except Exception as e:
             self.logger.exception(f"Error collecting results for task {uid}: {e}")
             self._set_task_failed(task, str(e))
-            return True  # Task is "done" (with failure)
+            return True
 
     async def _collect_single_task_results(self, uid: str, task_info, task: dict) -> bool:
         """Collect single task results - only return True when COMPLETE with results."""
@@ -1126,7 +1137,9 @@ class DragonExecutionBackend(BaseExecutionBackend):
                         completed_tasks.append(uid)
 
                         # Determine task status and notify callback
-                        if task.get("exception") or task.get("exit_code", 0) != 0:
+                        if task.get("canceled", False):
+                            self._callback_func(task, "CANCELED")
+                        elif task.get("exception") or task.get("exit_code", 0) != 0:
                             self._callback_func(task, "FAILED")
                         else:
                             self._callback_func(task, "DONE")
@@ -1153,8 +1166,13 @@ class DragonExecutionBackend(BaseExecutionBackend):
             return False
 
         try:
+            # Attempt to terminate the processes first
             success = await self._cancel_task_by_info(task_info)
+            
             if success:
+                # Only mark as cancelled after successful termination
+                task_info.cancelled = True
+
                 # Clean up DDict entries
                 self._result_collector._cleanup_ddict_entries(uid, task_info.ranks)
 
@@ -1202,14 +1220,14 @@ class DragonExecutionBackend(BaseExecutionBackend):
     async def cancel_all_tasks(self) -> int:
         """Cancel all running tasks."""
         self._ensure_initialized()
-        cancelled = 0
+        canceled = 0
         for task_uid in list(self._running_tasks.keys()):
             try:
                 if await self.cancel_task(task_uid):
-                    cancelled += 1
+                    canceled += 1
             except Exception:
                 pass
-        return cancelled
+        return canceled
 
     def _validate_task(self, task: dict) -> tuple[bool, str]:
         """Validate task configuration before submission."""
