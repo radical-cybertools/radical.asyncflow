@@ -14,13 +14,11 @@ from typing import Any, Callable, Optional, Union
 
 import typeguard
 
-from .backends.execution.base import BaseExecutionBackend
-from .backends.execution.noop import NoopExecutionBackend
+from .backends import BaseExecutionBackend
+from .backends.execution import NoopExecutionBackend
 from .data import InputFile, OutputFile
 from .errors import DependencyFailureError
-from .utils import get_next_uid
-from .utils import reset_uid_counter
-from .utils import get_event_loop_or_raise
+from .utils import get_event_loop_or_raise, get_next_uid, reset_uid_counter
 
 TASK = "task"
 BLOCK = "block"

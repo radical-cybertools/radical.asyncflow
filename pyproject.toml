@@ -20,7 +20,8 @@ requires-python = ">=3.9"
 dependencies = [
     "pydantic",
     "typeguard",
-    "requests"
+    "requests",
+    "rhapsody"
 ]
 
 [project.urls]

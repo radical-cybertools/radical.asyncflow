@@ -170,3 +170,21 @@ cython_debug/
 # PyPI configuration file
 .pypirc
 asyncflow.session.*
+
+# Ignore vscode settings
+.vscode/
+
+# Ignore GH instructions
+.github/instructions
+
+# Ignore codacy settings
+.codacy/
+
+# Ignore devcontainer settings
+.devcontainer/
+
+# Ignore direnv settings
+.direnv/
+
+# Ignore dotenv settings
+.envrc
