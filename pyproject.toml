@@ -21,7 +21,7 @@ dependencies = [
     "pydantic",
     "typeguard",
     "requests",
-    "rhapsody"
+    "rhapsody @ git+https://github.com/radical-cybertools/rhapsody.git@dev"
 ]
 
 [project.urls]
