@@ -15,6 +15,14 @@ pytestmark = pytest.mark.asyncio(loop_scope="module")
 
 
 @pytest_asyncio.fixture(scope="module")
+def event_loop():
+    """Create an instance of the default event loop for the test module."""
+    loop = asyncio.new_event_loop()
+    yield loop
+    loop.close()
+
+
+@pytest_asyncio.fixture(scope="module")
 async def backend():
     """Initialize RadicalExecutionBackend once for all tests."""
     be = await RadicalExecutionBackend({"resource": "local.localhost"})
