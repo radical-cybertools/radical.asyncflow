@@ -10,16 +10,18 @@ from radical.asyncflow import (
     WorkflowEngine,
 )
 
+# Configure all tests in this module to use module-scoped event loop for performance
+pytestmark = pytest.mark.asyncio(loop_scope="module")
 
-@pytest_asyncio.fixture(scope="function")
+
+@pytest_asyncio.fixture(scope="module")
 async def backend():
-    """Initialize RadicalExecutionBackend once for each test."""
+    """Initialize RadicalExecutionBackend once for all tests."""
     be = await RadicalExecutionBackend({"resource": "local.localhost"})
     yield be
     await be.shutdown()
 
 
-@pytest.mark.asyncio
 async def test_async_bag_of_tasks(backend):
     flow = await WorkflowEngine.create(backend=backend)
 
@@ -39,7 +41,6 @@ async def test_async_bag_of_tasks(backend):
     await flow.shutdown(skip_execution_backend=True)
 
 
-@pytest.mark.asyncio
 async def test_radical_backend_reject_service_task_function(backend):
     flow = await WorkflowEngine.create(backend=backend)
 
@@ -57,7 +58,6 @@ async def test_radical_backend_reject_service_task_function(backend):
     await flow.shutdown(skip_execution_backend=True)
 
 
-@pytest.mark.asyncio
 async def test_radical_backend_reject_function_task_with_raptor_off(backend):
     flow = await WorkflowEngine.create(backend=backend)
 
@@ -72,7 +72,6 @@ async def test_radical_backend_reject_function_task_with_raptor_off(backend):
     await flow.shutdown(skip_execution_backend=True)
 
 
-@pytest.mark.asyncio
 async def test_radical_backend_implicit_data(backend):
     flow = await WorkflowEngine.create(backend=backend)
 
@@ -91,7 +90,6 @@ async def test_radical_backend_implicit_data(backend):
     await flow.shutdown(skip_execution_backend=True)
 
 
-@pytest.mark.asyncio
 async def test_radical_backend_explicit_data(backend):
     flow = await WorkflowEngine.create(backend=backend)
 
@@ -110,7 +108,6 @@ async def test_radical_backend_explicit_data(backend):
     await flow.shutdown(skip_execution_backend=True)
 
 
-@pytest.mark.asyncio
 async def test_radical_backend_input_data_staging(backend):
     flow = await WorkflowEngine.create(backend=backend)
 
@@ -127,7 +124,6 @@ async def test_radical_backend_input_data_staging(backend):
     await flow.shutdown(skip_execution_backend=True)
 
 
-@pytest.mark.asyncio
 async def test_async_cancel_tasks(backend):
     flow = await WorkflowEngine.create(backend=backend)
 
@@ -151,7 +147,6 @@ async def test_async_cancel_tasks(backend):
     await flow.shutdown(skip_execution_backend=True)
 
 
-@pytest.mark.asyncio
 async def test_async_cancel_before_start(backend):
     flow = await WorkflowEngine.create(backend=backend)
 
@@ -176,7 +171,6 @@ async def test_async_cancel_before_start(backend):
     await flow.shutdown(skip_execution_backend=True)
 
 
-@pytest.mark.asyncio
 async def test_async_cancel_after_completion(backend):
     flow = await WorkflowEngine.create(backend=backend)
 
@@ -195,7 +189,6 @@ async def test_async_cancel_after_completion(backend):
     await flow.shutdown(skip_execution_backend=True)
 
 
-@pytest.mark.asyncio
 async def test_async_cancel_one_of_many(backend):
     flow = await WorkflowEngine.create(backend=backend)
 
