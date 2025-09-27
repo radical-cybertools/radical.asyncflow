@@ -4,19 +4,8 @@ import importlib.metadata as importlib_metadata
 
 # Import backends from rhapsody through our wrapper
 from .backends.execution import ConcurrentExecutionBackend, NoopExecutionBackend
-
-# Try to import optional backends
-try:
-    from .backends.execution import DaskExecutionBackend
-except ImportError:
-    DaskExecutionBackend = None
-
-try:
-    from .backends.execution import RadicalExecutionBackend
-except ImportError:
-    RadicalExecutionBackend = None
-
 from .data import InputFile, OutputFile
+from .utils import register_optional_backends
 from .workflow_manager import WorkflowEngine
 
 __version__ = importlib_metadata.version("radical.asyncflow")
@@ -29,9 +18,10 @@ __all__ = [
     "NoopExecutionBackend",
 ]
 
-# Add optional backends to __all__ if they exist
-if DaskExecutionBackend is not None:
-    __all__.append("DaskExecutionBackend")
-
-if RadicalExecutionBackend is not None:
-    __all__.append("RadicalExecutionBackend")
+# Register optional backends from rhapsody
+register_optional_backends(
+    globals(),
+    __all__,
+    "radical.asyncflow.backends.execution",
+    ["DaskExecutionBackend", "RadicalExecutionBackend"],
+)

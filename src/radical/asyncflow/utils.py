@@ -38,3 +38,24 @@ def get_event_loop_or_raise(
             f"Use 'await {context_name}.create(...)' from within an async function, "
             "or run within asyncio.run()."
         ) from e
+
+
+def register_optional_backends(globals_dict, all_list, package, backend_names):
+    """Register optional backend classes, handling ImportError gracefully.
+
+    Args:
+        globals_dict: The globals() dictionary to update with backend classes
+        all_list: The __all__ list to append backend names to if import succeeds
+        package: The package name to import from (e.g. 'rhapsody.backends.execution')
+        backend_names: List of backend class names to attempt importing
+    """
+    for backend_name in backend_names:
+        try:
+            # Import the module and get the backend class
+            module = __import__(package, fromlist=[backend_name])
+            backend_class = getattr(module, backend_name)
+            globals_dict[backend_name] = backend_class
+            all_list.append(backend_name)
+        except ImportError:
+            # Set to None to indicate the backend is unavailable
+            globals_dict[backend_name] = None

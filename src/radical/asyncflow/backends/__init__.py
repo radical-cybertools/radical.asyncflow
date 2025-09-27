@@ -6,10 +6,9 @@ workflows on various computing infrastructures.
 
 from __future__ import annotations
 
-# Import execution backends from rhapsody
 from rhapsody.backends.execution import ConcurrentExecutionBackend, NoopExecutionBackend
 
-# Import base class and session from our compatibility layer
+from ..utils import register_optional_backends
 from .base import BaseExecutionBackend, Session
 
 __all__ = [
@@ -19,17 +18,10 @@ __all__ = [
     "ConcurrentExecutionBackend",
 ]
 
-# Add optional backends that may be available
-try:
-    from rhapsody.backends.execution import DaskExecutionBackend  # noqa: F401
-
-    __all__.append("DaskExecutionBackend")
-except ImportError:
-    pass
-
-try:
-    from rhapsody.backends.execution import RadicalExecutionBackend  # noqa: F401
-
-    __all__.append("RadicalExecutionBackend")
-except ImportError:
-    pass
+# Register optional backends from rhapsody
+register_optional_backends(
+    globals(),
+    __all__,
+    "rhapsody.backends.execution",
+    ["DaskExecutionBackend", "RadicalExecutionBackend"],
+)
