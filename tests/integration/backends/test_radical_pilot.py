@@ -22,7 +22,7 @@ def event_loop():
     loop.close()
 
 
-@pytest_asyncio.fixture(scope="module")
+@pytest_asyncio.fixture(loop_scope="module", scope="module")
 async def backend():
     """Initialize RadicalExecutionBackend once for all tests."""
     be = await RadicalExecutionBackend({"resource": "local.localhost"})
