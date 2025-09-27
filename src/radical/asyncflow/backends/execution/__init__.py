@@ -15,14 +15,14 @@ __all__ = ["BaseExecutionBackend", "NoopExecutionBackend", "ConcurrentExecutionB
 
 # Add optional backends
 try:
-    from rhapsody.backends.execution import DaskExecutionBackend
+    from rhapsody.backends.execution import DaskExecutionBackend  # noqa: F401
 
     __all__.append("DaskExecutionBackend")
 except ImportError:
     pass
 
 try:
-    from rhapsody.backends.execution import RadicalExecutionBackend
+    from rhapsody.backends.execution import RadicalExecutionBackend  # noqa: F401
 
     __all__.append("RadicalExecutionBackend")
 except ImportError:

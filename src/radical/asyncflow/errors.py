@@ -1,9 +1,9 @@
 class DependencyFailureError(Exception):
     """Exception raised when a workflow component cannot execute due to dependency
-       failures.
+    failures.
 
-    This exception provides detailed information about the failed dependencies
-    and maintains the chain of causation for debugging purposes.
+    This exception provides detailed information about the failed dependencies and
+    maintains the chain of causation for debugging purposes.
     """
 
     def __init__(self, message, failed_dependencies=None, root_cause=None):

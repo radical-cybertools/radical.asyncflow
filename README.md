@@ -17,7 +17,7 @@
 </p>
 
 
-RADICAL AsyncFlow (RAF) is a fast asynchronous scripting library built on top of [asyncio](https://docs.python.org/3/library/asyncio.html) for building powerful async/sync workflows on HPC, clusters, and local machines. It supports pluggable execution backends with intuitive task dependencies and workflow composition. 
+RADICAL AsyncFlow (RAF) is a fast asynchronous scripting library built on top of [asyncio](https://docs.python.org/3/library/asyncio.html) for building powerful async/sync workflows on HPC, clusters, and local machines. It supports pluggable execution backends with intuitive task dependencies and workflow composition.
 
 - ⚡ Powerful asynchronous workflows — Compose complex async and sync workflows easily, with intuitive task dependencies and campaign orchestration.
 
@@ -79,7 +79,7 @@ async def main():
     # create the workflow
     t1_fut = task1()
     t2_result = await task2(t1_fut) # t2 depends on t1 (waits for it)
-  
+
     print(t2_result)
     # shutdown the execution backend
     await flow.shutdown()

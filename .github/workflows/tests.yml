@@ -3,7 +3,6 @@ name: tests
 on:
   push:
     branches: [main, test-me-*]
-    tags:
   pull_request:
   workflow_dispatch:
 
@@ -39,12 +38,12 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: Get pip cache dir
         id: pip-cache-dir
-        run: echo "PIP_CACHE_DIR=$(pip cache dir)" >> $GITHUB_ENV
+        run: echo "dir=$(pip cache dir)" >> $GITHUB_OUTPUT
       - name: Use pip cache
         id: pip-cache
         uses: actions/cache@v4
         with:
-          path: ${{ env.PIP_CACHE_DIR }}
+          path: ${{ steps.pip-cache-dir.outputs.dir }}
           key: tests-unit-${{ matrix.os }}-pip-${{ matrix.python }}-${{ hashFiles('pyproject.toml') }}
           restore-keys: |
             tests-unit-${{ matrix.os }}-pip-${{ matrix.python }}-
@@ -84,12 +83,12 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: Get pip cache dir
         id: pip-cache-dir
-        run: echo "PIP_CACHE_DIR=$(pip cache dir)" >> $GITHUB_ENV
+        run: echo "dir=$(pip cache dir)" >> $GITHUB_OUTPUT
       - name: Use pip cache
         id: pip-cache
         uses: actions/cache@v4
         with:
-          path: ${{ env.PIP_CACHE_DIR }}
+          path: ${{ steps.pip-cache-dir.outputs.dir }}
           key: tests-integration-${{ matrix.os }}-pip-${{ matrix.python }}-${{ hashFiles('pyproject.toml') }}
           restore-keys: |
             tests-integration-${{ matrix.os }}-pip-${{ matrix.python }}-

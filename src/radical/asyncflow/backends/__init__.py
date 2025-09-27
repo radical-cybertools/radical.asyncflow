@@ -1,7 +1,7 @@
 """Backend subsystem for AsyncFlow using Rhapsody backends.
 
-This module provides execution backends from the Rhapsody package for running
-scientific workflows on various computing infrastructures.
+This module provides execution backends from the Rhapsody package for running scientific
+workflows on various computing infrastructures.
 """
 
 from __future__ import annotations
@@ -21,14 +21,14 @@ __all__ = [
 
 # Add optional backends that may be available
 try:
-    from rhapsody.backends.execution import DaskExecutionBackend
+    from rhapsody.backends.execution import DaskExecutionBackend  # noqa: F401
 
     __all__.append("DaskExecutionBackend")
 except ImportError:
     pass
 
 try:
-    from rhapsody.backends.execution import RadicalExecutionBackend
+    from rhapsody.backends.execution import RadicalExecutionBackend  # noqa: F401
 
     __all__.append("RadicalExecutionBackend")
 except ImportError:

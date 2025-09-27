@@ -1,0 +1,45 @@
+[default]
+extend-ignore-identifiers-re = [
+    # Allow common variable names that might be flagged as typos
+    "asyncflow",
+    "rhapsody",
+    "mturilli",
+    "alsaadi",
+    "cybertools",
+    "devcontainer",
+    "pytest",
+    "pydantic",
+    "typeguard",
+    "mkdocs",
+    "mkdocstrings",
+    "mkdocs-.*",
+    "PnP",  # Plug-and-Play abbreviation
+    "Pn",   # Part of PnP that gets flagged
+]
+
+[default.extend-words]
+# Add any project-specific words that should not be flagged as typos
+asyncflow = "asyncflow"
+rhapsody = "rhapsody"
+PnP = "PnP"  # Plug-and-Play abbreviation
+Pn = "Pn"    # Part of PnP that gets flagged
+
+[files]
+extend-exclude = [
+    "*.pyc",
+    "*.pyo",
+    "*.pyd",
+    ".git/",
+    ".mypy_cache/",
+    ".pytest_cache/",
+    ".ruff_cache/",
+    "__pycache__/",
+    "build/",
+    "dist/",
+    "*.egg-info/",
+    ".direnv/",
+    ".venv/",
+    "venv/",
+    ".ipynb_checkpoints/",
+    "node_modules/",
+]

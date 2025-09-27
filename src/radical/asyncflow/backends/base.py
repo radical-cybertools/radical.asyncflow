@@ -1,7 +1,7 @@
 """Base execution backend compatibility layer.
 
-This module provides a compatibility layer for rhapsody backends to work
-with AsyncFlow's type system.
+This module provides a compatibility layer for rhapsody backends to work with
+AsyncFlow's type system.
 """
 
 from __future__ import annotations
@@ -11,8 +11,7 @@ from abc import ABC, abstractmethod
 
 # Import the original rhapsody base class
 try:
-    from rhapsody.backends import \
-        BaseExecutionBackend as RhapsodyBaseExecutionBackend
+    from rhapsody.backends import BaseExecutionBackend as RhapsodyBaseExecutionBackend
     from rhapsody.backends import Session as RhapsodySession
 
     # Create compatibility aliases
@@ -22,11 +21,12 @@ try:
 except ImportError:
     # Fallback to local definitions if rhapsody is not available
     class BaseExecutionBackend(ABC):
-        """Abstract base class for execution backends that manage task execution and state.
+        """Abstract base class for execution backends that manage task execution and
+        state.
 
-        This class defines the interface for execution backends that handle task submission,
-        state management, and dependency linking in a distributed or parallel execution
-        environment.
+        This class defines the interface for execution backends that handle task
+        submission, state management, and dependency linking in a distributed or
+        parallel execution environment.
         """
 
         @abstractmethod
@@ -65,8 +65,8 @@ except ImportError:
 
             Args:
                 task: Dictionary containing task information and metadata.
-                state: The new state of the task (e.g., 'pending', 'running', 'completed',
-                    'failed').
+                state: The new state of the task (e.g., 'pending', 'running',
+                'completed', 'failed').
             """
             pass
 
@@ -132,8 +132,7 @@ except ImportError:
 
         @abstractmethod
         async def cancel_task(self, uid: str) -> bool:
-            """
-            Cancel a task in the execution backend.
+            """Cancel a task in the execution backend.
 
             Args:
                 uid: Task identifier
@@ -143,20 +142,20 @@ except ImportError:
             """
             raise NotImplementedError("Not implemented in the base backend")
 
-
     class Session:
         """Manages execution session state and working directory.
 
-        This class maintains session-specific information including the current
-        working directory path for task execution.
+        This class maintains session-specific information including the current working
+        directory path for task execution.
         """
 
         def __init__(self):
             """Initialize a new session with the current working directory.
 
-            Sets the session path to the current working directory at the time
-            of initialization.
+            Sets the session path to the current working directory at the time of
+            initialization.
             """
             self.path = os.getcwd()
+
 
 __all__ = ["BaseExecutionBackend", "Session"]

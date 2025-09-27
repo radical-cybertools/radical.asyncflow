@@ -29,10 +29,9 @@ logger = logging.getLogger(__name__)
 
 
 class WorkflowEngine:
-    """
-    An asynchronous workflow manager that uses asyncio event loops and coroutines
-    to manage and execute workflow components (blocks and/or tasks) within
-    Directed Acyclic Graph (DAG) or Chain Graph (CG) structures.
+    """An asynchronous workflow manager that uses asyncio event loops and coroutines to
+    manage and execute workflow components (blocks and/or tasks) within Directed Acyclic
+    Graph (DAG) or Chain Graph (CG) structures.
 
     This class provides async/await operations and handles task dependencies,
     input/output data staging, and execution.
@@ -53,8 +52,7 @@ class WorkflowEngine:
         dry_run: bool = False,
         implicit_data: bool = True,
     ) -> None:
-        """
-        Initialize the WorkflowEngine (sync part only).
+        """Initialize the WorkflowEngine (sync part only).
 
         Note: This is a private constructor. Use WorkflowEngine.create() instead.
 
@@ -108,9 +106,8 @@ class WorkflowEngine:
         self._setup_signal_handlers()
 
     def _setup_signal_handlers(self):
-        """
-        Register signal handlers for graceful shutdown on SIGHUP, SIGTERM, and SIGINT.
-        """
+        """Register signal handlers for graceful shutdown on SIGHUP, SIGTERM, and
+        SIGINT."""
         signals = (signal.SIGHUP, signal.SIGTERM, signal.SIGINT)
         for sig in signals:
             try:
@@ -127,8 +124,7 @@ class WorkflowEngine:
     async def _handle_shutdown_signal(
         self, sig: signal.Signals, source: str = "external"
     ):
-        """
-        Handle received signals by initiating a graceful shutdown.
+        """Handle received signals by initiating a graceful shutdown.
 
         Args:
             sig: The signal received (e.g., SIGHUP, SIGTERM, SIGINT)
@@ -151,8 +147,7 @@ class WorkflowEngine:
         dry_run: bool = False,
         implicit_data: bool = True,
     ) -> "WorkflowEngine":
-        """
-        Factory method to create and initialize a WorkflowEngine.
+        """Factory method to create and initialize a WorkflowEngine.
 
         Args:
             backend: Execution backend. If None and dry_run=True,
@@ -563,8 +558,7 @@ class WorkflowEngine:
         return patched_cancel
 
     def _assign_uid(self, prefix: str) -> str:
-        """
-        Generates a unique identifier (UID) for a flow component using a counter.
+        """Generates a unique identifier (UID) for a flow component using a counter.
 
         Args:
             prefix (str): The prefix to use for the UID.
@@ -576,8 +570,7 @@ class WorkflowEngine:
         return f"{prefix}.{uid}"
 
     def _detect_dependencies(self, possible_dependencies):
-        """
-        Detects and categorizes possible dependencies into blocks/tasks, input files,
+        """Detects and categorizes possible dependencies into blocks/tasks, input files,
         and output files.
 
         This method iterates over a list of possible dependencies and classifies
@@ -622,10 +615,8 @@ class WorkflowEngine:
         return dependencies, input_files, output_files
 
     async def _extract_dependency_values(self, comp_desc: dict):
-        """
-        Resolve Future objects in args and kwargs to their actual values.
-        This is called right before submission when all dependencies are
-        guaranteed to be done.
+        """Resolve Future objects in args and kwargs to their actual values. This is
+        called right before submission when all dependencies are guaranteed to be done.
 
         Args:
             comp_desc: Component description dict
@@ -678,9 +669,8 @@ class WorkflowEngine:
             del self._dependency_count[comp_uid]
 
     def _create_dependency_failure_exception(self, comp_desc: dict, failed_deps: list):
-        """
-        Create a DependencyFailureError exception that shows both the immediate failure
-        and the root cause from failed dependencies.
+        """Create a DependencyFailureError exception that shows both the immediate
+        failure and the root cause from failed dependencies.
 
         Args:
             comp_desc (dict): Description of the component that cannot execute
@@ -712,8 +702,7 @@ class WorkflowEngine:
         )
 
     def _get_dependency_output_files(self, dependencies):
-        """
-        Helper method to get all output files from dependencies.
+        """Helper method to get all output files from dependencies.
 
         Args:
             dependencies: List of dependency descriptions
@@ -1276,8 +1265,7 @@ class WorkflowEngine:
             self.handle_task_failure(task_dct, task_fut)
 
     async def shutdown(self, skip_execution_backend: bool = False):
-        """
-        Internal implementation of asynchronous shutdown for the workflow manager.
+        """Internal implementation of asynchronous shutdown for the workflow manager.
 
         This method performs the following steps:
             1. Sets the shutdown event to signal components to exit

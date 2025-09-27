@@ -94,11 +94,11 @@ async def task3(*args):
 ```python
 async def run_wf(wf_id):
     print(f'Starting workflow {wf_id} at {time.time()}')
-    
+
     # Create dependent task execution
     t3 = task3(task1(), task2()) # (1)!
     await t3  # Wait for distributed execution to complete
-    
+
     print(f'Workflow {wf_id} completed at {time.time()}')
 ```
 
@@ -200,7 +200,7 @@ backend = RadicalExecutionBackend({
 
 AsyncFlow's backend abstraction means your workflow logic remains **identical** whether running on:
 - Your laptop with 8 cores
-- A university cluster with 1,000 nodes  
+- A university cluster with 1,000 nodes
 - A national supercomputer with 100,000+ cores
 - GPU clusters with thousands of accelerators
 

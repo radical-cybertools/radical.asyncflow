@@ -94,10 +94,10 @@ async def test_register_component_adds_block_entry():
     # only 1 block that is not unpacked yet
     assert len(engine.components) == 1
 
-    buid = next(iter(engine.components.keys()))
+    build = next(iter(engine.components.keys()))
 
     # block gets registered first
-    assert BLOCK in buid
+    assert BLOCK in build
 
     await block_future
 
@@ -113,7 +113,9 @@ async def test_dynamic_task_backend_specific_kwargs():
     task_resources = {"ranks": 8}
 
     @engine.function_task
-    async def dummy_task(task_description=task_resources):
+    async def dummy_task(task_description=None):
+        if task_description is None:
+            task_description = task_resources
         return "dummy return value"
 
     await dummy_task(task_description={"gpus_per_rank": 2})
