@@ -112,10 +112,8 @@ async def test_dynamic_task_backend_specific_kwargs():
 
     task_resources = {"ranks": 8}
 
-    @engine.function_task
-    async def dummy_task(task_description=None):
-        if task_description is None:
-            task_description = task_resources
+    @engine.function_task  # noqa: B006  # Intentional mutable default for testing
+    async def dummy_task(task_description=task_resources):
         return "dummy return value"
 
     await dummy_task(task_description={"gpus_per_rank": 2})
