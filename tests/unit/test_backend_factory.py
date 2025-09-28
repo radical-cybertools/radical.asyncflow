@@ -161,9 +161,7 @@ class TestBackendFactory:
         """Test installation suggestions for known backends."""
         suggestions = {
             "dask": "pip install 'radical.asyncflow[dask]'",
-            "radical_pilot": "pip install 'radical.asyncflow[radical-pilot]'",
-            "dragon": "pip install 'radical.asyncflow[dragon]'",
-            "flux": "pip install 'radical.asyncflow[flux]'",
+            "radical_pilot": "pip install 'radical.asyncflow[radicalpilot]'",
         }
 
         for backend_type, expected in suggestions.items():

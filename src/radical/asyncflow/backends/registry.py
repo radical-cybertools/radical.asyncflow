@@ -35,10 +35,10 @@ class BackendRegistry:
                 "ConcurrentExecutionBackend"
             ),
             # Optional rhapsody backends (loaded on demand)
-            "dask": "rhapsody.backends.execution:DaskExecutionBackend",
-            "radical_pilot": "rhapsody.backends.execution:RadicalExecutionBackend",
-            "dragon": "rhapsody.backends.execution:DragonExecutionBackend",
-            "flux": "rhapsody.backends.execution:FluxExecutionBackend",
+            "dask": "rhapsody.backends.execution.dask_parallel:DaskExecutionBackend",
+            "radical_pilot": (
+                "rhapsody.backends.execution.radical_pilot:RadicalExecutionBackend"
+            ),
         }
 
     def get_backend(self, name: str) -> Optional[type]:

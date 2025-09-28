@@ -21,7 +21,6 @@ dependencies = [
     "pydantic",
     "typeguard",
     "requests",
-    "rhapsody @ git+https://github.com/radical-cybertools/rhapsody.git@dev"
 ]
 
 [project.urls]
@@ -30,8 +29,16 @@ Issues = "https://github.com/radical-cybertools/radical.asyncflow/issues"
 Documentation = "https://radical-cybertools.github.io/radical.asyncflow"
 
 [project.optional-dependencies]
-dask = ["dask[distributed]"]
-radicalpilot = ["radical.pilot"]
+# HPC execution backends (requires rhapsody)
+hpc = ["rhapsody @ git+https://github.com/radical-cybertools/rhapsody.git@dev"]
+dask = [
+    "rhapsody @ git+https://github.com/radical-cybertools/rhapsody.git@dev",
+    "dask[distributed]"
+]
+radicalpilot = [
+    "rhapsody @ git+https://github.com/radical-cybertools/rhapsody.git@dev",
+    "radical.pilot"
+]
 
 lint = [
     "ruff",

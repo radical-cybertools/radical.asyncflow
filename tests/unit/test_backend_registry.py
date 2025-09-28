@@ -71,8 +71,6 @@ class TestBackendRegistry:
             "concurrent",
             "dask",
             "radical_pilot",
-            "dragon",
-            "flux",
         ]
         for backend_name in expected_backends:
             assert backend_name in registry._backend_specs
