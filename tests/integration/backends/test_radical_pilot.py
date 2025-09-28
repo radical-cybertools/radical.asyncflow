@@ -3,29 +3,18 @@ import asyncio
 import pytest
 import pytest_asyncio
 
-from radical.asyncflow import (
-    InputFile,
-    OutputFile,
-    RadicalExecutionBackend,
-    WorkflowEngine,
-)
+from radical.asyncflow import InputFile, OutputFile, WorkflowEngine, factory
 
 # Configure all tests in this module to use module-scoped event loop for performance
 pytestmark = pytest.mark.asyncio(loop_scope="module")
 
 
 @pytest_asyncio.fixture(scope="module")
-def event_loop():
-    """Create an instance of the default event loop for the test module."""
-    loop = asyncio.new_event_loop()
-    yield loop
-    loop.close()
-
-
-@pytest_asyncio.fixture(loop_scope="module", scope="module")
 async def backend():
-    """Initialize RadicalExecutionBackend once for all tests."""
-    be = await RadicalExecutionBackend({"resource": "local.localhost"})
+    """Initialize RADICAL-Pilot backend once for all tests."""
+    be = await factory.create_backend(
+        "radical_pilot", config={"resource": "local.localhost"}
+    )
     yield be
     await be.shutdown()
 

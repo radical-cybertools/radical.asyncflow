@@ -8,14 +8,14 @@ import os
 import signal
 from collections import defaultdict, deque
 from functools import wraps
-from itertools import count
+from itertools import chain
 from pathlib import Path
 from typing import Any, Callable, Optional, Union
 
 import typeguard
 
-from .backends import BaseExecutionBackend
 from .backends.execution import NoopExecutionBackend
+from .backends.execution.base import ExecutionBackendProtocol
 from .data import InputFile, OutputFile
 from .errors import DependencyFailureError
 from .utils import get_event_loop_or_raise, get_next_uid, reset_uid_counter
@@ -48,7 +48,7 @@ class WorkflowEngine:
     @typeguard.typechecked
     def __init__(
         self,
-        backend: BaseExecutionBackend,
+        backend: ExecutionBackendProtocol,
         dry_run: bool = False,
         implicit_data: bool = True,
     ) -> None:
@@ -143,7 +143,7 @@ class WorkflowEngine:
     @classmethod
     async def create(
         cls,
-        backend: Optional[BaseExecutionBackend] = None,
+        backend: Optional[ExecutionBackendProtocol] = None,
         dry_run: bool = False,
         implicit_data: bool = True,
     ) -> "WorkflowEngine":
@@ -176,8 +176,8 @@ class WorkflowEngine:
 
     @staticmethod
     def _setup_execution_backend(
-        backend: Optional[BaseExecutionBackend], dry_run: bool
-    ) -> BaseExecutionBackend:
+        backend: Optional[ExecutionBackendProtocol], dry_run: bool
+    ) -> ExecutionBackendProtocol:
         """Setup and validate the execution backend."""
         if backend is None:
             if dry_run:

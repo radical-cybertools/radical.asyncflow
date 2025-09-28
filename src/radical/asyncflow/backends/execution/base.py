@@ -8,10 +8,56 @@ from __future__ import annotations
 
 import os
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from ...constants import StateMapper
+
+
+@runtime_checkable
+class ExecutionBackendProtocol(Protocol):
+    """Protocol defining the interface that execution backends must implement.
+
+    This protocol allows both internal AsyncFlow backends and external backends (like
+    Rhapsody) to be used with WorkflowEngine type checking.
+    """
+
+    async def submit_tasks(self, tasks: list[dict]) -> None:
+        """Submit a list of tasks for execution."""
+        ...
+
+    async def shutdown(self) -> None:
+        """Gracefully shutdown the execution backend."""
+        ...
+
+    def state(self) -> str:
+        """Get the current state of the execution backend."""
+        ...
+
+    def register_callback(self, func) -> None:
+        """Register a callback function for task state changes."""
+        ...
+
+    def get_task_states_map(self) -> Any:
+        """Get the task states mapping."""
+        ...
+
+    async def cancel_task(self, uid: str) -> bool:
+        """Cancel a task by its UID."""
+        ...
+
+    def link_implicit_data_deps(self, src_task, dst_task):
+        """Link implicit data dependencies between tasks."""
+        ...
+
+    def link_explicit_data_deps(
+        self, src_task=None, dst_task=None, file_name=None, file_path=None
+    ):
+        """Link explicit data dependencies between tasks."""
+        ...
+
+    # Required for WorkflowEngine initialization - make it flexible
+    session: Any  # Backend must have a session with a path attribute
 
 
 class BaseExecutionBackend(ABC):
