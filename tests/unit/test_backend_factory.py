@@ -9,6 +9,7 @@ import pytest_asyncio
 
 from radical.asyncflow.backends.execution.base import BaseExecutionBackend
 from radical.asyncflow.backends.factory import BackendFactory
+from radical.asyncflow.backends.registry import registry
 
 
 # Mock backend classes for testing
@@ -176,35 +177,35 @@ class TestBackendFactory:
     @pytest.mark.asyncio
     async def test_create_noop_backend_success(self, factory):
         """Test successful creation of noop backend."""
-        with patch("radical.asyncflow.backends.factory.registry") as mock_registry:
+        with patch.object(registry, "get_backend") as mock_get_backend:
             # Mock successful backend retrieval
             from radical.asyncflow.backends.execution.noop import NoopExecutionBackend
 
-            mock_registry.get_backend.return_value = NoopExecutionBackend
+            mock_get_backend.return_value = NoopExecutionBackend
 
             # Act
             backend = await factory.create_backend("noop")
 
             # Assert
             assert isinstance(backend, NoopExecutionBackend)
-            mock_registry.get_backend.assert_called_once_with("noop")
+            mock_get_backend.assert_called_once_with("noop")
 
     @pytest.mark.asyncio
     async def test_create_concurrent_backend_success(self, factory):
         """Test successful creation of concurrent backend with default config."""
-        with patch("radical.asyncflow.backends.factory.registry") as mock_registry:
+        with patch.object(registry, "get_backend") as mock_get_backend:
             # Mock concurrent backend class that accepts executor
             mock_backend_class = Mock()
             mock_backend_instance = Mock()
             mock_backend_class.return_value = mock_backend_instance
-            mock_registry.get_backend.return_value = mock_backend_class
+            mock_get_backend.return_value = mock_backend_class
 
             # Act
             backend = await factory.create_backend("concurrent")
 
             # Assert
             assert backend is mock_backend_instance
-            mock_registry.get_backend.assert_called_once_with("concurrent")
+            mock_get_backend.assert_called_once_with("concurrent")
             # Verify that backend was created with an executor
             args = mock_backend_class.call_args[0]
             assert len(args) == 1
@@ -213,11 +214,11 @@ class TestBackendFactory:
     @pytest.mark.asyncio
     async def test_create_concurrent_backend_with_process_executor(self, factory):
         """Test creation of concurrent backend with process executor."""
-        with patch("radical.asyncflow.backends.factory.registry") as mock_registry:
+        with patch.object(registry, "get_backend") as mock_get_backend:
             mock_backend_class = Mock()
             mock_backend_instance = Mock()
             mock_backend_class.return_value = mock_backend_instance
-            mock_registry.get_backend.return_value = mock_backend_class
+            mock_get_backend.return_value = mock_backend_class
 
             # Act
             config = {"executor_type": "process", "max_workers": 2}
@@ -230,14 +231,18 @@ class TestBackendFactory:
     @pytest.mark.asyncio
     async def test_create_backend_not_available(self, factory):
         """Test creation of unavailable backend raises ValueError."""
-        with patch("radical.asyncflow.backends.factory.registry") as mock_registry:
-            mock_registry.get_backend.return_value = None
-            mock_registry.list_available.return_value = {
+        with (
+            patch.object(registry, "get_backend") as mock_get_backend,
+            patch.object(registry, "list_available") as mock_list_available,
+            patch.object(registry, "get_failure_reason") as mock_get_failure_reason,
+        ):
+            mock_get_backend.return_value = None
+            mock_list_available.return_value = {
                 "noop": True,
                 "concurrent": True,
                 "unavailable": False,
             }
-            mock_registry.get_failure_reason.return_value = "Import error"
+            mock_get_failure_reason.return_value = "Import error"
 
             # Act & Assert
             with pytest.raises(
@@ -248,9 +253,9 @@ class TestBackendFactory:
     @pytest.mark.asyncio
     async def test_create_backend_initialization_failure(self, factory):
         """Test handling of backend initialization failure."""
-        with patch("radical.asyncflow.backends.factory.registry") as mock_registry:
+        with patch.object(registry, "get_backend") as mock_get_backend:
             mock_backend_class = Mock(side_effect=RuntimeError("Init failed"))
-            mock_registry.get_backend.return_value = mock_backend_class
+            mock_get_backend.return_value = mock_backend_class
 
             # Act & Assert
             with pytest.raises(
@@ -261,8 +266,8 @@ class TestBackendFactory:
     @pytest.mark.asyncio
     async def test_create_backend_async_context_manager(self, factory):
         """Test creation of backend that is an async context manager."""
-        with patch("radical.asyncflow.backends.factory.registry") as mock_registry:
-            mock_registry.get_backend.return_value = MockAsyncBackend
+        with patch.object(registry, "get_backend") as mock_get_backend:
+            mock_get_backend.return_value = MockAsyncBackend
 
             # Act
             backend = await factory.create_backend("test_async")
@@ -274,8 +279,8 @@ class TestBackendFactory:
     @pytest.mark.asyncio
     async def test_create_backend_awaitable(self, factory):
         """Test creation of backend that is awaitable."""
-        with patch("radical.asyncflow.backends.factory.registry") as mock_registry:
-            mock_registry.get_backend.return_value = MockAwaitableBackend
+        with patch.object(registry, "get_backend") as mock_get_backend:
+            mock_get_backend.return_value = MockAwaitableBackend
 
             # Act
             backend = await factory.create_backend("test_awaitable")
@@ -287,8 +292,8 @@ class TestBackendFactory:
     @pytest.mark.asyncio
     async def test_create_backend_with_initialize_method(self, factory):
         """Test creation of backend with explicit initialize method."""
-        with patch("radical.asyncflow.backends.factory.registry") as mock_registry:
-            mock_registry.get_backend.return_value = MockInitializeBackend
+        with patch.object(registry, "get_backend") as mock_get_backend:
+            mock_get_backend.return_value = MockInitializeBackend
 
             # Act
             backend = await factory.create_backend("test_initialize")
@@ -300,13 +305,13 @@ class TestBackendFactory:
     @pytest.mark.asyncio
     async def test_create_backend_with_config_and_kwargs(self, factory):
         """Test creation of backend with config and keyword arguments."""
-        with patch("radical.asyncflow.backends.factory.registry") as mock_registry:
+        with patch.object(registry, "get_backend") as mock_get_backend:
             mock_backend_class = Mock()
             mock_backend_instance = Mock()
             # Make sure the mock doesn't have initialize method to avoid the await issue
             del mock_backend_instance.initialize
             mock_backend_class.return_value = mock_backend_instance
-            mock_registry.get_backend.return_value = mock_backend_class
+            mock_get_backend.return_value = mock_backend_class
 
             # Act
             config = {"setting1": "value1"}
@@ -321,18 +326,19 @@ class TestBackendFactory:
 
     def test_list_available_backends(self, factory):
         """Test listing available backends with detailed information."""
-        with patch("radical.asyncflow.backends.factory.registry") as mock_registry:
+        mock_specs = {"available": "test:Available", "unavailable": "test:Unavailable"}
+        with (
+            patch.object(registry, "get_backend") as mock_get_backend,
+            patch.object(registry, "get_failure_reason") as mock_get_failure_reason,
+            patch.object(registry, "_backend_specs", mock_specs),
+        ):
             mock_backend_class = Mock()
             mock_backend_class.__name__ = "MockBackend"
 
-            mock_registry._backend_specs = {
-                "available": "test:Available",
-                "unavailable": "test:Unavailable",
-            }
-            mock_registry.get_backend.side_effect = lambda name: (
+            mock_get_backend.side_effect = lambda name: (
                 mock_backend_class if name == "available" else None
             )
-            mock_registry.get_failure_reason.side_effect = lambda name: (
+            mock_get_failure_reason.side_effect = lambda name: (
                 None if name == "available" else "Import failed"
             )
 
@@ -357,11 +363,11 @@ class TestBackendFactory:
 
     def test_create_backend_sync_success(self, factory):
         """Test synchronous backend creation."""
-        with patch("radical.asyncflow.backends.factory.registry") as mock_registry:
+        with patch.object(registry, "get_backend") as mock_get_backend:
             mock_backend_class = Mock()
             mock_backend_instance = Mock()
             mock_backend_class.return_value = mock_backend_instance
-            mock_registry.get_backend.return_value = mock_backend_class
+            mock_get_backend.return_value = mock_backend_class
 
             # Act
             config = {"test": "value"}
@@ -373,9 +379,12 @@ class TestBackendFactory:
 
     def test_create_backend_sync_not_available(self, factory):
         """Test synchronous creation of unavailable backend."""
-        with patch("radical.asyncflow.backends.factory.registry") as mock_registry:
-            mock_registry.get_backend.return_value = None
-            mock_registry.list_available.return_value = {"noop": True}
+        with (
+            patch.object(registry, "get_backend") as mock_get_backend,
+            patch.object(registry, "list_available") as mock_list_available,
+        ):
+            mock_get_backend.return_value = None
+            mock_list_available.return_value = {"noop": True}
 
             # Act & Assert
             with pytest.raises(
@@ -385,9 +394,9 @@ class TestBackendFactory:
 
     def test_create_backend_sync_initialization_failure(self, factory):
         """Test handling of sync backend creation failure."""
-        with patch("radical.asyncflow.backends.factory.registry") as mock_registry:
+        with patch.object(registry, "get_backend") as mock_get_backend:
             mock_backend_class = Mock(side_effect=RuntimeError("Creation failed"))
-            mock_registry.get_backend.return_value = mock_backend_class
+            mock_get_backend.return_value = mock_backend_class
 
             # Act & Assert
             with pytest.raises(RuntimeError, match="Failed to create backend 'test'"):
@@ -395,11 +404,11 @@ class TestBackendFactory:
 
     def test_logging_during_operations(self, factory, caplog):
         """Test that appropriate log messages are generated."""
-        with patch("radical.asyncflow.backends.factory.registry") as mock_registry:
+        with patch.object(registry, "get_backend") as mock_get_backend:
             mock_backend_class = Mock()
             mock_backend_instance = Mock()
             mock_backend_class.return_value = mock_backend_instance
-            mock_registry.get_backend.return_value = mock_backend_class
+            mock_get_backend.return_value = mock_backend_class
 
             with caplog.at_level(logging.DEBUG):
                 # Test sync creation
