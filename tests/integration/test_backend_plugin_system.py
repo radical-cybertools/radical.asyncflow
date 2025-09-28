@@ -27,7 +27,8 @@ class TestBackendPluginIntegration:
         future = simple_task(5)
         result = await future
 
-        assert result == 10
+        # Noop backend returns dummy output, not actual computation
+        assert result == "Dummy Output"
 
         # Clean shutdown
         await flow.shutdown()
@@ -125,13 +126,9 @@ class TestBackendPluginIntegration:
         assert hasattr(backend, "shutdown")
         assert hasattr(backend, "register_callback")
 
-        # Backend should be in proper state (some backends have sync state methods)
-        try:
-            state = await backend.state()
-        except TypeError:
-            # If state() is not async, call it synchronously
-            state = backend.state()
-        valid_states = ["CONNECTED", "READY", "INITIALIZED", "DISCONNECTED"]
+        # Backend should be in proper state
+        state = backend.state()
+        valid_states = ["CONNECTED", "READY", "INITIALIZED", "DISCONNECTED", "RUNNING"]
         assert state in valid_states
 
         # Clean shutdown

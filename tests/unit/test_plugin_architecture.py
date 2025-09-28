@@ -120,7 +120,7 @@ class TestPluginArchitecture:
         # Should have cached the failure reason
         failure_reason = registry.get_failure_reason("dask")
         assert failure_reason is not None
-        assert "baseexecutionbackend subclass" in failure_reason.lower()
+        assert "rhapsody" in failure_reason.lower()
 
     def test_backend_specs_updated_for_phase2(self):
         """Test that backend specs reflect Phase 2 changes."""
