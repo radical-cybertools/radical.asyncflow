@@ -20,16 +20,19 @@ try:
     import multiprocessing as mp
     from dragon.native.process import Process, ProcessTemplate, Popen
     from dragon.native.process_group import ProcessGroup
+    from dragon.native.queue import Queue
     from dragon.data.ddict.ddict import DDict
     from dragon.native.machine import System
+    from dragon.infrastructure.facts import PMIBackend
     from dragon.managed_memory import MemoryPool
-    from dragon.native.process_group import DragonUserCodeError
 except ImportError:  # pragma: no cover - environment without Dragon
     dragon = None
     Process = None
     ProcessTemplate = None
     ProcessGroup = None
     Popen = None
+    PMIBackend = None
+    Queue = None
     DDict = None
     System = None
     MemoryPool = None
@@ -58,11 +61,25 @@ class TaskInfo:
     group: Optional[ProcessGroup] = None
 
 @dataclass
-class ProcessOutput:
-    stdout: str = ""
-    stderr: str = ""
-    exit_code: int = 0
-    error: Optional[str] = None
+class ExecutableTaskCompletion:
+    """Direct task completion data from executable process."""
+    task_uid: str
+    rank: int
+    process_id: int
+    stdout: str
+    stderr: str
+    exit_code: int
+    timestamp: float
+    
+    def to_task_result(self) -> dict:
+        """Convert to task result dictionary."""
+        return {
+            "stdout": self.stdout,
+            "stderr": self.stderr,
+            "exit_code": self.exit_code,
+            "return_value": None,
+            "exception": None if self.exit_code == 0 else f"Process exited with code {self.exit_code}"
+        }
 
 class DataReference:
     """Reference to data stored in shared memory."""
@@ -151,8 +168,6 @@ class SharedMemoryManager:
 
     async def _store_in_shared_memory(self, ref_id: str, data: Any, node_id: int):
         """Store data in managed memory and record metadata in DDict."""
-
-        # Choose best representation of payload
         if isinstance(data, (bytes, bytearray, memoryview)):
             payload = data
         elif hasattr(data, "tobytes"):  # NumPy, torch, etc.
@@ -160,15 +175,12 @@ class SharedMemoryManager:
         else:
             payload = self._serialize(data)
 
-        # Allocate from the target node's pool
         pool = self.memory_pools[node_id]
         allocation = pool.alloc(len(payload))
 
-        # Copy into managed memory
         mem_view = allocation.get_memview()
         mem_view[:len(payload)] = payload
 
-        # Store allocation and metadata
         self.managed_allocations[ref_id] = allocation
         self.ddict.pput(
             f"meta_{ref_id}",
@@ -235,7 +247,7 @@ class SharedMemoryManager:
         except Exception as e:
             self.logger.warning(f"Error cleaning up reference {ref.ref_id}: {e}")
 
-    # DDict operations moved here
+    # DDict operations
     def store_task_data(self, key: str, data: Any) -> None:
         """Store data in shared DDict."""
         self.ddict.pput(key, data)
@@ -285,292 +297,119 @@ class SharedMemoryManager:
                 continue
         raise RuntimeError("Failed to deserialize data")
 
-class AsyncCollector:
-    """Eager async stdio collector - collects results immediately when process completes."""
-
-    def __init__(self, logger: logging.Logger, buffer_size: int = 65536, timeout: float = 30.0):
-        self.logger = logger
-        self.buffer_size = buffer_size
-        self.timeout = timeout
-
-    async def collect_process_output(self, process) -> ProcessOutput:
-        """Collect output from process immediately - called when process completes."""
-        try:
-            stdout_conn = getattr(process, 'stdout_conn', None)
-            stderr_conn = getattr(process, 'stderr_conn', None)
-            exit_code = getattr(process, 'exitcode', 0) or 0
-
-            # Collect stdout and stderr concurrently with timeout
-            try:
-                stdout, stderr = await asyncio.wait_for(
-                    asyncio.gather(
-                        self._collect_stream(stdout_conn, "stdout"),
-                        self._collect_stream(stderr_conn, "stderr"),
-                        return_exceptions=True
-                    ),
-                    timeout=self.timeout
-                )
-            except asyncio.TimeoutError:
-                self.logger.warning(f"Timeout collecting process output after {self.timeout}s")
-                return ProcessOutput(
-                    stdout="",
-                    stderr="Output collection timeout",
-                    exit_code=exit_code,
-                    error=f"Collection timeout after {self.timeout}s"
-                )
-
-            # Handle collection exceptions
-            if isinstance(stdout, Exception):
-                stdout = f"Error collecting stdout: {stdout}"
-            if isinstance(stderr, Exception):
-                stderr = f"Error collecting stderr: {stderr}"
-
-            return ProcessOutput(
-                stdout=stdout,
-                stderr=stderr,
-                exit_code=exit_code,
-            )
-
-        except Exception as e:
-            self.logger.exception(f"Unexpected error in collect_process_output: {e}")
-            return ProcessOutput(
-                stdout="",
-                stderr=f"Collection error: {e}",
-                exit_code=getattr(process, 'exitcode', 1) or 1,
-                error=str(e)
-            )
-
-    async def collect_group_output(self, group) -> ProcessOutput:
-        """Collect output from all processes in group concurrently."""
-        try:
-            # Create collection tasks for all processes concurrently
-            collection_tasks = []
-            process_info = []
-
-            for puid, exit_code in group.inactive_puids:
-                proc = Process(None, ident=puid)
-                task = self._collect_process_streams(proc, exit_code)
-                collection_tasks.append(task)
-                process_info.append((puid, exit_code))
-
-            if not collection_tasks:
-                return ProcessOutput()
-
-            # Wait for all collections with timeout
-            try:
-                results = await asyncio.wait_for(
-                    asyncio.gather(*collection_tasks, return_exceptions=True),
-                    timeout=self.timeout
-                )
-            except asyncio.TimeoutError:
-                return ProcessOutput(
-                    stdout="",
-                    stderr="Group collection timeout",
-                    exit_code=1,
-                    error=f"Group collection timeout after {self.timeout}s"
-                )
-
-            # Aggregate results
-            stdout_parts = []
-            stderr_parts = []
-            exit_codes = []
-
-            for i, (result, (puid, exit_code)) in enumerate(zip(results, process_info)):
-                if isinstance(result, Exception):
-                    stdout_parts.append(f"Rank {i}: Error collecting output")
-                    stderr_parts.append(f"Rank {i}: {result}")
-                    exit_codes.append(1)
-                else:
-                    stdout, stderr = result
-                    stdout_parts.append(f"Rank {i}: {stdout}")
-                    stderr_parts.append(f"Rank {i}: {stderr}")
-                    exit_codes.append(exit_code)
-
-            return ProcessOutput(
-                stdout="\n".join(stdout_parts),
-                stderr="\n".join(stderr_parts),
-                exit_code=max(exit_codes) if exit_codes else 0,
-            )
-
-        except Exception as e:
-            self.logger.exception(f"Unexpected error in collect_group_output: {e}")
-            return ProcessOutput(
-                stdout="",
-                stderr=f"Group collection error: {e}",
-                exit_code=1,
-                error=str(e)
-            )
-
-    async def _collect_process_streams(self, process, exit_code: int) -> Tuple[str, str]:
-        """Collect stdout/stderr from a single process in group."""
-        stdout_conn = getattr(process, 'stdout_conn', None)
-        stderr_conn = getattr(process, 'stderr_conn', None)
-
-        stdout, stderr = await asyncio.gather(
-            self._collect_stream(stdout_conn, "stdout"),
-            self._collect_stream(stderr_conn, "stderr"),
-            return_exceptions=True
-        )
-
-        if isinstance(stdout, Exception):
-            stdout = f"Error: {stdout}"
-        if isinstance(stderr, Exception):
-            stderr = f"Error: {stderr}"
-
-        return stdout, stderr
-
-    async def _collect_stream(self, conn, stream_name: str) -> str:
-        """Non-blocking stream collection with cooperative yielding."""
-        if not conn:
-            return ""
-
-        chunks = []
-        total_size = 0
-        max_size = 10 * 1024 * 1024  # 10MB limit
-        retry_count = 0
-        max_retries = 100  # Prevent infinite loops
-
-        try:
-            while total_size < max_size and retry_count < max_retries:
-                try:
-                    # Non-blocking check for data
-                    if hasattr(conn, 'poll') and not conn.poll(0):
-                        retry_count += 1
-                        await asyncio.sleep(0.001)  # Brief yield
-                        continue
-
-                    # Reset retry count when data is available
-                    retry_count = 0
-
-                    # Try to read data
-                    chunk = conn.recv()
-                    if not chunk:  # EOF
-                        break
-
-                    chunk_str = str(chunk) if chunk else ""
-                    chunks.append(chunk_str)
-                    total_size += len(chunk_str)
-
-                    # Yield control every few chunks
-                    if len(chunks) % 20 == 0:
-                        await asyncio.sleep(0)
-
-                except (BlockingIOError, OSError) as e:
-                    if "would block" in str(e).lower():
-                        retry_count += 1
-                        await asyncio.sleep(0.001)
-                        continue
-                    else:
-                        # Real I/O error
-                        break
-                except EOFError:
-                    # Normal end of stream
-                    break
-                except Exception as e:
-                    self.logger.warning(f"Unexpected error reading {stream_name}: {e}")
-                    break
-
-            if retry_count >= max_retries:
-                self.logger.warning(f"Max retries reached collecting {stream_name}")
-
-            return "".join(chunks)
-
-        except Exception as e:
-            self.logger.warning(f"Error collecting {stream_name}: {e}")
-            raise  # Re-raise to be handled by caller
-        finally:
-            self._safe_close(conn)
-
-    def _safe_close(self, conn):
-        """Safely close connection, ignoring errors."""
-        try:
-            if hasattr(conn, 'close'):
-                conn.close()
-        except Exception:
-            pass
-
 class ResultCollector:
-    """ResultCollector for result collection with shared memory optimization."""
+    """Direct queue consumption for executables."""
 
-    def __init__(self, shared_memory_manager: SharedMemoryManager, logger: logging.Logger):
+    def __init__(self, shared_memory_manager: SharedMemoryManager, result_queue: Queue, logger: logging.Logger):
         self.shared_memory = shared_memory_manager
         self.ddict = shared_memory_manager.ddict
+        self.result_queue = result_queue
         self.logger = logger
-        self.stdio_collector = AsyncCollector(logger, timeout=30.0)
+        
+        # Track only completion counts, not actual results
+        self.executable_completion_counts: Dict[str, int] = {}  # task_uid -> received_count
+        self.executable_expected_counts: Dict[str, int] = {}   # task_uid -> expected_count
+        self.executable_aggregated_results: Dict[str, List[ExecutableTaskCompletion]] = {}  # temporary aggregation
 
-    async def collect_results(self, uid: str, task_info, task: dict) -> bool:
-        """
-        Collect results immediately when task completes.
-        Returns True when task is complete WITH results already collected.
-        """
+    def register_executable_task(self, task_uid: str, ranks: int):
+        """Register an executable task for result tracking."""
+        self.executable_expected_counts[task_uid] = ranks
+        self.executable_completion_counts[task_uid] = 0
+        self.executable_aggregated_results[task_uid] = []  # All tasks use aggregation
+
+    def try_consume_executable_result(self) -> Optional[str]:
+        """Try to consume one result from queue. Returns task_uid if task completed, None otherwise."""
         try:
-            if task_info.canceled:
-                # Mark task as canceled and return True (task is "done")
-                task.update({
-                    "canceled": True,
-                    "exception": "Task was canceled",
-                    "exit_code": -1,
-                    "return_value": None
-                })
-                return True
+            result = self.result_queue.get(block=False)
+            if isinstance(result, ExecutableTaskCompletion):
+                return self._process_executable_completion(result)
+            elif result == "SHUTDOWN":
+                return None
+        except Exception:
+            # Queue empty
+            pass
+        return None
 
-            if task_info.task_type.name.startswith("SINGLE_"):
-                return await self._collect_single_task_results(uid, task_info, task)
-            else:
-                return await self._collect_group_task_results(uid, task_info, task)
-        except Exception as e:
-            self.logger.exception(f"Error collecting results for task {uid}: {e}")
-            self._set_task_failed(task, str(e))
-            return True
+    def _process_executable_completion(self, completion: ExecutableTaskCompletion) -> Optional[str]:
+        """Process completion directly and return task_uid if task is now complete."""
+        task_uid = completion.task_uid
+        
+        if task_uid not in self.executable_expected_counts:
+            self.logger.warning(f"Received completion for unregistered task {task_uid}")
+            return None
 
-    async def _collect_single_task_results(self, uid: str, task_info, task: dict) -> bool:
-        """Collect single task results - only return True when COMPLETE with results."""
-        process = task_info.process
-        if not process:
-            return True  # No process, consider done
+        # Increment completion count
+        self.executable_completion_counts[task_uid] += 1
+        
+        expected = self.executable_expected_counts[task_uid]
+        received = self.executable_completion_counts[task_uid]
+        
+        # Both single and multi-rank use same aggregation path
+        self.executable_aggregated_results[task_uid].append(completion)
+        
+        if received >= expected:
+            return task_uid
+                
+        return None
 
-        if process.is_alive:
-            return False  # Still running
+    def get_completed_executable_task(self, task_uid: str) -> Optional[dict]:
+        """Get completed task data and clean up tracking."""
+        if task_uid not in self.executable_expected_counts:
+            return None
+            
+        results = self.executable_aggregated_results.get(task_uid, [])
+        if not results:
+            return None
+            
+        # Sort by rank
+        results.sort(key=lambda r: r.rank)
+        
+        if len(results) == 1:
+            # Single rank result
+            result = results[0]
+            result_data = {
+                "stdout": result.stdout,
+                "stderr": result.stderr,
+                "exit_code": result.exit_code,
+                "return_value": None,
+                "exception": None if result.exit_code == 0 else f"Process exited with code {result.exit_code}"
+            }
+        else:
+            # Multi-rank - aggregate results
+            stdout_parts = [f"Rank {r.rank}: {r.stdout}" for r in results]
+            stderr_parts = [f"Rank {r.rank}: {r.stderr}" for r in results]
+            max_exit_code = max(r.exit_code for r in results)
+            
+            result_data = {
+                "stdout": "\n".join(stdout_parts),
+                "stderr": "\n".join(stderr_parts),
+                "exit_code": max_exit_code,
+                "return_value": None,
+                "exception": None if max_exit_code == 0 else f"One or more processes failed"
+            }
 
-        # Process is complete, collect results NOW
-        if task_info.task_type.name.endswith("_FUNCTION"):
-            await self._collect_function_results_from_ddict(uid, 1, task)
-        else:  # executable
-            output = await self.stdio_collector.collect_process_output(process)
-            self._set_executable_results(task, output)
+        # Clean up tracking
+        self.cleanup_executable_task(task_uid)
+        return result_data
 
-        return True  # Complete with results
+    def cleanup_executable_task(self, task_uid: str):
+        """Clean up task tracking data."""
+        self.executable_completion_counts.pop(task_uid, None)
+        self.executable_expected_counts.pop(task_uid, None)
+        self.executable_aggregated_results.pop(task_uid, None)
 
-    async def _collect_group_task_results(self, uid: str, task_info, task: dict) -> bool:
-        """Collect group task results - only return True when COMPLETE with results."""
-        group = task_info.group
-        if not group:
-            return True  # No group, consider done
+    def is_executable_task_complete(self, task_uid: str) -> bool:
+        """Check if task is complete based on completion counts."""
+        if task_uid not in self.executable_expected_counts:
+            return False
+        
+        expected = self.executable_expected_counts[task_uid]
+        received = self.executable_completion_counts.get(task_uid, 0)
+        return received >= expected
 
-        if not hasattr(group, 'inactive_puids') or not group.inactive_puids:
-            return False  # Still running
-
-        # Group is complete, collect results NOW
-        if task_info.task_type.name.endswith("_FUNCTION"):
-            await self._collect_function_results_from_ddict(uid, task_info.ranks, task)
-        else:  # executable
-            output = await self.stdio_collector.collect_group_output(group)
-            self._set_executable_results(task, output)
-
-        return True  # Complete with results
-
-    def _set_executable_results(self, task: dict, output: ProcessOutput):
-        """Set task results from collected output."""
-        task.update({
-            "stdout": output.stdout,
-            "stderr": output.stderr,
-            "exit_code": output.exit_code,
-            "return_value": None,
-            "exception": output.error  # Include collection errors
-        })
-
-    async def _collect_function_results_from_ddict(self, uid: str, ranks: int, task: dict):
-        """Collect function results from DDict with shared memory optimization."""
+    # Keep existing function result methods unchanged
+    async def collect_function_results(self, uid: str, ranks: int, task: dict):
+        """Collect function results from DDict (unchanged for functions)."""
         completion_keys = [f"{uid}_rank_{rank}_completed" for rank in range(ranks)]
         await self._wait_for_completion_keys(completion_keys)
 
@@ -586,7 +425,6 @@ class ResultCollector:
             stdout_parts[rank] = result_data.get('stdout', '')
             stderr_parts[rank] = result_data.get('stderr', '')
 
-            # Optimize return value storage
             if result_data.get('success', False) and result_data.get('return_value') is not None:
                 referenced_value = await self._store_return_value_in_shared_memory(
                     result_data['return_value'], uid, rank
@@ -599,7 +437,7 @@ class ResultCollector:
         self._cleanup_ddict_entries(uid, ranks)
 
     async def _store_return_value_in_shared_memory(self, value: Any, uid: str, rank: int) -> Any:
-        """Optimize storage of return value using shared memory."""
+        """Storage of return value using shared memory."""
         if self.shared_memory.should_use_shared_memory(value):
             try:
                 ref = await self.shared_memory.store_data(value, node_id=0)
@@ -607,7 +445,6 @@ class ResultCollector:
                 return ref
             except Exception as e:
                 self.logger.warning(f"Failed to create reference for {uid}_rank_{rank}: {e}")
-
         return value
 
     async def _wait_for_completion_keys(self, completion_keys, timeout: int = 30):
@@ -671,20 +508,12 @@ class ResultCollector:
         except Exception as e:
             self.logger.warning(f"Error cleaning DDict entries for {uid}: {e}")
 
-    def _set_task_failed(self, task: dict, error_msg: str):
-        """Mark task as failed."""
-        task.update({
-            "exception": error_msg,
-            "exit_code": 1,
-            "stderr": task.get("stderr", "") + f"\nError: {error_msg}",
-            "return_value": None
-        })
-
 class TaskLauncher:
     """Unified task launching for all task types."""
 
-    def __init__(self, ddict: DDict, working_dir: str, logger: logging.Logger):
+    def __init__(self, ddict: DDict, result_queue: Queue, working_dir: str, logger: logging.Logger):
         self.ddict = ddict
+        self.result_queue = result_queue
         self.working_dir = working_dir
         self.logger = logger
 
@@ -699,7 +528,6 @@ class TaskLauncher:
 
     def _determine_task_type(self, task: dict) -> TaskType:
         """Determine task type based on task configuration."""
-
         is_function = bool(task.get("function"))
         backend_kwargs = task.get('task_backend_specific_kwargs', {})
         ranks = int(backend_kwargs.get("ranks", 1))
@@ -721,7 +549,7 @@ class TaskLauncher:
         if task_type == TaskType.SINGLE_FUNCTION:
             process = await self._create_function_process(task, 0)
         else:
-            process = self._create_executable_process(task)
+            process = self._create_executable_process(task, 0)
 
         process.start()
         self.logger.debug(f"Started single-rank Dragon process for task {uid}")
@@ -739,13 +567,7 @@ class TaskLauncher:
         backend_kwargs = task.get('task_backend_specific_kwargs', {})
         ranks = int(backend_kwargs.get("ranks", 2))
 
-        if task_type.name.startswith("MPI_"):
-            mpi = backend_kwargs.get("pmi", None)
-            group = ProcessGroup(restart=False, policy=None, pmi=mpi)
-            self.logger.debug(f"Started MPI group task {uid} ({mpi}) with {ranks} ranks")
-        else:
-            group = ProcessGroup(restart=False, policy=None)
-            self.logger.debug(f"Started group task {uid} with {ranks} ranks")
+        group = ProcessGroup(restart=False, policy=None)
 
         if task_type.name.endswith("_FUNCTION"):
             await self._add_function_processes_to_group(group, task, ranks)
@@ -754,6 +576,8 @@ class TaskLauncher:
 
         group.init()
         group.start()
+
+        self.logger.debug(f"Started group task {uid} with {ranks} ranks")
 
         return TaskInfo(
             task_type=task_type,
@@ -776,19 +600,15 @@ class TaskLauncher:
             args=(self.ddict, rank, func, uid, rank)
         )
 
-    def _create_executable_process(self, task: dict) -> Process:
-        """Create a single executable process."""
+    def _create_executable_process(self, task: dict, rank: int) -> Process:
+        """Create a single executable process with result queue integration."""
         executable = task["executable"]
         args = list(task.get("args", []))
+        uid = task["uid"]
 
         return Process(
-            target=executable,
-            args=args,
-            cwd=self.working_dir,
-            stdout=Popen.PIPE,
-            stderr=Popen.PIPE,
-            stdin=Popen.DEVNULL,
-            env=os.environ.copy(),
+            target=_executable_worker,
+            args=(self.result_queue, executable, args, uid, rank, self.working_dir)
         )
 
     async def _add_function_processes_to_group(self, group: ProcessGroup, task: dict, ranks: int) -> None:
@@ -816,22 +636,20 @@ class TaskLauncher:
             group.add_process(nproc=1, template=template)
 
     def _add_executable_processes_to_group(self, group: ProcessGroup, task: dict, ranks: int) -> None:
-        """Add executable processes to process group."""
+        """Add executable processes to process group with result queue integration."""
         executable = task["executable"]
         args = list(task.get("args", []))
+        uid = task["uid"]
 
         for rank in range(ranks):
             env = os.environ.copy()
             env["DRAGON_RANK"] = str(rank)
 
             template = ProcessTemplate(
-                target=executable,
-                args=args,
+                target=_executable_worker,
+                args=(self.result_queue, executable, args, uid, rank, self.working_dir),
                 env=env,
                 cwd=self.working_dir,
-                stdout=Popen.PIPE,
-                stderr=Popen.PIPE,
-                stdin=Popen.DEVNULL,
             )
             group.add_process(nproc=1, template=template)
 
@@ -861,6 +679,60 @@ class TaskLauncher:
         raise RuntimeError("Could not serialize function with any available method")
 
 
+def _executable_worker(result_queue: Queue, executable: str, args: list, task_uid: str, rank: int, working_dir: str):
+    """Worker function that executes executable and pushes completion directly to queue."""
+    import subprocess
+    import time
+    
+    try:
+        # Execute the process and capture output
+        result = subprocess.run(
+            [executable] + args,
+            cwd=working_dir,
+            capture_output=True,
+            text=True,
+            timeout=3600  # 1 hour timeout
+        )
+        
+        # Create completion object
+        completion = ExecutableTaskCompletion(
+            task_uid=task_uid,
+            rank=rank,
+            process_id=os.getpid(),
+            stdout=result.stdout,
+            stderr=result.stderr,
+            exit_code=result.returncode,
+            timestamp=time.time()
+        )
+        
+        # Push completion directly to queue
+        result_queue.put(completion, block=True)
+        
+    except subprocess.TimeoutExpired:
+        completion = ExecutableTaskCompletion(
+            task_uid=task_uid,
+            rank=rank,
+            process_id=os.getpid(),
+            stdout="",
+            stderr="Process timed out",
+            exit_code=124,
+            timestamp=time.time()
+        )
+        result_queue.put(completion, block=True)
+        
+    except Exception as e:
+        completion = ExecutableTaskCompletion(
+            task_uid=task_uid,
+            rank=rank,
+            process_id=os.getpid(),
+            stdout="",
+            stderr=f"Execution error: {str(e)}",
+            exit_code=1,
+            timestamp=time.time()
+        )
+        result_queue.put(completion, block=True)
+
+
 def _function_worker(d: DDict, client_id: int, func: bytes, task_uid: str, rank: int = 0):
     """Worker function to execute user functions in separate Dragon processes."""
     import io
@@ -879,7 +751,7 @@ def _function_worker(d: DDict, client_id: int, func: bytes, task_uid: str, rank:
     try:
         sys.stdout, sys.stderr = out_buf, err_buf
 
-        # FIXME: Keep the serializer type when we serialize and use it to Deserialize function data
+        # Deserialize function data
         func_info = None
         deserializers = [dill.loads, cloudpickle.loads, pickle.loads]
 
@@ -951,7 +823,40 @@ def _function_worker(d: DDict, client_id: int, func: bytes, task_uid: str, rank:
 
 
 class DragonExecutionBackend(BaseExecutionBackend):
-    """Dragon execution backend for distributed task execution with DDict integration and shared memory optimization."""
+    """Dragon execution backend with direct queue consumption
+    
+                ┌────────────────────────────┐
+                │  DRAGON EXECUTION BACKEND  │
+                └────────────────────────────┘
+                              |    
+                       ┌──────────────┐
+                       │ TaskLauncher │
+                       └──────┬───────┘
+              ┌────────────-──┴──────────────┐
+              ▼                              ▼
+     ┌────────────────────┐       ┌────────────────────┐
+     │ Executable Tasks   │       │ Function Tasks     │
+     │ Process / Group    │       │ Process / Group    │
+     │ _executable_worker │       │ _function_worker   │
+     └──────────┬─────────┘       └──────────┬─────────┘
+                ▼                            ▼
+     ┌────────────────────┐       ┌────────────────────┐
+     │   DRAGON QUEUE     │       │    DRAGON DDICT    │
+     └──────────┬─────────┘       └──────────┬─────────┘
+                ▼                            ▼
+     ┌────────────────────┐       ┌────────────────────┐
+     │ DirectResult       │       │ FunctionResult     │
+     │ Collector          │       │ Collector          │
+     └──────────┬─────────┘       └──────────┬─────────┘
+                ▼                            ▼
+              ┌──────────────┐───────────────┐
+              │    MONITOR LOOP (tasks, cb)  │
+              └──────────────┬───────────────┘
+                             ▼
+                ┌────────────────────────┐
+                │   WORKFLOW CALLBACKS   │
+                └────────────────────────┘
+    """
 
     @typeguard.typechecked
     def __init__(self, resources: Optional[dict] = None):
@@ -979,6 +884,7 @@ class DragonExecutionBackend(BaseExecutionBackend):
         # Dragon components
         self._ddict: Optional[DDict] = None
         self._system_alloc: Optional[System] = None
+        self._result_queue: Optional[Queue] = None
 
         # Shared memory manager
         self._shared_memory: Optional[SharedMemoryManager] = None
@@ -1023,8 +929,6 @@ class DragonExecutionBackend(BaseExecutionBackend):
 
             # Initialize DDict
             logger.debug("Creating DDict with proper parameters...")
-
-            #FIXME: make it dynamic and per user
             self._ddict = DDict(
                 n_nodes=nnodes,
                 total_mem=nnodes * int(4 * 1024 * 1024 * 1024),  # 4GB per node
@@ -1034,20 +938,25 @@ class DragonExecutionBackend(BaseExecutionBackend):
             )
             logger.debug("DDict created successfully")
 
+            # Initialize global result queue
+            logger.debug("Creating global result queue...")
+            self._result_queue = Queue(maxsize=10000)
+            logger.debug("Result queue created successfully")
+
             # Initialize shared memory manager
             self._shared_memory = SharedMemoryManager(self._ddict, self._system_alloc, logger)
             await self._shared_memory.initialize()
 
             # Initialize utilities
-            self._result_collector = ResultCollector(self._shared_memory, logger)
-            self._task_launcher = TaskLauncher(self._ddict, self._working_dir, logger)
+            self._result_collector = ResultCollector(self._shared_memory, self._result_queue, logger)
+            self._task_launcher = TaskLauncher(self._ddict, self._result_queue, self._working_dir, logger)
 
             # Start task monitoring
             logger.debug("Starting task monitoring...")
             self._monitor_task = asyncio.create_task(self._monitor_tasks())
             await asyncio.sleep(0.1)
 
-            logger.info(f"Dragon backend initialized with {self._slots} slots and DDict on {nnodes} nodes")
+            logger.info(f"Dragon backend initialized with {self._slots} slots, DDict on {nnodes} nodes, and direct queue consumption")
         except Exception as e:
             logger.exception(f"Failed to initialize Dragon backend: {str(e)}")
             raise
@@ -1061,7 +970,7 @@ class DragonExecutionBackend(BaseExecutionBackend):
                 mp.set_start_method("dragon", force=True)
         except RuntimeError:
             pass
-        logger.debug("Dragon backend active with DDict integration.")
+        logger.debug("Dragon backend active with direct queue integration.")
 
     def register_callback(self, callback: Callable) -> None:
         self._callback_func = callback
@@ -1112,6 +1021,11 @@ class DragonExecutionBackend(BaseExecutionBackend):
         self._free_slots -= ranks
 
         try:
+            # Register executable tasks with result collector
+            task_type = self._task_launcher._determine_task_type(task)
+            if task_type.name.endswith("_EXECUTABLE"):
+                self._result_collector.register_executable_task(uid, ranks)
+
             # Launch task using unified launcher
             task_info = await self._task_launcher.launch_task(task)
             self._running_tasks[uid] = task_info
@@ -1122,44 +1036,122 @@ class DragonExecutionBackend(BaseExecutionBackend):
             raise
 
     async def _monitor_tasks(self) -> None:
-        """Monitor running tasks for completion."""
+        """Monitor running tasks with direct queue consumption for executables."""
         while not self._shutdown_event.is_set():
             try:
+                # Process executable completions from queue
                 completed_tasks = []
 
+                # Batch consume queue results
+                for _ in range(1000):  # Process up to 100 results per iteration
+                    completed_task_uid = self._result_collector.try_consume_executable_result()
+                    if completed_task_uid:
+                        completed_tasks.append(completed_task_uid)
+                    else:
+                        break
+
+                # Check all running tasks for completion
                 for uid, task_info in list(self._running_tasks.items()):
                     task = self.tasks.get(uid)
                     if not task:
-                        completed_tasks.append(uid)
+                        if uid not in completed_tasks:
+                            completed_tasks.append(uid)
                         continue
 
-                    # This will return True only when results are FULLY collected
-                    if await self._result_collector.collect_results(uid, task_info, task):
-                        completed_tasks.append(uid)
+                    if await self._check_task_completion(uid, task_info, task):
+                        if uid not in completed_tasks:
+                            completed_tasks.append(uid)
 
-                        # Determine task status and notify callback
-                        if task.get("canceled", False):
-                            self._callback_func(task, "CANCELED")
-                        elif task.get("exception") or task.get("exit_code", 0) != 0:
-                            self._callback_func(task, "FAILED")
-                        else:
-                            self._callback_func(task, "DONE")
+                # Process all completed tasks
+                for uid in completed_tasks:
+                    if uid in self._running_tasks:
+                        task_info = self._running_tasks[uid]
+                        task = self.tasks.get(uid)
+                        
+                        if task:
+                            # Determine task status and notify callback
+                            if task.get("canceled", False):
+                                self._callback_func(task, "CANCELED")
+                            elif task.get("exception") or task.get("exit_code", 0) != 0:
+                                self._callback_func(task, "FAILED")
+                            else:
+                                self._callback_func(task, "DONE")
 
                         # Free up slots
                         self._free_slots += task_info.ranks
+                        
+                        # Remove from running tasks
+                        self._running_tasks.pop(uid, None)
 
-                # Clean up completed tasks
-                for uid in completed_tasks:
-                    self._running_tasks.pop(uid, None)
-
-                await asyncio.sleep(0.1)
+                await asyncio.sleep(0.01)  # Short sleep for responsiveness
 
             except Exception as e:
                 logger.exception(f"Error in task monitoring: {e}")
                 await asyncio.sleep(1)
 
+    async def _check_task_completion(self, uid: str, task_info: TaskInfo, task: dict) -> bool:
+        """Check if task is complete and collect results."""
+        try:
+            if task_info.canceled:
+                # Clean up any pending executable results
+                if task_info.task_type.name.endswith("_EXECUTABLE"):
+                    self._result_collector.cleanup_executable_task(uid)
+                
+                task.update({
+                    "canceled": True,
+                    "exception": "Task was canceled",
+                    "exit_code": -1,
+                    "return_value": None
+                })
+                return True
+
+            # Handle executable tasks with direct queue consumption
+            if task_info.task_type.name.endswith("_EXECUTABLE"):
+                if self._result_collector.is_executable_task_complete(uid):
+                    completed_data = self._result_collector.get_completed_executable_task(uid)
+                    if completed_data:
+                        task.update(completed_data)
+                    return True
+                return False
+
+            # Handle function tasks using DDict (unchanged)
+            elif task_info.task_type.name.endswith("_FUNCTION"):
+                if self._is_function_task_complete(uid, task_info):
+                    await self._result_collector.collect_function_results(uid, task_info.ranks, task)
+                    return True
+                return False
+
+        except Exception as e:
+            logger.exception(f"Error checking task completion for {uid}: {e}")
+            self._set_task_failed(task, str(e))
+            return True
+
+        return False
+
+    def _is_function_task_complete(self, uid: str, task_info: TaskInfo) -> bool:
+        """Check if function task is complete by checking processes and DDict keys."""
+        # Check if processes are still running
+        if task_info.process and task_info.process.is_alive:
+            return False
+        elif task_info.group and not task_info.group.inactive_puids:
+            return False
+
+        # Check if all completion keys are present in DDict
+        completion_keys = [f"{uid}_rank_{rank}_completed" for rank in range(task_info.ranks)]
+        completed = sum(1 for key in completion_keys if key in self._ddict)
+        return completed >= len(completion_keys)
+
+    def _set_task_failed(self, task: dict, error_msg: str):
+        """Mark task as failed."""
+        task.update({
+            "exception": error_msg,
+            "exit_code": 1,
+            "stderr": task.get("stderr", "") + f"\nError: {error_msg}",
+            "return_value": None
+        })
+
     async def cancel_task(self, uid: str) -> bool:
-        """Cancel a specific running task."""
+        """Cancel a specific running task with proper cleanup."""
         self._ensure_initialized()
 
         task_info = self._running_tasks.get(uid)
@@ -1167,23 +1159,25 @@ class DragonExecutionBackend(BaseExecutionBackend):
             return False
 
         try:
-            # Attempt to terminate the processes first
             success = await self._cancel_task_by_info(task_info)
             
             if success:
-                # Only mark as canceled after successful termination
                 task_info.canceled = True
 
-                # Clean up DDict entries
-                self._result_collector._cleanup_ddict_entries(uid, task_info.ranks)
-
-                # Clean up any data references for this task
+                # Clean up based on task type
+                if task_info.task_type.name.endswith("_FUNCTION"):
+                    self._result_collector._cleanup_ddict_entries(uid, task_info.ranks)
+                elif task_info.task_type.name.endswith("_EXECUTABLE"):
+                    self._result_collector.cleanup_executable_task(uid)
+                
+                # Clean up data references
                 try:
                     task_result = self.tasks.get(uid, {}).get("return_value")
                     if isinstance(task_result, DataReference):
                         self._shared_memory.cleanup_reference(task_result)
                 except Exception as e:
                     logger.warning(f"Error cleaning up references for task {uid}: {e}")
+                    
             return success
 
         except Exception as e:
@@ -1192,22 +1186,30 @@ class DragonExecutionBackend(BaseExecutionBackend):
 
     async def _cancel_task_by_info(self, task_info: TaskInfo) -> bool:
         """Cancel task based on TaskInfo."""
-        proc, group = task_info.process, task_info.group
+        try:
+            if task_info.process:
+                # Single process cancellation
+                if task_info.process.is_alive:
+                    task_info.process.terminate()
+                    task_info.process.join(timeout=2.0)
+                    if task_info.process.is_alive:
+                        task_info.process.kill()
+                return True
 
-        if proc:
-            if proc.is_alive:
-                proc.terminate(); proc.join(2.0)
-                if proc.is_alive:
-                    proc.kill(); proc.join(1.0)
-            return True
+            elif task_info.group:
+                # Process group cancellation
+                if not task_info.group.inactive_puids:
+                    for puid in getattr(task_info.group, "puids", []):
+                        try:
+                            proc = Process(None, ident=puid)
+                            proc.terminate()
+                        except Exception as e:
+                            logger.warning(f"Failed to terminate process {puid}: {e}")
+                return True
 
-        if group and not group.inactive_puids:
-            try:
-                group.stop()
-                group.close()
-            except DragonUserCodeError:
-                pass
-            return True
+        except Exception as e:
+            logger.warning(f"Failed to cancel task: {e}")
+
         return False
 
     async def cancel_all_tasks(self) -> int:
@@ -1265,6 +1267,11 @@ class DragonExecutionBackend(BaseExecutionBackend):
         self._ensure_initialized()
         return self._ddict
 
+    def get_result_queue(self) -> Queue:
+        """Get the global result queue."""
+        self._ensure_initialized()
+        return self._result_queue
+
     # Data management methods delegated to SharedMemoryManager
     def store_task_data(self, key: str, data: Any) -> None:
         """Store data in shared DDict for cross-task access."""
@@ -1307,7 +1314,7 @@ class DragonExecutionBackend(BaseExecutionBackend):
         pass
 
     async def shutdown(self) -> None:
-        """Shutdown the backend and cleanup resources."""
+        """Shutdown with proper cleanup."""
         if not self._initialized:
             return
 
@@ -1315,12 +1322,32 @@ class DragonExecutionBackend(BaseExecutionBackend):
             self._shutdown_event.set()
             await self.cancel_all_tasks()
 
+            # Signal result collector to stop
+            try:
+                if self._result_queue:
+                    self._result_queue.put("SHUTDOWN", block=False)
+            except Exception as e:
+                logger.warning(f"Error signaling queue shutdown: {e}")
+
             # Stop monitoring task
             if self._monitor_task and not self._monitor_task.done():
                 try:
                     await asyncio.wait_for(self._monitor_task, timeout=5.0)
                 except asyncio.TimeoutError:
                     self._monitor_task.cancel()
+
+            # Clean up result queue
+            try:
+                if self._result_queue:
+                    while True:
+                        try:
+                            self._result_queue.get(block=False)
+                        except:
+                            break
+                    self._result_queue = None
+                logger.debug("Result queue cleaned up")
+            except Exception as e:
+                logger.warning(f"Error cleaning up result queue: {e}")
 
             # Clean up DDict
             try:
