@@ -3,7 +3,7 @@ import logging
 
 import numpy as np
 
-from radical.asyncflow import DaskExecutionBackend, WorkflowEngine
+from radical.asyncflow import WorkflowEngine, factory
 from radical.asyncflow.logging import init_default_logger
 
 logger = logging.getLogger(__name__)
@@ -11,7 +11,9 @@ init_default_logger(logging.INFO)
 
 
 async def main():
-    backend = await DaskExecutionBackend({"n_workers": 2, "threads_per_worker": 4})
+    backend = await factory.create_backend(
+        "dask", config={"n_workers": 2, "threads_per_worker": 4}
+    )
     flow = await WorkflowEngine.create(backend=backend)
 
     @flow.function_task

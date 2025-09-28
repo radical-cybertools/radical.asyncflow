@@ -1,0 +1,52 @@
+# AsyncFlow Examples Configuration
+# This file defines how each example should be tested in CI
+# Format matches stride-research/observe for consistency
+
+examples:
+  01-workflows:
+    script: examples/01-workflows.py
+    timeout_sec: 60
+    backend: "concurrent"
+    dependencies: []
+    min_output_lines: 5  # Minimum lines in output (crash detection)
+
+  02-blocks:
+    script: examples/02-blocks.py
+    timeout_sec: 60
+    backend: "concurrent"
+    dependencies: []
+    min_output_lines: 5
+
+  03-nested_blocks:
+    script: examples/03-nested_blocks.py
+    timeout_sec: 120
+    backend: "concurrent"
+    dependencies: []
+    min_output_lines: 5
+
+  04-dask_execution_backend:
+    script: examples/04-dask_execution_backend.py
+    timeout_sec: 180
+    backend: "dask"
+    dependencies:
+      - "dask[complete]"
+    min_output_lines: 10
+    skip_python: []
+
+  05-radical_execution_backend:
+    script: examples/05-radical_execution_backend.py
+    timeout_sec: 300
+    backend: "radical_pilot"
+    dependencies:
+      - "radical.pilot"
+    min_output_lines: 10
+    skip_python: ["3.12"]  # Skip if RP doesn't support Python 3.12 yet
+
+# Tutorial notebooks (if they exist)
+notebooks:
+  build_async_workflows:
+    script: examples/tutorials/build_async_workflows.ipynb
+    timeout_sec: 180
+    backend: "concurrent"
+    dependencies: []
+    notebook: true

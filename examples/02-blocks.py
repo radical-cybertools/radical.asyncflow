@@ -1,8 +1,7 @@
 import asyncio
 import logging
-from concurrent.futures import ThreadPoolExecutor
 
-from radical.asyncflow import ConcurrentExecutionBackend, WorkflowEngine
+from radical.asyncflow import WorkflowEngine, factory
 from radical.asyncflow.logging import init_default_logger
 
 logger = logging.getLogger(__name__)
@@ -11,8 +10,10 @@ logger = logging.getLogger(__name__)
 async def main():
     init_default_logger(logging.INFO)
 
-    # Create backend and workflow
-    backend = await ConcurrentExecutionBackend(ThreadPoolExecutor())
+    # Create backend and workflow using factory
+    backend = await factory.create_backend(
+        "concurrent", config={"max_workers": 4, "executor_type": "thread"}
+    )
     flow = await WorkflowEngine.create(backend=backend)
 
     @flow.function_task

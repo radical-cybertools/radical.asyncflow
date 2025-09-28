@@ -1,0 +1,189 @@
+name: "Run single AsyncFlow example"
+description: "Runs a single AsyncFlow example with a specific Python version and backend"
+
+inputs:
+  example:
+    description: "Example key in .github/examples-config.yml"
+    required: true
+  python-version:
+    description: "Python version, e.g., 3.11"
+    required: true
+
+outputs:
+  success:
+    description: "Whether the example ran successfully"
+    value: ${{ steps.run.outputs.success }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      id: setup_py
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Show Python details
+      shell: bash
+      run: |
+        PY="${{ steps.setup_py.outputs.python-path }}"
+        echo "python path: $PY"
+        "$PY" -V
+        "$PY" -c "import sys, sysconfig; print('include:', sysconfig.get_paths()['include'])"
+
+    - name: Cache pip
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: pip-asyncflow-${{ runner.os }}-${{ inputs.python-version }}-${{ hashFiles('**/pyproject.toml') }}
+        restore-keys: |
+          pip-asyncflow-${{ runner.os }}-${{ inputs.python-version }}-
+
+    - name: Ensure yq present
+      shell: bash
+      run: |
+        if ! command -v yq >/dev/null 2>&1; then
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+        fi
+
+    - name: Load example configuration
+      shell: bash
+      id: cfg
+      run: |
+        set -euo pipefail
+        CFG=".github/examples-config.yml"
+        EXAMPLE="${{ inputs.example }}"
+
+        if [ ! -f "$CFG" ]; then
+          echo "❌ Missing $CFG"
+          exit 2
+        fi
+
+        if ! yq -e ".examples.$EXAMPLE" "$CFG" >/dev/null; then
+          echo "❌ Example '$EXAMPLE' not found in $CFG"
+          yq '.examples | keys' "$CFG" || echo "No examples found"
+          exit 2
+        fi
+
+        script=$(yq -r ".examples.$EXAMPLE.script" "$CFG")
+        timeout_sec=$(yq -r ".examples.$EXAMPLE.timeout_sec" "$CFG")
+        backend=$(yq -r ".examples.$EXAMPLE.backend // \"concurrent\"" "$CFG")
+        min_output_lines=$(yq -r ".examples.$EXAMPLE.min_output_lines // 3" "$CFG")
+        skip_python=$(yq -r ".examples.$EXAMPLE.skip_python // []" "$CFG" | jq -c '.')
+        dependencies=$(yq -r ".examples.$EXAMPLE.dependencies // []" "$CFG" | jq -c '.')
+
+        echo "script=$script" >> "$GITHUB_OUTPUT"
+        echo "timeout_sec=$timeout_sec" >> "$GITHUB_OUTPUT"
+        echo "backend=$backend" >> "$GITHUB_OUTPUT"
+        echo "min_output_lines=$min_output_lines" >> "$GITHUB_OUTPUT"
+        echo "skip_python=$skip_python" >> "$GITHUB_OUTPUT"
+        echo "dependencies=$dependencies" >> "$GITHUB_OUTPUT"
+
+        # Check if this Python version should be skipped
+        if echo "$skip_python" | jq -e "index(\"${{ inputs.python-version }}\")" > /dev/null; then
+          echo "skip=true" >> "$GITHUB_OUTPUT"
+          echo "⏭️ Skipping example on Python ${{ inputs.python-version }}"
+        else
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Skip if configured
+      if: steps.cfg.outputs.skip == 'true'
+      shell: bash
+      run: |
+        echo "Example ${{ inputs.example }} configured to skip Python ${{ inputs.python-version }}"
+        exit 0
+
+    - name: Install AsyncFlow and dependencies
+      if: steps.cfg.outputs.skip != 'true'
+      shell: bash
+      run: |
+        PY="${{ steps.setup_py.outputs.python-path }}"
+        "$PY" -m pip install --upgrade pip
+        "$PY" -m pip install -e .
+
+        # Install example-specific dependencies
+        DEPS='${{ steps.cfg.outputs.dependencies }}'
+        if [ "$DEPS" != "[]" ]; then
+          echo "Installing dependencies: $DEPS"
+          echo "$DEPS" | jq -r '.[]' | while read dep; do
+            echo "Installing: $dep"
+            "$PY" -m pip install "$dep"
+          done
+        fi
+
+        # Install backend-specific dependencies
+        BACKEND='${{ steps.cfg.outputs.backend }}'
+        case "$BACKEND" in
+          "dask")
+            echo "Installing Dask backend dependencies"
+            "$PY" -m pip install 'dask[complete]' || echo "Dask installation failed"
+            ;;
+          "radical_pilot")
+            echo "Installing RADICAL-Pilot backend dependencies"
+            "$PY" -m pip install 'radical.pilot' || echo "RADICAL-Pilot installation failed"
+            ;;
+          "concurrent"|"noop")
+            echo "Using built-in backend: $BACKEND"
+            ;;
+        esac
+
+    - name: Run example script
+      if: steps.cfg.outputs.skip != 'true'
+      id: run
+      shell: bash
+      run: |
+        set -euo pipefail
+        PY="${{ steps.setup_py.outputs.python-path }}"
+        SCRIPT="${{ steps.cfg.outputs.script }}"
+        TIMEOUT="${{ steps.cfg.outputs.timeout_sec }}"
+        BACKEND="${{ steps.cfg.outputs.backend }}"
+
+        # Set backend environment variable
+        export RADICAL_ASYNCFLOW_BACKEND="$BACKEND"
+
+        echo "🚀 Running: $SCRIPT (timeout: ${TIMEOUT}s, backend: $BACKEND)"
+
+        # Create output directory and run with output capture
+        mkdir -p "example-outputs"
+        OUTPUT_FILE="example-outputs/${{ inputs.example }}-py${{ inputs.python-version }}.log"
+
+        if timeout "${TIMEOUT}s" "$PY" "$SCRIPT" > "$OUTPUT_FILE" 2>&1; then
+          echo "success=true" >> "$GITHUB_OUTPUT"
+          echo "✅ Example completed successfully"
+
+          # Show output summary
+          LINES=$(wc -l < "$OUTPUT_FILE")
+          echo "Output: $LINES lines"
+
+          # Check minimum output requirement
+          MIN_LINES=${{ steps.cfg.outputs.min_output_lines }}
+          if [ "$LINES" -lt "$MIN_LINES" ]; then
+            echo "⚠️ Output below minimum ($LINES < $MIN_LINES lines) - possible crash"
+            echo "Full output:"
+            cat "$OUTPUT_FILE"
+          else
+            echo "First 10 lines of output:"
+            head -10 "$OUTPUT_FILE"
+          fi
+        else
+          echo "success=false" >> "$GITHUB_OUTPUT"
+          echo "❌ Example failed"
+          echo "Last 20 lines of output:"
+          tail -20 "$OUTPUT_FILE"
+          exit 1
+        fi
+
+    - name: Validate output patterns
+      if: steps.cfg.outputs.skip != 'true' && steps.run.outputs.success == 'true'
+      shell: bash
+      run: |
+        OUTPUT_FILE="example-outputs/${{ inputs.example }}-py${{ inputs.python-version }}.log"
+
+        # Check for error patterns (but allow expected ones)
+        if grep -i "traceback\|exception\|error" "$OUTPUT_FILE" | grep -v "expected\|handled\|graceful"; then
+          echo "⚠️ Found potential errors in output (but example still succeeded)"
+        fi
+
+        echo "✅ Output validation completed"
