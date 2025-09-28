@@ -7,7 +7,7 @@ This guide will help you install AsyncFlow in a clean Python environment.
 
 ## Prerequisites
 
-* Python ≥ **3.8** (recommended: 3.11 or newer)
+* Python ≥ **3.9** (recommended: 3.11 or newer)
 * `pip` ≥ 22.0
 * Optional: `conda` ≥ 4.10 for Conda environments
 
@@ -17,6 +17,39 @@ Make sure Python is installed on your system:
 python --version
 pip --version
 ```
+
+---
+
+## Installation Options
+
+AsyncFlow supports different installation modes depending on your execution backend needs:
+
+### Core Installation (Local Development)
+```bash
+pip install radical.asyncflow
+```
+
+This provides:
+- **`noop`** backend for testing and dry runs
+- **`concurrent`** backend for local parallel execution
+
+### HPC Execution Backends
+```bash
+# All HPC backends
+pip install 'radical.asyncflow[hpc]'
+
+# Specific backends
+pip install 'radical.asyncflow[dask]'          # Dask distributed computing
+pip install 'radical.asyncflow[radicalpilot]'  # RADICAL-Pilot for HPC
+```
+
+### Development Installation
+```bash
+pip install 'radical.asyncflow[dev]'  # Testing and development tools
+```
+
+!!! tip "Backend Discovery"
+    AsyncFlow automatically discovers available backends at runtime. Missing backends show helpful installation hints when requested.
 
 ---
 
