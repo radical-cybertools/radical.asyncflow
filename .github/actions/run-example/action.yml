@@ -130,12 +130,12 @@ runs:
         BACKEND='${{ steps.cfg.outputs.backend }}'
         case "$BACKEND" in
           "dask")
-            echo "Installing Dask backend dependencies"
-            "$PY" -m pip install 'dask[complete]' || echo "Dask installation failed"
+            echo "Installing Dask backend dependencies via AsyncFlow optional dependencies"
+            "$PY" -m pip install -e '.[dask]' || echo "Dask backend installation failed"
             ;;
           "radical_pilot")
-            echo "Installing RADICAL-Pilot backend dependencies"
-            "$PY" -m pip install 'radical.pilot' || echo "RADICAL-Pilot installation failed"
+            echo "Installing RADICAL-Pilot backend dependencies via AsyncFlow optional dependencies"
+            "$PY" -m pip install -e '.[radicalpilot]' || echo "RADICAL-Pilot backend installation failed"
             ;;
           "concurrent"|"noop")
             echo "Using built-in backend: $BACKEND"

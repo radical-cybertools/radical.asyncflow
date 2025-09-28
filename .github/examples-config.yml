@@ -28,8 +28,7 @@ examples:
     script: examples/04-dask_execution_backend.py
     timeout_sec: 180
     backend: "dask"
-    dependencies:
-      - "dask[complete]"
+    dependencies: []  # Installed via AsyncFlow optional dependencies
     min_output_lines: 10
     skip_python: []
 
@@ -37,8 +36,7 @@ examples:
     script: examples/05-radical_execution_backend.py
     timeout_sec: 300
     backend: "radical_pilot"
-    dependencies:
-      - "radical.pilot"
+    dependencies: []  # Installed via AsyncFlow optional dependencies
     min_output_lines: 10
     # Skip if RP doesn't support Python 3.12 yet
     skip_python: ["3.12"]
