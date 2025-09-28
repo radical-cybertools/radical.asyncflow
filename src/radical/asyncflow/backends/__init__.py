@@ -1,27 +1,24 @@
-"""Backend subsystem for AsyncFlow using Rhapsody backends.
+"""Backend subsystem for AsyncFlow with plugin-based architecture.
 
-This module provides execution backends from the Rhapsody package for running scientific
-workflows on various computing infrastructures.
+This module provides a plugin-based backend system that supports both local backends
+(for development and testing) and optional external backends (for HPC and scale-out
+execution) without requiring hard dependencies.
 """
 
 from __future__ import annotations
 
-from rhapsody.backends.execution import ConcurrentExecutionBackend, NoopExecutionBackend
+from .execution import ConcurrentExecutionBackend, NoopExecutionBackend
 
-from ..utils import register_optional_backends
-from .base import BaseExecutionBackend, Session
+# Import core components
+from .execution.base import BaseExecutionBackend, Session
+from .factory import factory
+from .registry import registry
 
 __all__ = [
     "BaseExecutionBackend",
     "Session",
     "NoopExecutionBackend",
     "ConcurrentExecutionBackend",
+    "factory",
+    "registry",
 ]
-
-# Register optional backends from rhapsody
-register_optional_backends(
-    globals(),
-    __all__,
-    "rhapsody.backends.execution",
-    ["DaskExecutionBackend", "RadicalExecutionBackend"],
-)
