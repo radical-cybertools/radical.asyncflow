@@ -75,12 +75,32 @@ class BackendRegistry:
             # Validate that it's a proper backend
             from radical.asyncflow.backends.execution.base import BaseExecutionBackend
 
-            # Check if it's a BaseExecutionBackend subclass
-            if not issubclass(backend_class, BaseExecutionBackend):
-                error_msg = f"Class {class_name} is not a BaseExecutionBackend subclass"
-                self._failed_backends[name] = error_msg
-                logger.error(f"Backend '{name}' validation failed: {error_msg}")
-                return None
+            # Check if it's a BaseExecutionBackend subclass (for internal backends)
+            # or implements the required interface (for external backends like Rhapsody)
+            if issubclass(backend_class, BaseExecutionBackend):
+                # Internal backend - passes strict inheritance check
+                pass
+            else:
+                # External backend - validate using duck-typing
+                required_methods = ["submit_tasks", "shutdown", "state"]
+                missing_methods = []
+
+                for method in required_methods:
+                    if not hasattr(backend_class, method):
+                        missing_methods.append(method)
+                    elif not callable(getattr(backend_class, method)):
+                        missing_methods.append(f"{method} (not callable)")
+
+                if missing_methods:
+                    error_msg = (
+                        f"Backend '{class_name}' missing required methods: "
+                        f"{', '.join(missing_methods)}"
+                    )
+                    self._failed_backends[name] = error_msg
+                    logger.error(f"Backend '{name}' validation failed: {error_msg}")
+                    return None
+
+                logger.debug(f"External backend '{name}' passed duck-typing validation")
 
             # Cache successful load
             self._backends[name] = backend_class

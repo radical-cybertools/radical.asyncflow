@@ -28,7 +28,8 @@ examples:
     script: examples/04-dask_execution_backend.py
     timeout_sec: 180
     backend: "dask"
-    dependencies: []  # Installed via AsyncFlow optional dependencies
+    dependencies:
+      - "numpy"  # Required by the example
     min_output_lines: 10
     skip_python: []
 
@@ -38,8 +39,8 @@ examples:
     backend: "radical_pilot"
     dependencies: []  # Installed via AsyncFlow optional dependencies
     min_output_lines: 10
-    # Skip if RP doesn't support Python 3.12 yet
-    skip_python: ["3.12"]
+    # Skip if RP doesn't support Python 3.12+ yet (3.13 has multiprocessing issues)
+    skip_python: ["3.12", "3.13"]
 
 # Tutorial notebooks (if they exist)
 notebooks:
