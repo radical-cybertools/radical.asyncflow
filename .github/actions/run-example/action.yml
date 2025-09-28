@@ -70,8 +70,21 @@ runs:
         timeout_sec=$(yq -r ".examples.$EXAMPLE.timeout_sec" "$CFG")
         backend=$(yq -r ".examples.$EXAMPLE.backend // \"concurrent\"" "$CFG")
         min_output_lines=$(yq -r ".examples.$EXAMPLE.min_output_lines // 3" "$CFG")
-        skip_python=$(yq -r ".examples.$EXAMPLE.skip_python // []" "$CFG" | jq -c '.')
-        dependencies=$(yq -r ".examples.$EXAMPLE.dependencies // []" "$CFG" | jq -c '.')
+
+        # Handle arrays properly - return empty array if null
+        skip_python_raw=$(yq -r ".examples.$EXAMPLE.skip_python" "$CFG")
+        if [ "$skip_python_raw" = "null" ]; then
+          skip_python="[]"
+        else
+          skip_python=$(yq -o json ".examples.$EXAMPLE.skip_python" "$CFG" | jq -c '.')
+        fi
+
+        dependencies_raw=$(yq -r ".examples.$EXAMPLE.dependencies" "$CFG")
+        if [ "$dependencies_raw" = "null" ]; then
+          dependencies="[]"
+        else
+          dependencies=$(yq -o json ".examples.$EXAMPLE.dependencies" "$CFG" | jq -c '.')
+        fi
 
         echo "script=$script" >> "$GITHUB_OUTPUT"
         echo "timeout_sec=$timeout_sec" >> "$GITHUB_OUTPUT"

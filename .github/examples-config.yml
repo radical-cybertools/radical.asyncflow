@@ -40,7 +40,8 @@ examples:
     dependencies:
       - "radical.pilot"
     min_output_lines: 10
-    skip_python: ["3.12"]  # Skip if RP doesn't support Python 3.12 yet
+    # Skip if RP doesn't support Python 3.12 yet
+    skip_python: ["3.12"]
 
 # Tutorial notebooks (if they exist)
 notebooks:
