@@ -75,7 +75,7 @@ class TestBackendRegistry:
         for backend_name in expected_backends:
             assert backend_name in registry._backend_specs
 
-    @patch("radical.asyncflow.backends.registry.importlib.import_module")
+    @patch("importlib.import_module")
     def test_successful_backend_loading(self, mock_import_module):
         """Test successful loading of a valid backend."""
         # Arrange
@@ -96,7 +96,7 @@ class TestBackendRegistry:
         assert "test_valid" not in registry._failed_backends
         mock_import_module.assert_called_once_with("test.module")
 
-    @patch("radical.asyncflow.backends.registry.importlib.import_module")
+    @patch("importlib.import_module")
     def test_backend_loading_import_error(self, mock_import_module):
         """Test handling of import errors during backend loading."""
         # Arrange
@@ -114,7 +114,7 @@ class TestBackendRegistry:
         assert "Import error" in registry._failed_backends["test_missing"]
         assert "test_missing" not in registry._backends
 
-    @patch("radical.asyncflow.backends.registry.importlib.import_module")
+    @patch("importlib.import_module")
     def test_backend_loading_attribute_error(self, mock_import_module):
         """Test handling of missing class in module."""
         # Arrange
@@ -134,7 +134,7 @@ class TestBackendRegistry:
         assert "test_missing_class" in registry._failed_backends
         assert "Class not found" in registry._failed_backends["test_missing_class"]
 
-    @patch("radical.asyncflow.backends.registry.importlib.import_module")
+    @patch("importlib.import_module")
     def test_invalid_backend_class_validation(self, mock_import_module):
         """Test validation that backend class inherits from BaseExecutionBackend."""
         # Arrange
@@ -299,7 +299,7 @@ class TestBackendRegistry:
         assert "test_spec" not in registry._backends
         assert "test_spec" not in registry._failed_backends
 
-    @patch("radical.asyncflow.backends.registry.importlib.import_module")
+    @patch("importlib.import_module")
     def test_unexpected_error_during_loading(self, mock_import_module):
         """Test handling of unexpected errors during backend loading."""
         # Arrange

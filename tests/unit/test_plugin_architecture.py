@@ -79,7 +79,7 @@ class TestPluginArchitecture:
         unknown_hint = factory._suggest_installation("unknown_backend")
         assert "radical.asyncflow[hpc]" in unknown_hint
 
-    @patch("radical.asyncflow.backends.registry.importlib.import_module")
+    @patch("importlib.import_module")
     def test_backend_validation_failure_handling(self, mock_import):
         """Test handling of backends that load but fail validation."""
         # Simulate rhapsody backend that loads but has wrong base class
