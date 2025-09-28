@@ -23,15 +23,14 @@ try:
     from dragon.native.queue import Queue
     from dragon.data.ddict.ddict import DDict
     from dragon.native.machine import System
-    from dragon.infrastructure.facts import PMIBackend
     from dragon.managed_memory import MemoryPool
+    from dragon.native.process_group import DragonUserCodeError
 except ImportError:  # pragma: no cover - environment without Dragon
     dragon = None
     Process = None
     ProcessTemplate = None
     ProcessGroup = None
     Popen = None
-    PMIBackend = None
     Queue = None
     DDict = None
     System = None
@@ -407,9 +406,8 @@ class ResultCollector:
         received = self.executable_completion_counts.get(task_uid, 0)
         return received >= expected
 
-    # Keep existing function result methods unchanged
     async def collect_function_results(self, uid: str, ranks: int, task: dict):
-        """Collect function results from DDict (unchanged for functions)."""
+        """Collect function results from DDict."""
         completion_keys = [f"{uid}_rank_{rank}_completed" for rank in range(ranks)]
         await self._wait_for_completion_keys(completion_keys)
 
@@ -567,7 +565,17 @@ class TaskLauncher:
         backend_kwargs = task.get('task_backend_specific_kwargs', {})
         ranks = int(backend_kwargs.get("ranks", 2))
 
-        group = ProcessGroup(restart=False, policy=None)
+        # FIXME: pass Policy and other attrs to Process/Group init
+        if task_type.name.startswith("MPI_"):
+            mpi = backend_kwargs.get("pmi", None)
+            if mpi is None:
+                raise ValueError("Missing required 'pmi' value in backend_kwargs.")
+
+            group = ProcessGroup(restart=False, policy=None, pmi=mpi)
+            self.logger.debug(f"Started MPI group task {uid} ({mpi}) with {ranks} ranks")
+        else:
+            group = ProcessGroup(restart=False, policy=None)
+            self.logger.debug(f"Started group task {uid} with {ranks} ranks")
 
         if task_type.name.endswith("_FUNCTION"):
             await self._add_function_processes_to_group(group, task, ranks)
@@ -1093,10 +1101,7 @@ class DragonExecutionBackend(BaseExecutionBackend):
         """Check if task is complete and collect results."""
         try:
             if task_info.canceled:
-                # Clean up any pending executable results
-                if task_info.task_type.name.endswith("_EXECUTABLE"):
-                    self._result_collector.cleanup_executable_task(uid)
-                
+
                 task.update({
                     "canceled": True,
                     "exception": "Task was canceled",
@@ -1114,7 +1119,7 @@ class DragonExecutionBackend(BaseExecutionBackend):
                     return True
                 return False
 
-            # Handle function tasks using DDict (unchanged)
+            # Handle function tasks using DDict
             elif task_info.task_type.name.endswith("_FUNCTION"):
                 if self._is_function_task_complete(uid, task_info):
                     await self._result_collector.collect_function_results(uid, task_info.ranks, task)
@@ -1186,30 +1191,22 @@ class DragonExecutionBackend(BaseExecutionBackend):
 
     async def _cancel_task_by_info(self, task_info: TaskInfo) -> bool:
         """Cancel task based on TaskInfo."""
-        try:
-            if task_info.process:
-                # Single process cancellation
-                if task_info.process.is_alive:
-                    task_info.process.terminate()
-                    task_info.process.join(timeout=2.0)
-                    if task_info.process.is_alive:
-                        task_info.process.kill()
-                return True
+        proc, group = task_info.process, task_info.group
 
-            elif task_info.group:
-                # Process group cancellation
-                if not task_info.group.inactive_puids:
-                    for puid in getattr(task_info.group, "puids", []):
-                        try:
-                            proc = Process(None, ident=puid)
-                            proc.terminate()
-                        except Exception as e:
-                            logger.warning(f"Failed to terminate process {puid}: {e}")
-                return True
+        if proc:
+            if proc.is_alive:
+                proc.terminate(); proc.join(2.0)
+                if proc.is_alive:
+                    proc.kill(); proc.join(1.0)
+            return True
 
-        except Exception as e:
-            logger.warning(f"Failed to cancel task: {e}")
-
+        if group and not group.inactive_puids:
+            try:
+                group.stop()
+                group.close()
+            except DragonUserCodeError:
+                pass
+            return True
         return False
 
     async def cancel_all_tasks(self) -> int:
