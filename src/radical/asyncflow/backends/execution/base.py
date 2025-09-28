@@ -8,6 +8,10 @@ from __future__ import annotations
 
 import os
 from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ...constants import StateMapper
 
 
 class BaseExecutionBackend(ABC):
@@ -65,7 +69,7 @@ class BaseExecutionBackend(ABC):
         """
 
     @abstractmethod
-    def get_task_states_map(self):
+    def get_task_states_map(self) -> StateMapper:
         """Retrieve a mapping of task IDs to their current states.
 
         Returns:
