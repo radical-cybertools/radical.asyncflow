@@ -4,8 +4,9 @@ import asyncio
 
 import pytest
 import pytest_asyncio
+from rhapsody.backends.execution.dask_parallel import DaskExecutionBackend
 
-from radical.asyncflow import DaskExecutionBackend, WorkflowEngine
+from radical.asyncflow import WorkflowEngine
 
 
 @pytest_asyncio.fixture(scope="function")
