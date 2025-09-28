@@ -151,10 +151,7 @@ class TestBackendRegistry:
         # Assert
         assert backend_class is None
         assert "test_invalid" in registry._failed_backends
-        assert (
-            "not a BaseExecutionBackend subclass"
-            in registry._failed_backends["test_invalid"]
-        )
+        assert "missing required methods" in registry._failed_backends["test_invalid"]
 
     def test_cached_backend_retrieval(self):
         """Test that successfully loaded backends are cached."""

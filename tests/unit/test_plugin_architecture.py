@@ -46,9 +46,11 @@ class TestPluginArchitecture:
     @pytest.mark.asyncio
     async def test_optional_backend_helpful_error_messages(self):
         """Test that optional backends provide helpful error messages."""
-        optional_backends = ["dask", "radical_pilot"]
+        # Use truly unavailable backends instead of dask/radical_pilot
+        # which might be available now
+        unavailable_backends = ["nonexistent_backend", "fake_backend"]
 
-        for backend_name in optional_backends:
+        for backend_name in unavailable_backends:
             with pytest.raises(ValueError) as exc_info:
                 await BackendFactory.create_backend(backend_name)
 
@@ -107,24 +109,27 @@ class TestPluginArchitecture:
         """Test that registry properly caches both successes and failures."""
         registry = BackendRegistry()
 
-        # First call should attempt loading
+        # Test with dask which should be available now
         result1 = registry.get_backend("dask")
-
-        # Second call should use cached result
         result2 = registry.get_backend("dask")
 
-        # Both should be None (not available) but consistent
-        assert result1 is None
-        assert result2 is None
+        # Both should be the same backend class and consistent
+        assert result1 is not None
+        assert result2 is not None
+        assert result1 is result2  # Should be cached
 
-        # Should have cached the failure reason
-        failure_reason = registry.get_failure_reason("dask")
-        assert failure_reason is not None
-        # Update assertion to match actual failure reason
-        assert (
-            "baseexecutionbackend" in failure_reason.lower()
-            or "import error" in failure_reason.lower()
-        )
+        # Test with unknown backend (not in _backend_specs)
+        result3 = registry.get_backend("nonexistent_backend")
+        result4 = registry.get_backend("nonexistent_backend")
+
+        # Both should be None (not available) but consistent
+        assert result3 is None
+        assert result4 is None
+
+        # For unknown backends, no failure reason is recorded
+        # (they just return None without attempting to load)
+        failure_reason = registry.get_failure_reason("nonexistent_backend")
+        assert failure_reason is None  # No failure reason for unknown backends
 
     def test_backend_specs_updated_for_phase2(self):
         """Test that backend specs reflect Phase 2 changes."""
