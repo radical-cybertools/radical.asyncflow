@@ -23,7 +23,6 @@ try:
     from dragon.native.queue import Queue
     from dragon.data.ddict.ddict import DDict
     from dragon.native.machine import System
-    from dragon.managed_memory import MemoryPool
     from dragon.native.process_group import DragonUserCodeError
 except ImportError:  # pragma: no cover - environment without Dragon
     dragon = None
@@ -34,11 +33,13 @@ except ImportError:  # pragma: no cover - environment without Dragon
     Queue = None
     DDict = None
     System = None
-    MemoryPool = None
 
 logger = logging.getLogger(__name__)
 
-SHARED_MEMORY_THRESHOLD = 1024 * 1024  # 1MB
+# Default threshold for storing return values as DataReferences (1MB)
+DRAGON_DEFAULT_REF_THRESHOLD = int(
+    os.environ.get("DRAGON_DEFAULT_REF_THRESHOLD", 1024 * 1024)
+)
 
 class TaskType(Enum):
     """Enumeration of supported task types."""
@@ -81,12 +82,12 @@ class ExecutableTaskCompletion:
         }
 
 class DataReference:
-    """Reference to data stored in shared memory."""
+    """Reference to data stored in Cross Node Distributed Dict."""
 
-    def __init__(self, ref_id: str, backend_id: str):
+    def __init__(self, ref_id: str, backend_id: str, ddict: DDict):
         self._ref_id = ref_id
         self._backend_id = backend_id
-        self._is_resolved = False
+        self._ddict = ddict
 
     @property
     def ref_id(self) -> str:
@@ -96,44 +97,37 @@ class DataReference:
     def backend_id(self) -> str:
         return self._backend_id
 
+    def resolve(self) -> Any:
+        """Resolve reference to actual data. User controls when this happens."""
+        data_key = f"data_{self._ref_id}"
+        
+        if data_key not in self._ddict:
+            raise KeyError(f"Reference data not found: {self._ref_id}")
+            
+        return self._ddict[data_key]
+
     def __repr__(self) -> str:
         return f"DataReference(ref_id='{self._ref_id}', backend_id='{self._backend_id}')"
 
 class SharedMemoryManager:
-    """Manages data in shared memory with fallback to DDict."""
+    """Manages data storage using DDict exclusively."""
 
-    def __init__(self, ddict: DDict, system: System, logger: logging.Logger):
+    def __init__(self, ddict: DDict, system: System, logger: logging.Logger, reference_threshold: int = DRAGON_DEFAULT_REF_THRESHOLD):
         self.ddict = ddict
         self.system = system
         self.logger = logger
-        self.memory_pools: Dict[int, MemoryPool] = {}
-        self.managed_allocations: Dict[str, Any] = {}
         self.backend_id = f"dragon_{uuid.uuid4().hex[:8]}"
+        self.reference_threshold = reference_threshold
 
     async def initialize(self):
-        """Initialize memory pools per node."""
-        try:
-            for node_id in range(self.system.nnodes):
-                pool_size = int(os.environ.get('DRAGON_MEMORY_POOL_SIZE', 2 * 1024**3))
-                self.memory_pools[node_id] = MemoryPool(
-                    size=pool_size,
-                    fname=f"dragon_pool_{node_id}_{self.backend_id}",
-                    uid=node_id + hash(self.backend_id) % 10000,
-                )
-                self.logger.debug(f"Initialized memory pool on node {node_id}")
-        except Exception as e:
-            self.logger.warning(f"Failed to initialize memory pools: {e}")
-            self.memory_pools.clear()
+        """Initialize the storage manager."""
+        self.logger.debug(f"SharedMemoryManager initialized with DDict-only storage (threshold: {self.reference_threshold} bytes)")
 
-    def should_use_shared_memory(self, data: Any) -> bool:
-        """Determine if data should be stored in shared memory based
-           on the size thresold of SHARED_MEMORY_THRESHOLD."""
-        if not self.memory_pools:
-            return False
-
+    def should_use_reference(self, data: Any) -> bool:
+        """Determine if data should be stored as reference based on size threshold."""
         try:
             estimated_size = self._estimate_size(data)
-            return estimated_size >= SHARED_MEMORY_THRESHOLD
+            return estimated_size >= self.reference_threshold
         except Exception:
             return False
 
@@ -150,86 +144,25 @@ class SharedMemoryManager:
             return 1000
 
     async def store_data(self, data: Any, node_id: int = 0) -> DataReference:
-        """Store data and return reference."""
+        """Store data in DDict and return reference."""
         ref_id = f"ref_{uuid.uuid4().hex}"
-
-        if self.should_use_shared_memory(data):
-            try:
-                await self._store_in_shared_memory(ref_id, data, node_id)
-                self.logger.debug(f"Stored data {ref_id} in shared memory")
-            except Exception as e:
-                self.logger.warning(f"Shared memory storage failed for {ref_id}: {e}, using DDict")
-                self._store_in_ddict(ref_id, data)
-        else:
+        
+        try:
             self._store_in_ddict(ref_id, data)
-
-        return DataReference(ref_id, self.backend_id)
-
-    async def _store_in_shared_memory(self, ref_id: str, data: Any, node_id: int):
-        """Store data in managed memory and record metadata in DDict."""
-        if isinstance(data, (bytes, bytearray, memoryview)):
-            payload = data
-        elif hasattr(data, "tobytes"):  # NumPy, torch, etc.
-            payload = data.tobytes()
-        else:
-            payload = self._serialize(data)
-
-        pool = self.memory_pools[node_id]
-        allocation = pool.alloc(len(payload))
-
-        mem_view = allocation.get_memview()
-        mem_view[:len(payload)] = payload
-
-        self.managed_allocations[ref_id] = allocation
-        self.ddict.pput(
-            f"meta_{ref_id}",
-            {
-                "node": node_id,
-                "size": len(payload),
-                "backend_id": self.backend_id,
-                "in_shared_memory": True,
-            },
-        )
+            self.logger.debug(f"Stored data {ref_id} in DDict")
+        except Exception as e:
+            self.logger.error(f"Failed to store data {ref_id}: {e}")
+            raise
+            
+        return DataReference(ref_id, self.backend_id, self.ddict)
 
     def _store_in_ddict(self, ref_id: str, data: Any):
         """Store data directly in DDict."""
         self.ddict.pput(f"data_{ref_id}", data)
         self.ddict.pput(f"meta_{ref_id}", {
             'backend_id': self.backend_id,
-            'in_shared_memory': False
+            'stored_at': time.time()
         })
-
-    async def resolve_reference(self, ref: DataReference) -> Any:
-        """Resolve reference to actual data."""
-        if ref.backend_id != self.backend_id:
-            raise ValueError(f"Cannot resolve reference from different backend: {ref.backend_id}")
-
-        meta_key = f"meta_{ref.ref_id}"
-        if meta_key not in self.ddict:
-            raise KeyError(f"Reference metadata not found: {ref.ref_id}")
-
-        metadata = self.ddict[meta_key]
-
-        if metadata['in_shared_memory']:
-            return await self._retrieve_from_shared_memory(ref.ref_id, metadata)
-        else:
-            data_key = f"data_{ref.ref_id}"
-            if data_key not in self.ddict:
-                raise KeyError(f"Reference data not found: {ref.ref_id}")
-            return self.ddict[data_key]
-
-    async def _retrieve_from_shared_memory(self, ref_id: str, metadata: dict) -> Any:
-        """Retrieve data from shared memory."""
-        allocation = self.managed_allocations.get(ref_id)
-
-        if not allocation:
-            raise KeyError(f"Memory allocation not found for reference {ref_id}")
-
-        size = metadata['size']
-        mem_view = allocation.get_memview()
-        serialized_data = bytes(mem_view[:size])
-
-        return self._deserialize(serialized_data)
 
     def cleanup_reference(self, ref: DataReference):
         """Clean up reference data."""
@@ -237,16 +170,14 @@ class SharedMemoryManager:
             meta_key = f"meta_{ref.ref_id}"
             data_key = f"data_{ref.ref_id}"
 
-            if meta_key in self.ddict:
-                del self.ddict[meta_key]
-            if data_key in self.ddict:
-                del self.ddict[data_key]
-            if ref.ref_id in self.managed_allocations:
-                del self.managed_allocations[ref.ref_id]
+            for key in [meta_key, data_key]:
+                if key in self.ddict:
+                    del self.ddict[key]
+                    
         except Exception as e:
             self.logger.warning(f"Error cleaning up reference {ref.ref_id}: {e}")
 
-    # DDict operations
+    # DDict operations for direct task data sharing
     def store_task_data(self, key: str, data: Any) -> None:
         """Store data in shared DDict."""
         self.ddict.pput(key, data)
@@ -277,24 +208,6 @@ class SharedMemoryManager:
                 self.ddict.clear()
         except Exception as e:
             self.logger.warning(f"Error clearing DDict data: {e}")
-
-    def _serialize(self, data: Any) -> bytes:
-        """Serialize data using best available method."""
-        for serializer in [cloudpickle.dumps, dill.dumps, pickle.dumps]:
-            try:
-                return serializer(data)
-            except Exception:
-                continue
-        raise RuntimeError("Failed to serialize data")
-
-    def _deserialize(self, data: bytes) -> Any:
-        """Deserialize data using best available method."""
-        for deserializer in [cloudpickle.loads, dill.loads, pickle.loads]:
-            try:
-                return deserializer(data)
-            except Exception:
-                continue
-        raise RuntimeError("Failed to deserialize data")
 
 class ResultCollector:
     """Direct queue consumption for executables."""
@@ -424,7 +337,7 @@ class ResultCollector:
             stderr_parts[rank] = result_data.get('stderr', '')
 
             if result_data.get('success', False) and result_data.get('return_value') is not None:
-                referenced_value = await self._store_return_value_in_shared_memory(
+                referenced_value = await self._store_return_value(
                     result_data['return_value'], uid, rank
                 )
                 return_values.append(referenced_value)
@@ -434,9 +347,9 @@ class ResultCollector:
         self._set_function_task_results(task, results, stdout_parts, stderr_parts, return_values, ranks)
         self._cleanup_ddict_entries(uid, ranks)
 
-    async def _store_return_value_in_shared_memory(self, value: Any, uid: str, rank: int) -> Any:
+    async def _store_return_value(self, value: Any, uid: str, rank: int) -> Any:
         """Storage of return value using shared memory."""
-        if self.shared_memory.should_use_shared_memory(value):
+        if self.shared_memory.should_use_reference(value):
             try:
                 ref = await self.shared_memory.store_data(value, node_id=0)
                 self.logger.debug(f"Created reference for {uid}_rank_{rank} result")
@@ -867,7 +780,7 @@ class DragonExecutionBackend(BaseExecutionBackend):
     """
 
     @typeguard.typechecked
-    def __init__(self, resources: Optional[dict] = None):
+    def __init__(self, resources: Optional[dict] = None, ddict: Optional[DDict] = None):
         if dragon is None:
             raise ImportError("Dragon is required for DragonExecutionBackend.")
         if DDict is None:
@@ -885,12 +798,15 @@ class DragonExecutionBackend(BaseExecutionBackend):
         self._slots: int = int(self._resources.get("slots", mp.cpu_count() or 1))
         self._free_slots: int = self._slots
         self._working_dir: str = self._resources.get("working_dir", os.getcwd())
+        
+        # User-configurable reference threshold
+        self._reference_threshold: int = int(self._resources.get("reference_threshold", DRAGON_DEFAULT_REF_THRESHOLD))
 
         # Task tracking
         self._running_tasks: dict[str, TaskInfo] = {}
 
         # Dragon components
-        self._ddict: Optional[DDict] = None
+        self._ddict: Optional[DDict] = ddict
         self._system_alloc: Optional[System] = None
         self._result_queue: Optional[Queue] = None
 
@@ -937,13 +853,14 @@ class DragonExecutionBackend(BaseExecutionBackend):
 
             # Initialize DDict
             logger.debug("Creating DDict with proper parameters...")
-            self._ddict = DDict(
-                n_nodes=nnodes,
-                total_mem=nnodes * int(4 * 1024 * 1024 * 1024),  # 4GB per node
-                wait_for_keys=True,
-                working_set_size=4,
-                timeout=200
-            )
+            if not self._ddict:
+                self._ddict = DDict(
+                    n_nodes=nnodes,
+                    total_mem=nnodes * int(4 * 1024 * 1024 * 1024),  # 4GB per node
+                    wait_for_keys=True,
+                    working_set_size=4,
+                    timeout=200
+                )
             logger.debug("DDict created successfully")
 
             # Initialize global result queue
@@ -951,8 +868,13 @@ class DragonExecutionBackend(BaseExecutionBackend):
             self._result_queue = Queue(maxsize=10000)
             logger.debug("Result queue created successfully")
 
-            # Initialize shared memory manager
-            self._shared_memory = SharedMemoryManager(self._ddict, self._system_alloc, logger)
+            # Initialize shared memory manager with user-configurable threshold
+            self._shared_memory = SharedMemoryManager(
+                self._ddict, 
+                self._system_alloc, 
+                logger,
+                reference_threshold=self._reference_threshold
+            )
             await self._shared_memory.initialize()
 
             # Initialize utilities
@@ -964,7 +886,10 @@ class DragonExecutionBackend(BaseExecutionBackend):
             self._monitor_task = asyncio.create_task(self._monitor_tasks())
             await asyncio.sleep(0.1)
 
-            logger.info(f"Dragon backend initialized with {self._slots} slots, DDict on {nnodes} nodes, and direct queue consumption")
+            logger.info(
+                f"Dragon backend initialized with {self._slots} slots, "
+                f"DDict on {nnodes} nodes, reference threshold: {self._reference_threshold} bytes"
+            )
         except Exception as e:
             logger.exception(f"Failed to initialize Dragon backend: {str(e)}")
             raise
@@ -978,23 +903,13 @@ class DragonExecutionBackend(BaseExecutionBackend):
                 mp.set_start_method("dragon", force=True)
         except RuntimeError:
             pass
-        logger.debug("Dragon backend active with direct queue integration.")
+        logger.debug("Dragon backend active with DDict-only storage and user-controlled resolution.")
 
     def register_callback(self, callback: Callable) -> None:
         self._callback_func = callback
 
     def get_task_states_map(self):
         return StateMapper(backend=self)
-
-    async def get_data_from_reference(self, ref: DataReference) -> Any:
-        """Resolve data reference to actual data."""
-        if not self._initialized:
-            raise RuntimeError("Backend not initialized")
-
-        if not isinstance(ref, DataReference):
-            raise TypeError("Expected DataReference object")
-
-        return await self._shared_memory.resolve_reference(ref)
 
     async def submit_tasks(self, tasks: list[dict[str, Any]]) -> None:
         self._ensure_initialized()
@@ -1051,7 +966,7 @@ class DragonExecutionBackend(BaseExecutionBackend):
                 completed_tasks = []
 
                 # Batch consume queue results
-                for _ in range(1000):  # Process up to 100 results per iteration
+                for _ in range(1000):  # Process up to 1000 results per iteration
                     completed_task_uid = self._result_collector.try_consume_executable_result()
                     if completed_task_uid:
                         completed_tasks.append(completed_task_uid)
@@ -1101,7 +1016,6 @@ class DragonExecutionBackend(BaseExecutionBackend):
         """Check if task is complete and collect results."""
         try:
             if task_info.canceled:
-
                 task.update({
                     "canceled": True,
                     "exception": "Task was canceled",
