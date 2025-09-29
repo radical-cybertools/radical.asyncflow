@@ -2,7 +2,7 @@ import asyncio
 import logging
 import time
 
-from radical.asyncflow import RadicalExecutionBackend, WorkflowEngine
+from radical.asyncflow import WorkflowEngine, factory
 from radical.asyncflow.logging import init_default_logger
 
 logger = logging.getLogger(__name__)
@@ -11,8 +11,10 @@ logger = logging.getLogger(__name__)
 async def main():
     init_default_logger(logging.INFO)
 
-    # Create backend and workflow
-    backend = await RadicalExecutionBackend({"resource": "local.localhost"})
+    # Create backend and workflow using factory
+    backend = await factory.create_backend(
+        "radical_pilot", config={"resource": "local.localhost"}
+    )
     flow = await WorkflowEngine.create(backend=backend)
 
     task1_resources = {"ranks": 1, "gpus_per_rank": 1}

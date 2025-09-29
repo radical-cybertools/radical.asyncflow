@@ -2,21 +2,20 @@ from __future__ import annotations
 
 import importlib.metadata as importlib_metadata
 
-from .backends.execution.concurrent import ConcurrentExecutionBackend
-from .backends.execution.dask_parallel import DaskExecutionBackend
-from .backends.execution.noop import NoopExecutionBackend
-from .backends.execution.radical_pilot import RadicalExecutionBackend
+# Import core components with new plugin architecture
+from .backends import factory, registry
+from .backends.execution import ConcurrentExecutionBackend, NoopExecutionBackend
 from .data import InputFile, OutputFile
 from .workflow_manager import WorkflowEngine
 
 __version__ = importlib_metadata.version("radical.asyncflow")
 
 __all__ = [
-    "ConcurrentExecutionBackend",
-    "DaskExecutionBackend",
-    "NoopExecutionBackend",
-    "RadicalExecutionBackend",
+    "WorkflowEngine",
     "InputFile",
     "OutputFile",
-    "WorkflowEngine",
+    "ConcurrentExecutionBackend",
+    "NoopExecutionBackend",
+    "factory",
+    "registry",
 ]

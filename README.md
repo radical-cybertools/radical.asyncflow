@@ -17,7 +17,7 @@
 </p>
 
 
-RADICAL AsyncFlow (RAF) is a fast asynchronous scripting library built on top of [asyncio](https://docs.python.org/3/library/asyncio.html) for building powerful async/sync workflows on HPC, clusters, and local machines. It supports pluggable execution backends with intuitive task dependencies and workflow composition. 
+RADICAL AsyncFlow (RAF) is a fast asynchronous scripting library built on top of [asyncio](https://docs.python.org/3/library/asyncio.html) for building powerful async/sync workflows on HPC, clusters, and local machines. It supports pluggable execution backends with intuitive task dependencies and workflow composition.
 
 - ⚡ Powerful asynchronous workflows — Compose complex async and sync workflows easily, with intuitive task dependencies and campaign orchestration.
 
@@ -28,21 +28,38 @@ RADICAL AsyncFlow (RAF) is a fast asynchronous scripting library built on top of
 
 Currently, RAF supports the following execution backends:
 
+* **Local Development**
+  * [Concurrent.Executor](https://docs.python.org/3/library/concurrent.futures.html#executor-objects) - Multi-threading/processing on single machine
+  * Noop - Dry-run backend for testing and validation
 
-- [Radical.Pilot](https://radicalpilot.readthedocs.io/en/stable/#)
-- [Dask.Parallel](https://docs.dask.org/en/stable/)
-- [Concurrent.Executor](https://docs.python.org/3/library/concurrent.futures.html#executor-objects)
-- Noop with `dry_run`
-- Custom implementations
+* **HPC and Distributed Computing** *(optional dependencies)*
+  * [RADICAL-Pilot](https://radicalpilot.readthedocs.io/en/stable/#) - Large-scale HPC and supercomputing
+  * [Dask.Distributed](https://docs.dask.org/en/stable/) - Distributed computing clusters
+
+* **Custom Implementations**
+  * Extensible backend system for custom execution environments
 
 ## ⚙️ Installation
-Radical Asyncflow package is available on [PyPI](https://pypi.org/project/radical-asyncflow/).
-```
-pip install radical-asyncflow
+
+### Core Installation
+Radical AsyncFlow package is available on [PyPI](https://pypi.org/project/radical-asyncflow/).
+```bash
+pip install radical.asyncflow
 ```
 
+### Optional HPC Backends
+For HPC and distributed computing capabilities:
+```bash
+# All HPC backends
+pip install 'radical.asyncflow[hpc]'
+
+# Specific backends
+pip install 'radical.asyncflow[dask]'          # Dask distributed computing
+pip install 'radical.asyncflow[radicalpilot]'  # RADICAL-Pilot for HPC
+```
+
+### Development Installation
 For developers:
-
 ```shell
 git clone https://github.com/radical-cybertools/radical.asyncflow
 cd radical.asyncflow
@@ -55,17 +72,17 @@ pip install -e .[dev,lint,doc]
 
 
 ## Basic Usage
+
 ```python
 import asyncio
-
-from radical.asyncflow import WorkflowEngine
-from radical.asyncflow import ConcurrentExecutionBackend
-
-from concurrent.futures import ThreadPoolExecutor
+from radical.asyncflow import WorkflowEngine, factory
 
 async def main():
-    # Create backend and workflow
-    backend = await ConcurrentExecutionBackend(ThreadPoolExecutor())
+    # Create backend and workflow using factory
+    backend = await factory.create_backend("concurrent", config={
+        "max_workers": 4,
+        "executor_type": "thread"
+    })
     flow = await WorkflowEngine.create(backend=backend)
 
     @flow.executable_task
@@ -79,7 +96,7 @@ async def main():
     # create the workflow
     t1_fut = task1()
     t2_result = await task2(t1_fut) # t2 depends on t1 (waits for it)
-  
+
     print(t2_result)
     # shutdown the execution backend
     await flow.shutdown()

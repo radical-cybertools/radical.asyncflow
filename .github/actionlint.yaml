@@ -1,0 +1,21 @@
+# Configuration for actionlint
+# https://github.com/rhysd/actionlint/blob/main/docs/config.md
+
+# Disable specific checks if needed
+# self-hosted-runner:
+#   # Labels of self-hosted runner in array of strings
+#   labels:
+#     - linux.2xlarge
+#     - windows-latest-xl
+#   # Repository path of self-hosted runner configurations
+#   config-file: path/to/runner-config.json
+
+# Schema validation config
+# config-variables:
+#   # Array of known custom configuration variable names
+#   vars: []
+
+# Format configuration
+# format:
+#   # Available formats: sarif, json
+#   output-format: ""

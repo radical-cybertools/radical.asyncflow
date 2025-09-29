@@ -2,6 +2,32 @@
 
 AsyncFlow's architecture follows a **separation of concerns** principle, completely isolating the execution backend from the asynchronous programming layer. This **plug-and-play (PnP)** design allows you to switch between different execution environments with minimal code changes — from local development to massive HPC clusters.
 
+## Backend Registry and Factory System
+
+AsyncFlow uses a modern **registry and factory pattern** for backend management:
+
+- **Registry**: Discovers and lazy-loads available backends on demand
+- **Factory**: Creates and initializes backend instances with proper configuration
+- **Lazy Loading**: Backends are only loaded when requested, avoiding unnecessary dependencies
+
+This architecture provides:
+- **Centralized backend management** with automatic discovery
+- **Better error messages** with installation hints for missing backends
+- **Proper caching** to avoid repeated failed imports
+- **Type safety** with automatic validation of backend interfaces
+
+## Available Backends
+
+AsyncFlow automatically discovers and manages the following backends:
+
+- **`noop`** - No-operation backend for dry runs and testing
+- **`concurrent`** - Local execution using Python's concurrent.futures
+- **`dask`** - Distributed computing with Dask (requires `radical.asyncflow[dask]`)
+- **`radical_pilot`** - HPC execution with RADICAL-Pilot (requires `radical.asyncflow[radicalpilot]`)
+
+!!! tip "Backend Discovery"
+    Use `factory.list_available_backends()` to see which backends are available in your environment and get installation hints for missing ones.
+
 ## The Power of Backend Abstraction
 
 By design, AsyncFlow enforces that the execution backend should be entirely isolated from the asynchronous programming layer. This means you can seamlessly transition your workflows from:
@@ -14,44 +40,71 @@ By design, AsyncFlow enforces that the execution backend should be entirely isol
 
 ## Local vs HPC Execution: A Side-by-Side Comparison
 
-### Local Execution with ConcurrentExecutionBackend
+### Local Execution with Factory Pattern
 
 ```python
-# Local execution with threads
+# Local execution with concurrent backend
+from radical.asyncflow import factory
 
-from concurrent.futures import ThreadPoolExecutor
-from radical.asyncflow import ConcurrentExecutionBackend
-
-backend = ConcurrentExecutionBackend(ThreadPoolExecutor())
+# Create backend using factory
+backend = await factory.create_backend("concurrent", config={
+    "max_workers": 4,
+    "executor_type": "thread"  # or "process"
+})
 ```
 
-### HPC Execution with RadicalExecutionBackend
+### HPC Execution with Factory Pattern
 
 ```python
-# HPC execution with Radical.Pilot
-from radical.asyncflow import RadicalExecutionBackend
+# HPC execution with RADICAL-Pilot
+from radical.asyncflow import factory
 
-backend = RadicalExecutionBackend({'resource': 'local.localhost'})
+# Create backend using factory
+backend = await factory.create_backend("radical_pilot", config={
+    "resource": "local.localhost"
+})
 ```
 
 !!! success
 **One line change** transforms your workflow from local thread execution to distributed HPC execution across thousands of nodes.
 
+### Backend Discovery and Error Handling
+
+```python
+from radical.asyncflow import factory
+
+# List available backends
+backends = factory.list_available_backends()
+for name, info in backends.items():
+    print(f"Backend '{name}': {'✅' if info['available'] else '❌'}")
+    if not info['available']:
+        print(f"  Installation hint: {info['installation_hint']}")
+```
+
+!!! tip "Helpful Error Messages"
+    When a backend is not available, AsyncFlow provides clear error messages with installation instructions:
+    ```
+    Backend 'dask' is not available.
+    Available backends: noop, concurrent
+    Installation hint: Try: pip install 'radical.asyncflow[dask]'
+    ```
+
 ## Complete HPC Workflow Example
 
-Below is a complete example demonstrating how to execute workflows on HPC infrastructure using `RadicalExecutionBackend`.
+Below is a complete example demonstrating how to execute workflows on HPC infrastructure using the factory pattern.
 
 ### Setup for HPC Execution
 
 ```python
 import time
 import asyncio
-from radical.asyncflow import RadicalExecutionBackend
-from radical.asyncflow import WorkflowEngine
+from radical.asyncflow import factory, WorkflowEngine
 
-# HPC backend configuration
-backend = RadicalExecutionBackend({'resource': 'local.localhost'}) # (1)!
-flow = WorkflowEngine(backend=backend)
+# HPC backend configuration using factory
+backend = await factory.create_backend("radical_pilot", config={
+    "resource": "local.localhost"  # (1)!
+})
+flow = await WorkflowEngine.create(backend=backend)
 ```
 
 1. Configure for HPC execution - can target supercomputers, GPU clusters, local resources
@@ -94,11 +147,11 @@ async def task3(*args):
 ```python
 async def run_wf(wf_id):
     print(f'Starting workflow {wf_id} at {time.time()}')
-    
+
     # Create dependent task execution
     t3 = task3(task1(), task2()) # (1)!
     await t3  # Wait for distributed execution to complete
-    
+
     print(f'Workflow {wf_id} completed at {time.time()}')
 ```
 
@@ -158,12 +211,12 @@ await flow.shutdown()
 
 ```python
 # Configure for GPU-accelerated computing
-backend = RadicalExecutionBackend({
-    'resource': 'ornl.summit',
-    'queue': 'gpu',
-    'nodes': 100,
-    'gpus_per_node': 6,
-    'walltime': 120  # minutes
+backend = await factory.create_backend("radical_pilot", config={
+    "resource": "ornl.summit",
+    "queue": "gpu",
+    "nodes": 100,
+    "gpus_per_node": 6,
+    "walltime": 120  # minutes
 })
 ```
 
@@ -171,13 +224,26 @@ backend = RadicalExecutionBackend({
 
 ```python
 # Configure for massive CPU parallelism
-backend = RadicalExecutionBackend({
-    'resource': 'tacc.frontera',
-    'queue': 'normal',
-    'nodes': 1000,
-    'cores_per_node': 56,
-    'walltime': 240  # minutes
+backend = await factory.create_backend("radical_pilot", config={
+    "resource": "tacc.frontera",
+    "queue": "normal",
+    "nodes": 1000,
+    "cores_per_node": 56,
+    "walltime": 240  # minutes
 })
+```
+
+### Backend Availability Check
+
+```python
+# Check if HPC backend is available before creating
+backends = factory.list_available_backends()
+if backends["radical_pilot"]["available"]:
+    backend = await factory.create_backend("radical_pilot", config={...})
+else:
+    print(f"RADICAL-Pilot not available: {backends['radical_pilot']['installation_hint']}")
+    # Fallback to local execution
+    backend = await factory.create_backend("concurrent")
 ```
 
 !!! warning
@@ -200,7 +266,7 @@ backend = RadicalExecutionBackend({
 
 AsyncFlow's backend abstraction means your workflow logic remains **identical** whether running on:
 - Your laptop with 8 cores
-- A university cluster with 1,000 nodes  
+- A university cluster with 1,000 nodes
 - A national supercomputer with 100,000+ cores
 - GPU clusters with thousands of accelerators
 

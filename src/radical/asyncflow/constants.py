@@ -22,8 +22,8 @@ class TasksMainStates(Enum):
 
 
 class StateMapper:
-    """Unified interface for mapping task states between main workflow and
-       backend systems.
+    """Unified interface for mapping task states between main workflow and backend
+    systems.
 
     StateMapper provides a centralized mechanism for translating task states between
     the main workflow system and various backend execution systems

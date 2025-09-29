@@ -5,14 +5,15 @@ import asyncio
 import pytest
 import pytest_asyncio
 
-from radical.asyncflow import DaskExecutionBackend, WorkflowEngine
+from radical.asyncflow import WorkflowEngine, factory
 
 
 @pytest_asyncio.fixture(scope="function")
 async def backend():
     # Setup: create backend and flow
-    backend = await DaskExecutionBackend(
-        {"n_workers": 2, "threads_per_worker": 1, "dashboard_address": None}
+    backend = await factory.create_backend(
+        "dask",
+        config={"n_workers": 2, "threads_per_worker": 1, "dashboard_address": None},
     )
     # provide the flow to the test
     yield backend

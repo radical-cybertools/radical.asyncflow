@@ -8,21 +8,21 @@ This page walks you step by step through defining and running composite workflow
 graph TD
 
     subgraph Block A
-        A_WF1[task1 --> task2 --> task3] --> A_WF2[task1 --> task2 --> task3] --> A_WF3[task1 --> task2 --> task3] 
+        A_WF1[task1 --> task2 --> task3] --> A_WF2[task1 --> task2 --> task3] --> A_WF3[task1 --> task2 --> task3]
     end
 
     subgraph Block B
-        B_WF1[task1 --> task2 --> task3] --> B_WF2[task1 --> task2 --> task3] --> B_WF3[task1 --> task2 --> task3] 
+        B_WF1[task1 --> task2 --> task3] --> B_WF2[task1 --> task2 --> task3] --> B_WF3[task1 --> task2 --> task3]
     end
 
     subgraph Block C
-        C_WF1[task1 --> task2 --> task3] --> C_WF2[task1 --> task2 --> task3] --> C_WF3[task1 --> task2 --> task3] 
+        C_WF1[task1 --> task2 --> task3] --> C_WF2[task1 --> task2 --> task3] --> C_WF3[task1 --> task2 --> task3]
     end
 
 ```
 
 !!! note
-`Block` entity can have DAG shaped workflows where some workflows depends on others. 
+`Block` entity can have DAG shaped workflows where some workflows depends on others.
 
 ## Example: Independent Blocks
 
