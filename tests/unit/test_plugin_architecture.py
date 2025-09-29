@@ -109,9 +109,9 @@ class TestPluginArchitecture:
         """Test that registry properly caches both successes and failures."""
         registry = BackendRegistry()
 
-        # Test with dask which should be available now
-        result1 = registry.get_backend("dask")
-        result2 = registry.get_backend("dask")
+        # Test with concurrent backend which should always be available
+        result1 = registry.get_backend("concurrent")
+        result2 = registry.get_backend("concurrent")
 
         # Both should be the same backend class and consistent
         assert result1 is not None
