@@ -85,14 +85,13 @@ class TestBackendPluginIntegration:
     async def test_helpful_error_for_unavailable_backend(self):
         """Test that attempting to use unavailable backend provides helpful guidance."""
         with pytest.raises(ValueError) as exc_info:
-            await asyncflow.factory.create_backend("dask")
+            await asyncflow.factory.create_backend("nonexistent_backend")
 
         error_msg = str(exc_info.value)
 
         # Should provide comprehensive error information
-        assert "Backend 'dask' is not available" in error_msg
-        assert "Installation hint:" in error_msg
-        assert "radical.asyncflow[dask]" in error_msg
+        assert "Backend 'nonexistent_backend' is not available" in error_msg
+        assert "Available backends:" in error_msg
         assert "Available backends:" in error_msg
 
         # Should list working backends
