@@ -514,11 +514,9 @@ class TaskLauncher:
         args = task.get("args", ())
         kwargs = task.get("kwargs", {})
 
-        func = await self._serialize_function(function, args, kwargs)
-
         return Process(
             target=_function_worker,
-            args=(self.ddict, rank, func, uid, rank)
+            args=(self.ddict, task, uid, rank)
         )
 
     def _create_executable_process(self, task: dict, rank: int) -> Process:
@@ -539,15 +537,13 @@ class TaskLauncher:
         args = task.get("args", ())
         kwargs = task.get("kwargs", {})
 
-        func = await self._serialize_function(function, args, kwargs)
-
         for rank in range(ranks):
             env = os.environ.copy()
             env["DRAGON_RANK"] = str(rank)
 
             template = ProcessTemplate(
                 target=_function_worker,
-                args=(self.ddict, rank, func, uid, rank),
+                args=(self.ddict, task, uid, rank),
                 env=env,
                 cwd=self.working_dir,
                 stdout=Popen.PIPE,
@@ -573,31 +569,6 @@ class TaskLauncher:
                 cwd=self.working_dir,
             )
             group.add_process(nproc=1, template=template)
-
-    async def _serialize_function(self, function: Callable, args: tuple, kwargs: dict) -> bytes:
-        """Serialize function data using multiple serialization methods."""
-        serializers = [
-            ('dill', dill.dumps),
-            ('cloudpickle', cloudpickle.dumps),
-            ('pickle', pickle.dumps)
-        ]
-
-        func_info = {
-            'function': function,
-            'args': args,
-            'kwargs': kwargs
-        }
-
-        for name, serializer in serializers:
-            try:
-                func = serializer(func_info)
-                self.logger.debug(f"Successfully serialized function with {name}")
-                return func
-            except Exception as e:
-                self.logger.debug(f"Failed to serialize with {name}: {e}")
-                continue
-
-        raise RuntimeError("Could not serialize function with any available method")
 
 
 def _executable_worker(result_queue: Queue, executable: str, args: list, task_uid: str, rank: int, working_dir: str):
@@ -654,13 +625,11 @@ def _executable_worker(result_queue: Queue, executable: str, args: list, task_ui
         result_queue.put(completion, block=True)
 
 
-def _function_worker(d: DDict, client_id: int, func: bytes, task_uid: str, rank: int = 0):
+def _function_worker(d: DDict, task: dict, task_uid: str, rank: int = 0):
     """Worker function to execute user functions in separate Dragon processes."""
     import io
     import sys
     import traceback
-    import dill
-    import cloudpickle
 
     # Set environment variable for rank
     os.environ["DRAGON_RANK"] = str(rank)
@@ -669,26 +638,12 @@ def _function_worker(d: DDict, client_id: int, func: bytes, task_uid: str, rank:
     old_out, old_err = sys.stdout, sys.stderr
     out_buf, err_buf = io.StringIO(), io.StringIO()
 
+    function = task["function"]
+    args = task.get("args", ())
+    kwargs = task.get("kwargs", {})
+
     try:
         sys.stdout, sys.stderr = out_buf, err_buf
-
-        # Deserialize function data
-        func_info = None
-        deserializers = [dill.loads, cloudpickle.loads, pickle.loads]
-
-        for deserializer in deserializers:
-            try:
-                func_info = deserializer(func)
-                break
-            except Exception:
-                continue
-
-        if func_info is None:
-            raise RuntimeError("Could not deserialize function")
-
-        function = func_info['function']
-        args = func_info.get('args', ())
-        kwargs = func_info.get('kwargs', {})
 
         # Execute function
         if asyncio.iscoroutinefunction(function):
