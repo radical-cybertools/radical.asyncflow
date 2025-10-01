@@ -332,10 +332,8 @@ class WorkerPool:
             return
         
         try:
-            # Create shared queues with capacity scaled for high-volume workloads
-            queue_size = max(100000, self.total_workers * 100)
-            self.input_queue = Queue(maxsize=queue_size)
-            self.output_queue = Queue(maxsize=queue_size)
+            self.input_queue = Queue()
+            self.output_queue = Queue()
             
             worker_id = 0
             nnodes = self.system.nnodes
@@ -350,45 +348,21 @@ class WorkerPool:
                         # User-provided policy
                         policy = config.policy
                         self.logger.debug(f"Using user-provided policy for worker group {config_idx}")
-                    elif config.nodes:
-                        # User-specified nodes, create policy
-                        if Policy is None:
-                            raise RuntimeError("Dragon Policy not available")
-                        
-                        policy = Policy()
-                        policy.placement = Policy.Placement.HOST_NAME
-                        policy.host_name = f"node{config.nodes[0]}"  # Primary node
-                        
-                        # For multi-node workers, you'd need to handle this differently
-                        # Dragon policies are per-ProcessGroup, not per-process
-                        self.logger.debug(
-                            f"Created policy for nodes {config.nodes} (ProcessGroup on node{config.nodes[0]})"
-                        )
                     else:
-                        # Automatic round-robin node placement
-                        if Policy is None:
-                            policy = None
-                        else:
-                            policy = Policy()
-                            policy.distribution = Policy.Distribution.ROUNDROBIN
-                            policy.placement = Policy.Placement.DEFAULT
-                        
-                        self.logger.debug(f"Using automatic round-robin placement for worker group {config_idx}")
+                        policy = Policy()
+                        policy.distribution = Policy.Distribution.ROUNDROBIN
+                        policy.placement = Policy.Placement.DEFAULT
                     
+                        self.logger.debug(f"Using automatic round-robin placement for worker group {config_idx}")
+
                     # Create ProcessGroup with policy
                     process_group = ProcessGroup(restart=False, policy=policy)
-                    
+
                     # Add nprocs workers to this group
                     for proc_idx in range(config.nprocs):
                         env = os.environ.copy()
                         env["DRAGON_WORKER_ID"] = str(worker_id)
-                        
-                        # If specific nodes provided, set affinity hint
-                        if config.nodes:
-                            # Calculate which node this process should prefer
-                            node_idx = config.nodes[proc_idx % len(config.nodes)]
-                            env["DRAGON_NODE_HINT"] = str(node_idx)
-                        
+
                         template = ProcessTemplate(
                             target=_worker_loop,
                             args=(worker_id, self.input_queue, self.output_queue, 
@@ -397,19 +371,14 @@ class WorkerPool:
                             cwd=self.working_dir,
                         )
                         process_group.add_process(nproc=1, template=template)
-                        worker_id += 1
-                    
+
+                    worker_id += 1
+
                     # Initialize and start this group
                     process_group.init()
                     process_group.start()
                     self.process_groups.append(process_group)
-                    
-                    node_info = f"nodes {config.nodes}" if config.nodes else "auto-placement"
-                    self.logger.info(
-                        f"Started ProcessGroup {len(self.process_groups)}: "
-                        f"{config.nprocs} workers on {node_info}"
-                    )
-            
+
             self.initialized = True
             self.logger.info(
                 f"Worker pool initialized: {len(self.process_groups)} ProcessGroups, "
