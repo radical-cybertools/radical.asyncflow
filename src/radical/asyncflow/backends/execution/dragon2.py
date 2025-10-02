@@ -86,23 +86,25 @@ class TaskInfo:
     completed_ranks: int = 0
 
 @dataclass
+class PolicyConfig:
+    """Configuration for a single policy (ProcessTemplate)."""
+    nprocs: int
+    policy: Optional[Policy] = None
+
+@dataclass
 class WorkerGroupConfig:
-    """Configuration for a worker group with node placement.
+    """Configuration for a worker group (ProcessGroup) with node placement.
     
     Attributes:
-        nprocs: Number of processes in this worker group
-        count: Number of worker groups with this configuration
-        nodes: Optional list of node indices for placement (e.g., [0, 1] for nodes 0-1)
-        policy: Optional Dragon Policy object for placement control
+        name: Worker group name for identification
+        policies: List of PolicyConfig, each becomes a ProcessTemplate
     """
-    nprocs: int = 1
-    count: int = 1
-    nodes: Optional[List[int]] = None
-    policy: Optional[Policy] = None
+    name: str
+    policies: List[PolicyConfig] = field(default_factory=list)
     
     def total_slots(self) -> int:
-        """Total slots provided by this worker group config."""
-        return self.nprocs * self.count
+        """Total slots provided by this worker group."""
+        return sum(p.nprocs for p in self.policies)
 
 class DataReference:
     """Reference to data stored in Cross Node Distributed Dict."""
@@ -198,7 +200,7 @@ def _worker_loop(worker_id: int, input_queue: Queue, output_queue: Queue,
     """Persistent worker that processes tasks from queue.
     
     Handles both function and executable tasks:
-    - Functions: Execute Python callables (async or sync)
+    - Functions: Execute Python callables
     - Executables: Run external processes via subprocess
     """
     import io
@@ -303,15 +305,14 @@ def _worker_loop(worker_id: int, input_queue: Queue, output_queue: Queue,
 
 
 class WorkerPool:
-    """Manages persistent worker pool with node-aware placement.
-    
+    """Manages persistent worker pool with Policy-based placement.
     Supports:
     - Heterogeneous worker groups with different process counts
     - Explicit node placement (e.g., worker 0 on nodes 0-1, worker 1 on nodes 2-3)
     - Custom Dragon Policy objects per worker group
     - Automatic distribution across available nodes if not specified
     """
-    
+
     def __init__(self, worker_configs: List[WorkerGroupConfig], ddict: DDict, 
                  working_dir: str, logger: logging.Logger, system: System):
         self.worker_configs = worker_configs
@@ -323,11 +324,11 @@ class WorkerPool:
         self.input_queue: Optional[Queue] = None
         self.output_queue: Optional[Queue] = None
         self.process_groups: List[ProcessGroup] = []
-        self.total_workers = sum(cfg.nprocs * cfg.count for cfg in worker_configs)
+        self.total_workers = sum(cfg.total_slots() for cfg in worker_configs)
         self.initialized = False
         
     async def initialize(self):
-        """Initialize worker pool with node-aware ProcessGroups."""
+        """Initialize worker pool with Policy-aware ProcessGroups."""
         if self.initialized:
             return
         
@@ -336,53 +337,47 @@ class WorkerPool:
             self.output_queue = Queue()
             
             worker_id = 0
-            nnodes = self.system.nnodes
             
-            # Track node allocation for automatic placement
-            nodes_allocated = 0
-            
-            for config_idx, config in enumerate(self.worker_configs):
-                for group_instance in range(config.count):
-                    # Determine policy for this ProcessGroup
-                    if config.policy:
-                        # User-provided policy
-                        policy = config.policy
-                        self.logger.debug(f"Using user-provided policy for worker group {config_idx}")
-                    else:
-                        policy = Policy()
-                        policy.distribution = Policy.Distribution.ROUNDROBIN
-                        policy.placement = Policy.Placement.DEFAULT
+            for worker_config in self.worker_configs:
+                # Create ONE ProcessGroup per worker
+                process_group = ProcessGroup(restart=False)
+                
+                # Add multiple templates (one per policy) to this ProcessGroup
+                for policy_config in worker_config.policies:
+                    env = os.environ.copy()
+                    env["DRAGON_WORKER_ID"] = str(worker_id)
                     
-                        self.logger.debug(f"Using automatic round-robin placement for worker group {config_idx}")
-
-                    # Create ProcessGroup with policy
-                    process_group = ProcessGroup(restart=False, policy=policy)
-
-                    # Add nprocs workers to this group
-                    for proc_idx in range(config.nprocs):
-                        env = os.environ.copy()
-                        env["DRAGON_WORKER_ID"] = str(worker_id)
-
-                        template = ProcessTemplate(
-                            target=_worker_loop,
-                            args=(worker_id, self.input_queue, self.output_queue, 
-                                  self.ddict, self.working_dir),
-                            env=env,
-                            cwd=self.working_dir,
-                        )
-                        process_group.add_process(nproc=1, template=template)
-
-                    worker_id += 1
-
-                    # Initialize and start this group
-                    process_group.init()
-                    process_group.start()
-                    self.process_groups.append(process_group)
-
+                    template = ProcessTemplate(
+                        target=_worker_loop,
+                        args=(worker_id, self.input_queue, self.output_queue, 
+                              self.ddict, self.working_dir),
+                        env=env,
+                        cwd=self.working_dir,
+                        policy=policy_config.policy
+                    )
+                    
+                    # Add nprocs with this template/policy
+                    process_group.add_process(nproc=policy_config.nprocs, template=template)
+                
+                # Initialize and start the ProcessGroup
+                process_group.init()
+                process_group.start()
+                self.process_groups.append(process_group)
+                worker_id += 1
+            
             self.initialized = True
+            
+            # Log configuration
+            config_summary = []
+            for cfg in self.worker_configs:
+                policy_details = [f"{p.nprocs}procs" for p in cfg.policies]
+                config_summary.append(
+                    f"{cfg.name}: {len(cfg.policies)} templates ({', '.join(policy_details)})"
+                )
+            
             self.logger.info(
                 f"Worker pool initialized: {len(self.process_groups)} ProcessGroups, "
-                f"{self.total_workers} total workers across {nnodes} nodes"
+                f"{self.total_workers} total processes. Config: {'; '.join(config_summary)}"
             )
             
         except Exception as e:
@@ -390,7 +385,7 @@ class WorkerPool:
             raise
     
     def submit_request(self, request: WorkerRequest):
-        """Submit task request to worker pool with timeout."""
+        """Submit task request to worker pool."""
         if not self.initialized:
             raise RuntimeError("Worker pool not initialized")
         try:
@@ -537,8 +532,7 @@ class ResultCollector:
 
 
 class DragonExecutionBackend(BaseExecutionBackend):
-    """Dragon execution backend with node-aware worker pool.
-    
+    """Dragon execution backend with Policy-based worker configuration.
     Features:
     - Flexible worker configuration with explicit node placement
     - Custom Dragon Policy objects per worker group
@@ -547,30 +541,24 @@ class DragonExecutionBackend(BaseExecutionBackend):
     - Automatic result aggregation for multi-rank tasks
     - Data reference management for large return values
     
-    Example configurations:
-        # Explicit node placement: 2 workers, each on 2 nodes (256 cores each)
+    Example configuration:
         resources = {
             "workers": [
-                {"nprocs": 256, "count": 1, "nodes": [0, 1]},  # Worker 0: nodes 0-1
-                {"nprocs": 256, "count": 1, "nodes": [2, 3]},  # Worker 1: nodes 2-3
-            ],
-        }
-        
-        # Custom policy
-        from dragon.infrastructure.policy import Policy
-        policy = Policy()
-        policy.distribution = Policy.Distribution.BLOCK
-        resources = {
-            "workers": [
-                {"nprocs": 128, "count": 4, "policy": policy},
-            ],
-        }
-        
-        # Automatic round-robin (default)
-        resources = {
-            "workers": [
-                {"nprocs": 64, "count": 8},  # Auto-distributed across nodes
-            ],
+                {
+                    "name": "worker0",
+                    "policies": [
+                        {"nprocs": 128, "policy": policy_n0},
+                        {"nprocs": 128, "policy": policy_n1}
+                    ]
+                },
+                {
+                    "name": "worker1",
+                    "policies": [
+                        {"nprocs": 128, "policy": policy_n2},
+                        {"nprocs": 128, "policy": policy_n3}
+                    ]
+                }
+            ]
         }
     """
     
@@ -611,21 +599,43 @@ class DragonExecutionBackend(BaseExecutionBackend):
         self._shutdown_event = asyncio.Event()
     
     def _parse_worker_config(self, resources: dict) -> List[WorkerGroupConfig]:
-        """Parse worker configuration from resources with node placement support."""
+        """Parse worker configuration from resources."""
         if "workers" in resources:
             configs = []
-            for cfg in resources["workers"]:
-                configs.append(WorkerGroupConfig(
-                    nprocs=cfg.get("nprocs", 1),
-                    count=cfg.get("count", 1),
-                    nodes=cfg.get("nodes", None),
-                    policy=cfg.get("policy", None)
-                ))
+            for idx, worker_cfg in enumerate(resources["workers"]):
+                name = worker_cfg.get("name")
+                if not name:
+                    raise ValueError(f"Worker config {idx}: 'name' is required")
+                
+                policies_list = worker_cfg.get("policies")
+                if not policies_list:
+                    raise ValueError(f"Worker '{name}': 'policies' list is required")
+                
+                if not isinstance(policies_list, list):
+                    raise TypeError(f"Worker '{name}': 'policies' must be a list")
+                
+                policy_configs = []
+                for policy_idx, policy_dict in enumerate(policies_list):
+                    nprocs = policy_dict.get("nprocs", 1)
+                    policy = policy_dict.get("policy", None)
+                    
+                    if policy is not None and not isinstance(policy, Policy):
+                        raise TypeError(
+                            f"Worker '{name}' policy {policy_idx}: 'policy' must be a Dragon Policy object or None"
+                        )
+                    
+                    policy_configs.append(PolicyConfig(nprocs=nprocs, policy=policy))
+                
+                configs.append(WorkerGroupConfig(name=name, policies=policy_configs))
+            
             return configs
         else:
             # Default: create single-process workers with auto-placement
             slots = int(resources.get("slots", mp.cpu_count() or 1))
-            return [WorkerGroupConfig(nprocs=1, count=slots)]
+            return [WorkerGroupConfig(
+                name="default_workers", 
+                policies=[PolicyConfig(nprocs=slots, policy=None)]
+            )]
     
     def __await__(self):
         return self._async_init().__await__()
@@ -687,17 +697,7 @@ class DragonExecutionBackend(BaseExecutionBackend):
             # Start monitoring
             self._monitor_task = asyncio.create_task(self._monitor_tasks())
             
-            # Log configuration
-            config_details = []
-            for idx, cfg in enumerate(self._worker_configs):
-                node_info = f"nodes={cfg.nodes}" if cfg.nodes else "auto"
-                policy_info = "custom-policy" if cfg.policy else "default"
-                config_details.append(f"{cfg.count}x{cfg.nprocs}proc({node_info},{policy_info})")
-            
-            logger.info(
-                f"Dragon backend initialized: {', '.join(config_details)} "
-                f"= {self._total_slots} total slots across {nnodes} nodes"
-            )
+            logger.info(f"Dragon backend initialized: {self._total_slots} total slots")
             
         except Exception as e:
             logger.exception(f"Failed to initialize Dragon backend: {e}")
@@ -793,7 +793,7 @@ class DragonExecutionBackend(BaseExecutionBackend):
                 completed_tasks = []
                 
                 # Consume responses from worker pool (batch processing)
-                for _ in range(1000):  # Process up to 1000 responses per iteration
+                for _ in range(1000):
                     response = self._worker_pool.try_get_response()
                     if response:
                         completed_uid = self._result_collector.process_response(response)
@@ -822,11 +822,10 @@ class DragonExecutionBackend(BaseExecutionBackend):
                             else:
                                 self._callback_func(task, "DONE")
                         
-                        # Free slots
                         self._free_slots += task_info.ranks
                         self._running_tasks.pop(uid, None)
                 
-                await asyncio.sleep(0.01)  # Short sleep for responsiveness
+                await asyncio.sleep(0.01)
                 
             except Exception as e:
                 logger.exception(f"Error in task monitoring: {e}")
@@ -834,7 +833,7 @@ class DragonExecutionBackend(BaseExecutionBackend):
     
     async def cancel_task(self, uid: str) -> bool:
         """Cancel a running task.
-        
+
         Note: With worker pool architecture, cancellation is best-effort.
         Workers that already picked up the task will complete it.
         """
@@ -845,7 +844,6 @@ class DragonExecutionBackend(BaseExecutionBackend):
         task_info.canceled = True
         self._result_collector.cleanup_task(uid)
         
-        # Mark task as canceled
         if uid in self.tasks:
             self.tasks[uid]["canceled"] = True
         
@@ -902,7 +900,6 @@ class DragonExecutionBackend(BaseExecutionBackend):
         self._ensure_initialized()
         return self._ddict
     
-    # Compatibility methods
     def link_explicit_data_deps(self, src_task=None, dst_task=None, file_name=None, file_path=None):
         pass
     
@@ -926,21 +923,17 @@ class DragonExecutionBackend(BaseExecutionBackend):
         try:
             self._shutdown_event.set()
             
-            # Cancel all tasks
             await self.cancel_all_tasks()
             
-            # Stop monitoring
             if self._monitor_task and not self._monitor_task.done():
                 try:
                     await asyncio.wait_for(self._monitor_task, timeout=5.0)
                 except asyncio.TimeoutError:
                     self._monitor_task.cancel()
             
-            # Shutdown worker pool
             if self._worker_pool:
                 await self._worker_pool.shutdown()
             
-            # Cleanup DDict
             if self._ddict:
                 try:
                     self._ddict.clear()
