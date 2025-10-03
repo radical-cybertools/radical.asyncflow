@@ -69,6 +69,7 @@ class WorkerResponse:
     task_uid: str
     rank: int
     success: bool
+    worker_name: str = ""  # Added for tracking
     return_value: Any = None
     stdout: str = ""
     stderr: str = ""
@@ -82,6 +83,7 @@ class TaskInfo:
     task_type: TaskType
     ranks: int
     start_time: float
+    worker_name: str = ""  # Track which worker has this task
     canceled: bool = False
     completed_ranks: int = 0
 
@@ -195,7 +197,7 @@ class SharedMemoryManager:
             self.logger.warning(f"Error cleaning up reference {ref.ref_id}: {e}")
 
 
-def _worker_loop(worker_id: int, input_queue: Queue, output_queue: Queue, 
+def _worker_loop(worker_id: int, worker_name: str, input_queue: Queue, output_queue: Queue, 
                  ddict: DDict, working_dir: str) -> None:
     """Persistent worker that processes tasks from queue.
     
@@ -209,6 +211,7 @@ def _worker_loop(worker_id: int, input_queue: Queue, output_queue: Queue,
     import subprocess
     
     os.environ["DRAGON_WORKER_ID"] = str(worker_id)
+    os.environ["DRAGON_WORKER_NAME"] = worker_name
     
     try:
         while True:
@@ -228,6 +231,7 @@ def _worker_loop(worker_id: int, input_queue: Queue, output_queue: Queue,
             response = WorkerResponse(
                 task_uid=request.task_uid,
                 rank=request.rank,
+                worker_name=worker_name,
                 success=False,
                 timestamp=time.time()
             )
@@ -294,7 +298,7 @@ def _worker_loop(worker_id: int, input_queue: Queue, output_queue: Queue,
             output_queue.put(response)
             
     except Exception as e:
-        print(f"Worker {worker_id} fatal error: {e}")
+        print(f"Worker {worker_id} ({worker_name}) fatal error: {e}")
         raise
     finally:
         # Detach from DDict on exit
@@ -305,12 +309,12 @@ def _worker_loop(worker_id: int, input_queue: Queue, output_queue: Queue,
 
 
 class WorkerPool:
-    """Manages persistent worker pool with Policy-based placement.
-    Supports:
-    - Heterogeneous worker groups with different process counts
-    - Explicit node placement (e.g., worker 0 on nodes 0-1, worker 1 on nodes 2-3)
-    - Custom Dragon Policy objects per worker group
-    - Automatic distribution across available nodes if not specified
+    """Manages persistent worker pool with per-worker queues and slot reservation.
+    
+    Key features:
+    - Each worker group has its own input queue
+    - Slot tracking per worker for load balancing
+    - Tasks are assigned to workers with sufficient free slots
     """
 
     def __init__(self, worker_configs: List[WorkerGroupConfig], ddict: DDict, 
@@ -321,45 +325,65 @@ class WorkerPool:
         self.logger = logger
         self.system = system
         
-        self.input_queue: Optional[Queue] = None
+        # Shared output queue for all workers
         self.output_queue: Optional[Queue] = None
+        
+        # Per-worker input queues
+        self.worker_queues: Dict[str, Queue] = {}
+        
+        # Slot tracking per worker
+        self.worker_slots: Dict[str, int] = {}
+        self.worker_free_slots: Dict[str, int] = {}
+        
         self.process_groups: List[ProcessGroup] = []
-        self.total_workers = sum(cfg.total_slots() for cfg in worker_configs)
+        self.total_workers = len(worker_configs)
+        self.total_slots = sum(cfg.total_slots() for cfg in worker_configs)
         self.initialized = False
         
     async def initialize(self):
-        """Initialize worker pool with Policy-aware ProcessGroups."""
+        """Initialize worker pool with per-worker queues."""
         if self.initialized:
             return
         
         try:
-            self.input_queue = Queue()
+            # Single shared output queue
             self.output_queue = Queue()
             
             worker_id = 0
             
             for worker_config in self.worker_configs:
-                # Create ONE ProcessGroup per worker
+                worker_name = worker_config.name
+                
+                # Create dedicated input queue for this worker
+                input_queue = Queue()
+                self.worker_queues[worker_name] = input_queue
+
+                # Track slots
+                total_worker_slots = worker_config.total_slots()
+                self.worker_slots[worker_name] = total_worker_slots
+                self.worker_free_slots[worker_name] = total_worker_slots
+                
+                # Create ProcessGroup for this worker
                 process_group = ProcessGroup(restart=False)
                 
-                # Add multiple templates (one per policy) to this ProcessGroup
+                # Add templates for each policy
                 for policy_config in worker_config.policies:
                     env = os.environ.copy()
                     env["DRAGON_WORKER_ID"] = str(worker_id)
-                    
+                    env["DRAGON_WORKER_NAME"] = worker_name
+
                     template = ProcessTemplate(
                         target=_worker_loop,
-                        args=(worker_id, self.input_queue, self.output_queue, 
+                        args=(worker_id, worker_name, input_queue, self.output_queue, 
                               self.ddict, self.working_dir),
                         env=env,
                         cwd=self.working_dir,
                         policy=policy_config.policy
                     )
                     
-                    # Add nprocs with this template/policy
                     process_group.add_process(nproc=policy_config.nprocs, template=template)
                 
-                # Initialize and start the ProcessGroup
+                # Initialize and start
                 process_group.init()
                 process_group.start()
                 self.process_groups.append(process_group)
@@ -370,28 +394,62 @@ class WorkerPool:
             # Log configuration
             config_summary = []
             for cfg in self.worker_configs:
-                policy_details = [f"{p.nprocs}procs" for p in cfg.policies]
-                config_summary.append(
-                    f"{cfg.name}: {len(cfg.policies)} templates ({', '.join(policy_details)})"
-                )
+                config_summary.append(f"{cfg.name}: {cfg.total_slots()} slots")
             
             self.logger.info(
-                f"Worker pool initialized: {len(self.process_groups)} ProcessGroups, "
-                f"{self.total_workers} total processes. Config: {'; '.join(config_summary)}"
+                f"Worker pool initialized: {self.total_workers} workers, "
+                f"{self.total_slots} total slots. Config: {'; '.join(config_summary)}"
             )
             
         except Exception as e:
             self.logger.exception(f"Failed to initialize worker pool: {e}")
             raise
     
-    def submit_request(self, request: WorkerRequest):
-        """Submit task request to worker pool."""
+    def find_worker_for_task(self, ranks: int) -> Optional[str]:
+        """Find worker with sufficient free slots for task.
+        
+        Returns worker name or None if no worker available.
+        """
+        for worker_name, free_slots in self.worker_free_slots.items():
+            if free_slots >= ranks:
+                return worker_name
+        return None
+    
+    def reserve_slots(self, worker_name: str, ranks: int) -> bool:
+        """Reserve slots on a worker. Returns True if successful."""
+        if worker_name not in self.worker_free_slots:
+            return False
+        
+        if self.worker_free_slots[worker_name] >= ranks:
+            self.worker_free_slots[worker_name] -= ranks
+            self.logger.debug(
+                f"Reserved {ranks} slots on {worker_name} "
+                f"({self.worker_free_slots[worker_name]}/{self.worker_slots[worker_name]} free)"
+            )
+            return True
+        return False
+    
+    def release_slots(self, worker_name: str, ranks: int):
+        """Release slots back to worker."""
+        if worker_name in self.worker_free_slots:
+            self.worker_free_slots[worker_name] += ranks
+            self.logger.debug(
+                f"Released {ranks} slots on {worker_name} "
+                f"({self.worker_free_slots[worker_name]}/{self.worker_slots[worker_name]} free)"
+            )
+    
+    def submit_request(self, worker_name: str, request: WorkerRequest):
+        """Submit task request to specific worker."""
         if not self.initialized:
             raise RuntimeError("Worker pool not initialized")
+        
+        if worker_name not in self.worker_queues:
+            raise ValueError(f"Unknown worker: {worker_name}")
+        
         try:
-            self.input_queue.put(request, timeout=10)
+            self.worker_queues[worker_name].put(request, timeout=10)
         except Exception as e:
-            self.logger.error(f"Failed to submit request: {e}")
+            self.logger.error(f"Failed to submit request to {worker_name}: {e}")
             raise
     
     def try_get_response(self) -> Optional[WorkerResponse]:
@@ -408,8 +466,10 @@ class WorkerPool:
         
         try:
             # Send shutdown signal to all workers
-            for _ in range(self.total_workers):
-                self.input_queue.put(None)
+            for worker_name, input_queue in self.worker_queues.items():
+                worker_slots = self.worker_slots[worker_name]
+                for _ in range(worker_slots):
+                    input_queue.put(None)
             
             # Stop all process groups
             for idx, process_group in enumerate(self.process_groups):
@@ -430,6 +490,7 @@ class WorkerPool:
         finally:
             self.initialized = False
             self.process_groups.clear()
+            self.worker_queues.clear()
 
 
 class ResultCollector:
@@ -532,15 +593,13 @@ class ResultCollector:
 
 
 class DragonExecutionBackend(BaseExecutionBackend):
-    """Dragon execution backend with Policy-based worker configuration.
-    Features:
-    - Flexible worker configuration with explicit node placement
-    - Custom Dragon Policy objects per worker group
-    - Unified handling of function and executable tasks
-    - Queue-based task distribution
-    - Automatic result aggregation for multi-rank tasks
-    - Data reference management for large return values
+    """Dragon execution backend with per-worker slot reservation.
     
+    Features:
+    - Per-worker queue architecture for true load balancing
+    - Slot reservation ensures tasks go to workers with capacity
+    - Tasks with same rank requirement run in parallel on different workers
+    - High performance with minimal coordination overhead
     Example configuration:
         resources = {
             "workers": [
@@ -576,7 +635,6 @@ class DragonExecutionBackend(BaseExecutionBackend):
         # Parse worker configuration
         self._worker_configs = self._parse_worker_config(self._resources)
         self._total_slots = sum(cfg.total_slots() for cfg in self._worker_configs)
-        self._free_slots: int = self._total_slots
         
         # Other resources
         self._working_dir: str = self._resources.get("working_dir", os.getcwd())
@@ -586,6 +644,7 @@ class DragonExecutionBackend(BaseExecutionBackend):
         
         # Task tracking
         self._running_tasks: dict[str, TaskInfo] = {}
+        self._pending_tasks: asyncio.Queue = asyncio.Queue()
         
         # Dragon components
         self._ddict: Optional[DDict] = ddict
@@ -593,9 +652,10 @@ class DragonExecutionBackend(BaseExecutionBackend):
         self._shared_memory: Optional[SharedMemoryManager] = None
         self._result_collector: Optional[ResultCollector] = None
         self._worker_pool: Optional[WorkerPool] = None
-        
+
         # Async management
         self._monitor_task: Optional[asyncio.Task] = None
+        self._scheduler_task: Optional[asyncio.Task] = None
         self._shutdown_event = asyncio.Event()
     
     def _parse_worker_config(self, resources: dict) -> List[WorkerGroupConfig]:
@@ -688,17 +748,21 @@ class DragonExecutionBackend(BaseExecutionBackend):
             # Initialize result collector
             self._result_collector = ResultCollector(self._shared_memory, logger)
             
-            # Initialize worker pool with node awareness
+            # Initialize worker pool with per-worker queues
             self._worker_pool = WorkerPool(
                 self._worker_configs, self._ddict, self._working_dir, logger, self._system_alloc
             )
             await self._worker_pool.initialize()
             
-            # Start monitoring
+            # Start monitoring and scheduling
             self._monitor_task = asyncio.create_task(self._monitor_tasks())
-            
-            logger.info(f"Dragon backend initialized: {self._total_slots} total slots")
-            
+            self._scheduler_task = asyncio.create_task(self._schedule_tasks())
+
+            logger.info(
+                f"Dragon backend initialized: {len(self._worker_configs)} workers, "
+                f"{self._total_slots} total slots"
+            )
+
         except Exception as e:
             logger.exception(f"Failed to initialize Dragon backend: {e}")
             raise
@@ -722,23 +786,59 @@ class DragonExecutionBackend(BaseExecutionBackend):
             self.tasks[task["uid"]] = task
             
             try:
-                await self._submit_task(task)
+                # Add to pending queue for scheduler
+                await self._pending_tasks.put(task)
             except Exception as e:
                 task["exception"] = e
                 self._callback_func(task, "FAILED")
     
-    async def _submit_task(self, task: dict[str, Any]) -> None:
-        """Submit task to worker pool."""
+    async def _schedule_tasks(self) -> None:
+        """Scheduler: assigns tasks to workers with available slots."""
+        while not self._shutdown_event.is_set():
+            try:
+                # Get pending task (with timeout to check shutdown)
+                try:
+                    task = await asyncio.wait_for(self._pending_tasks.get(), timeout=0.1)
+                except asyncio.TimeoutError:
+                    continue
+                
+                uid = task["uid"]
+                backend_kwargs = task.get('task_backend_specific_kwargs', {})
+                ranks = int(backend_kwargs.get("ranks", 1))
+                
+                # Find worker with sufficient slots
+                worker_name = self._worker_pool.find_worker_for_task(ranks)
+                
+                while not worker_name and not self._shutdown_event.is_set():
+                    # Wait for slots to become available
+                    await asyncio.sleep(0.01)
+                    worker_name = self._worker_pool.find_worker_for_task(ranks)
+                
+                if self._shutdown_event.is_set():
+                    break
+                
+                # Reserve slots on this worker
+                if not self._worker_pool.reserve_slots(worker_name, ranks):
+                    # Race condition - put back and retry
+                    await self._pending_tasks.put(task)
+                    continue
+                
+                try:
+                    # Submit task to this specific worker
+                    await self._submit_task_to_worker(task, worker_name, ranks)
+                except Exception as e:
+                    # Release slots on failure
+                    self._worker_pool.release_slots(worker_name, ranks)
+                    task["exception"] = e
+                    self._callback_func(task, "FAILED")
+                
+            except Exception as e:
+                logger.exception(f"Error in task scheduler: {e}")
+                await asyncio.sleep(0.1)
+    
+    async def _submit_task_to_worker(self, task: dict[str, Any], worker_name: str, ranks: int) -> None:
+        """Submit task to specific worker."""
         uid = task["uid"]
-        backend_kwargs = task.get('task_backend_specific_kwargs', {})
-        ranks = int(backend_kwargs.get("ranks", 1))
-        
-        # Wait for available slots
-        while self._free_slots < ranks:
-            logger.debug(f"Waiting for {ranks} slots for task {uid}, {self._free_slots} free")
-            await asyncio.sleep(0.1)
-        
-        self._free_slots -= ranks
         
         try:
             # Register task with result collector
@@ -748,7 +848,7 @@ class DragonExecutionBackend(BaseExecutionBackend):
             is_function = bool(task.get("function"))
             task_type = TaskType.FUNCTION if is_function else TaskType.EXECUTABLE
             
-            # Create and submit requests for each rank
+            # Create and submit requests for each rank to the specific worker
             for rank in range(ranks):
                 if is_function:
                     request = WorkerRequest(
@@ -771,19 +871,20 @@ class DragonExecutionBackend(BaseExecutionBackend):
                         working_dir=self._working_dir
                     )
                 
-                self._worker_pool.submit_request(request)
+                # Submit to specific worker's queue
+                self._worker_pool.submit_request(worker_name, request)
             
             # Track task
             self._running_tasks[uid] = TaskInfo(
                 task_type=task_type,
                 ranks=ranks,
+                worker_name=worker_name,
                 start_time=time.time()
             )
             
             self._callback_func(task, "RUNNING")
             
         except Exception:
-            self._free_slots += ranks
             raise
     
     async def _monitor_tasks(self) -> None:
@@ -814,6 +915,9 @@ class DragonExecutionBackend(BaseExecutionBackend):
                             if result:
                                 task.update(result)
                             
+                            # Release slots back to worker
+                            self._worker_pool.release_slots(task_info.worker_name, task_info.ranks)
+                            
                             # Determine status
                             if task.get("canceled", False):
                                 self._callback_func(task, "CANCELED")
@@ -822,7 +926,6 @@ class DragonExecutionBackend(BaseExecutionBackend):
                             else:
                                 self._callback_func(task, "DONE")
                         
-                        self._free_slots += task_info.ranks
                         self._running_tasks.pop(uid, None)
                 
                 await asyncio.sleep(0.01)
@@ -844,6 +947,10 @@ class DragonExecutionBackend(BaseExecutionBackend):
         task_info.canceled = True
         self._result_collector.cleanup_task(uid)
         
+        # Release slots
+        self._worker_pool.release_slots(task_info.worker_name, task_info.ranks)
+        
+        # Mark task as canceled
         if uid in self.tasks:
             self.tasks[uid]["canceled"] = True
         
@@ -900,6 +1007,7 @@ class DragonExecutionBackend(BaseExecutionBackend):
         self._ensure_initialized()
         return self._ddict
     
+    # Compatibility methods
     def link_explicit_data_deps(self, src_task=None, dst_task=None, file_name=None, file_path=None):
         pass
     
@@ -923,17 +1031,28 @@ class DragonExecutionBackend(BaseExecutionBackend):
         try:
             self._shutdown_event.set()
             
+            # Cancel all tasks
             await self.cancel_all_tasks()
             
+            # Stop scheduler
+            if self._scheduler_task and not self._scheduler_task.done():
+                try:
+                    await asyncio.wait_for(self._scheduler_task, timeout=5.0)
+                except asyncio.TimeoutError:
+                    self._scheduler_task.cancel()
+            
+            # Stop monitoring
             if self._monitor_task and not self._monitor_task.done():
                 try:
                     await asyncio.wait_for(self._monitor_task, timeout=5.0)
                 except asyncio.TimeoutError:
                     self._monitor_task.cancel()
             
+            # Shutdown worker pool
             if self._worker_pool:
                 await self._worker_pool.shutdown()
             
+            # Cleanup DDict
             if self._ddict:
                 try:
                     self._ddict.clear()
