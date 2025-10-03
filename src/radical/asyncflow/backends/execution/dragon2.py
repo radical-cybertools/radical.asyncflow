@@ -43,6 +43,13 @@ class TaskType(Enum):
     FUNCTION = "function"
     EXECUTABLE = "executable"
 
+class WorkerPinningPolicy(Enum):
+    """Worker pinning policy for task assignment."""
+    STRICT = "strict"      # Wait indefinitely for hinted worker
+    SOFT = "soft"          # Wait N seconds, then fallback to any worker
+    AFFINITY = "affinity"  # Prefer hinted worker, use others if not immediately available
+    EXCLUSIVE = "exclusive" # Only hinted worker can run, reject if insufficient capacity
+
 @dataclass
 class WorkerRequest:
     """Request sent to worker pool."""
@@ -69,7 +76,7 @@ class WorkerResponse:
     task_uid: str
     rank: int
     success: bool
-    worker_name: str = ""  # Added for tracking
+    worker_name: str = ""
     return_value: Any = None
     stdout: str = ""
     stderr: str = ""
@@ -83,7 +90,7 @@ class TaskInfo:
     task_type: TaskType
     ranks: int
     start_time: float
-    worker_name: str = ""  # Track which worker has this task
+    worker_name: str = ""
     canceled: bool = False
     completed_ranks: int = 0
 
@@ -325,13 +332,8 @@ class WorkerPool:
         self.logger = logger
         self.system = system
         
-        # Shared output queue for all workers
         self.output_queue: Optional[Queue] = None
-        
-        # Per-worker input queues
         self.worker_queues: Dict[str, Queue] = {}
-        
-        # Slot tracking per worker
         self.worker_slots: Dict[str, int] = {}
         self.worker_free_slots: Dict[str, int] = {}
         
@@ -405,18 +407,28 @@ class WorkerPool:
             self.logger.exception(f"Failed to initialize worker pool: {e}")
             raise
     
-    def find_worker_for_task(self, ranks: int) -> Optional[str]:
-        """Find worker with sufficient free slots for task.
+    def find_worker_for_task(self, ranks: int, preferred_worker: Optional[str] = None) -> Optional[str]:
+        """Find worker with sufficient free slots for task."""
+        if preferred_worker and preferred_worker in self.worker_free_slots:
+            if self.worker_free_slots[preferred_worker] >= ranks:
+                return preferred_worker
         
-        Returns worker name or None if no worker available.
-        """
         for worker_name, free_slots in self.worker_free_slots.items():
             if free_slots >= ranks:
                 return worker_name
         return None
     
+    def worker_has_capacity(self, worker_name: str, ranks: int) -> bool:
+        """Check if specific worker has capacity."""
+        return (worker_name in self.worker_free_slots and 
+                self.worker_free_slots[worker_name] >= ranks)
+    
+    def worker_exists(self, worker_name: str) -> bool:
+        """Check if worker exists."""
+        return worker_name in self.worker_slots
+    
     def reserve_slots(self, worker_name: str, ranks: int) -> bool:
-        """Reserve slots on a worker. Returns True if successful."""
+        """Reserve slots on a worker."""
         if worker_name not in self.worker_free_slots:
             return False
         
@@ -465,7 +477,6 @@ class WorkerPool:
             return
         
         try:
-            # Send shutdown signal to all workers
             for worker_name, input_queue in self.worker_queues.items():
                 worker_slots = self.worker_slots[worker_name]
                 for _ in range(worker_slots):
@@ -510,7 +521,7 @@ class ResultCollector:
         self.task_responses[task_uid] = []
     
     def process_response(self, response: WorkerResponse) -> Optional[str]:
-        """Process worker response. Returns task_uid if task is complete."""
+        """Process worker response."""
         task_uid = response.task_uid
         
         if task_uid not in self.task_expected:
@@ -533,7 +544,6 @@ class ResultCollector:
         responses.sort(key=lambda r: r.rank)
         
         if len(responses) == 1:
-            # Single rank
             r = responses[0]
             result = {
                 "stdout": r.stdout,
@@ -543,7 +553,6 @@ class ResultCollector:
                 "exception": r.exception
             }
         else:
-            # Multi-rank - aggregate
             stdout_parts = [f"Rank {r.rank}: {r.stdout}" for r in responses]
             stderr_parts = [f"Rank {r.rank}: {r.stderr}" for r in responses]
             max_exit_code = max(r.exit_code for r in responses)
@@ -793,7 +802,7 @@ class DragonExecutionBackend(BaseExecutionBackend):
                 self._callback_func(task, "FAILED")
     
     async def _schedule_tasks(self) -> None:
-        """Scheduler: assigns tasks to workers with available slots."""
+        """Scheduler: assigns tasks to workers with available slots and respects pinning policies."""
         while not self._shutdown_event.is_set():
             try:
                 # Get pending task (with timeout to check shutdown)
@@ -805,19 +814,23 @@ class DragonExecutionBackend(BaseExecutionBackend):
                 uid = task["uid"]
                 backend_kwargs = task.get('task_backend_specific_kwargs', {})
                 ranks = int(backend_kwargs.get("ranks", 1))
+                worker_hint = backend_kwargs.get("worker_hint")
                 
-                # Find worker with sufficient slots
-                worker_name = self._worker_pool.find_worker_for_task(ranks)
+                pinning_policy_str = backend_kwargs.get("pinning_policy", "").lower()
+                try:
+                    pinning_policy = WorkerPinningPolicy(pinning_policy_str) if pinning_policy_str else None
+                except ValueError:
+                    pinning_policy = None
                 
-                while not worker_name and not self._shutdown_event.is_set():
-                    # Wait for slots to become available
-                    await asyncio.sleep(0.01)
-                    worker_name = self._worker_pool.find_worker_for_task(ranks)
+                pinning_timeout = float(backend_kwargs.get("pinning_timeout", 30.0))
                 
-                if self._shutdown_event.is_set():
-                    break
+                worker_name = await self._apply_pinning_policy(
+                    task, ranks, worker_hint, pinning_policy, pinning_timeout
+                )
                 
-                # Reserve slots on this worker
+                if not worker_name:
+                    continue
+                
                 if not self._worker_pool.reserve_slots(worker_name, ranks):
                     # Race condition - put back and retry
                     await self._pending_tasks.put(task)
@@ -835,6 +848,99 @@ class DragonExecutionBackend(BaseExecutionBackend):
             except Exception as e:
                 logger.exception(f"Error in task scheduler: {e}")
                 await asyncio.sleep(0.1)
+
+    async def _apply_pinning_policy(
+        self, 
+        task: dict, 
+        ranks: int, 
+        worker_hint: Optional[str],
+        pinning_policy: Optional[WorkerPinningPolicy],
+        timeout: float
+    ) -> Optional[str]:
+        """Apply worker pinning policy to find appropriate worker."""
+        
+        if not worker_hint or not pinning_policy:
+            worker_name = self._worker_pool.find_worker_for_task(ranks)
+            while not worker_name and not self._shutdown_event.is_set():
+                await asyncio.sleep(0.01)
+                worker_name = self._worker_pool.find_worker_for_task(ranks)
+            return worker_name
+        
+        if not self._worker_pool.worker_exists(worker_hint):
+            error_msg = f"Worker hint '{worker_hint}' does not exist. Available workers: {list(self._worker_pool.worker_slots.keys())}"
+            logger.error(error_msg)
+            task["exception"] = ValueError(error_msg)
+            self._callback_func(task, "FAILED")
+            return None
+        
+        if pinning_policy == WorkerPinningPolicy.AFFINITY:
+            if self._worker_pool.worker_has_capacity(worker_hint, ranks):
+                logger.debug(f"Task {task['uid']}: AFFINITY policy - using preferred worker {worker_hint}")
+                return worker_hint
+            else:
+                worker_name = self._worker_pool.find_worker_for_task(ranks)
+                if worker_name:
+                    logger.debug(f"Task {task['uid']}: AFFINITY policy - fallback to {worker_name} (preferred {worker_hint} unavailable)")
+                    return worker_name
+                while not worker_name and not self._shutdown_event.is_set():
+                    await asyncio.sleep(0.01)
+                    worker_name = self._worker_pool.find_worker_for_task(ranks)
+                return worker_name
+        
+        elif pinning_policy == WorkerPinningPolicy.STRICT:
+            logger.debug(f"Task {task['uid']}: STRICT policy - waiting for worker {worker_hint}")
+            while not self._shutdown_event.is_set():
+                if self._worker_pool.worker_has_capacity(worker_hint, ranks):
+                    logger.debug(f"Task {task['uid']}: STRICT policy - worker {worker_hint} now available")
+                    return worker_hint
+                await asyncio.sleep(0.01)
+            return None
+        
+        elif pinning_policy == WorkerPinningPolicy.SOFT:
+            logger.debug(f"Task {task['uid']}: SOFT policy - waiting {timeout}s for worker {worker_hint}")
+            start_time = time.time()
+            
+            while time.time() - start_time < timeout:
+                if self._worker_pool.worker_has_capacity(worker_hint, ranks):
+                    logger.debug(f"Task {task['uid']}: SOFT policy - worker {worker_hint} available")
+                    return worker_hint
+                await asyncio.sleep(0.01)
+                if self._shutdown_event.is_set():
+                    return None
+            
+            logger.debug(f"Task {task['uid']}: SOFT policy - timeout reached, using fallback")
+            worker_name = self._worker_pool.find_worker_for_task(ranks)
+            while not worker_name and not self._shutdown_event.is_set():
+                await asyncio.sleep(0.01)
+                worker_name = self._worker_pool.find_worker_for_task(ranks)
+            
+            if worker_name:
+                logger.debug(f"Task {task['uid']}: SOFT policy - fallback to {worker_name}")
+            return worker_name
+        
+        elif pinning_policy == WorkerPinningPolicy.EXCLUSIVE:
+            if self._worker_pool.worker_has_capacity(worker_hint, ranks):
+                logger.debug(f"Task {task['uid']}: EXCLUSIVE policy - using worker {worker_hint}")
+                return worker_hint
+            else:
+                total_capacity = self._worker_pool.worker_slots.get(worker_hint, 0)
+                if ranks > total_capacity:
+                    error_msg = (
+                        f"Task {task['uid']}: EXCLUSIVE policy - worker '{worker_hint}' "
+                        f"has insufficient total capacity ({total_capacity} slots) for {ranks} ranks"
+                    )
+                else:
+                    error_msg = (
+                        f"Task {task['uid']}: EXCLUSIVE policy - worker '{worker_hint}' "
+                        f"currently has insufficient free slots for {ranks} ranks"
+                    )
+                
+                logger.error(error_msg)
+                task["exception"] = ValueError(error_msg)
+                self._callback_func(task, "FAILED")
+                return None
+        
+        return None
     
     async def _submit_task_to_worker(self, task: dict[str, Any], worker_name: str, ranks: int) -> None:
         """Submit task to specific worker."""
@@ -991,6 +1097,25 @@ class DragonExecutionBackend(BaseExecutionBackend):
                 return False, "Task 'ranks' must be >= 1"
         except (ValueError, TypeError):
             return False, "Task 'ranks' must be a valid integer"
+        
+        pinning_policy = backend_kwargs.get("pinning_policy", "").lower()
+        if pinning_policy:
+            try:
+                WorkerPinningPolicy(pinning_policy)
+            except ValueError:
+                valid_policies = [p.value for p in WorkerPinningPolicy]
+                return False, f"Invalid pinning_policy '{pinning_policy}'. Must be one of: {valid_policies}"
+        
+        worker_hint = backend_kwargs.get("worker_hint")
+        if worker_hint and not isinstance(worker_hint, str):
+            return False, "worker_hint must be a string"
+        
+        timeout = backend_kwargs.get("pinning_timeout")
+        if timeout is not None:
+            try:
+                float(timeout)
+            except (ValueError, TypeError):
+                return False, "pinning_timeout must be a number"
         
         return True, ""
     
