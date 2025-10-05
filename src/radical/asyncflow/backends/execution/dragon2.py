@@ -4,7 +4,7 @@ import os
 import time
 import pickle
 import uuid
-from typing import Any, Callable, Optional, Dict, List
+from typing import Any, Callable, Optional, Dict, List, Tuple
 from enum import Enum
 from dataclasses import dataclass, field
 
@@ -57,6 +57,7 @@ class WorkerRequest:
     task_type: TaskType
     rank: int
     total_ranks: int
+    gpu_ids: List[int] = field(default_factory=list)
     function: Optional[Callable] = None
     args: tuple = ()
     kwargs: dict = None
@@ -91,6 +92,7 @@ class TaskInfo:
     ranks: int
     start_time: float
     worker_name: str = ""
+    gpu_allocations: Dict[int, List[int]] = field(default_factory=dict)  # rank -> gpu_ids
     canceled: bool = False
     completed_ranks: int = 0
 
@@ -99,6 +101,7 @@ class PolicyConfig:
     """Configuration for a single policy (ProcessTemplate)."""
     nprocs: int
     policy: Optional[Policy] = None
+    ngpus: int = 0
 
 @dataclass
 class WorkerGroupConfig:
@@ -112,8 +115,12 @@ class WorkerGroupConfig:
     policies: List[PolicyConfig] = field(default_factory=list)
     
     def total_slots(self) -> int:
-        """Total slots provided by this worker group."""
+        """Total CPU slots provided by this worker group."""
         return sum(p.nprocs for p in self.policies)
+    
+    def total_gpus(self) -> int:
+        """Total GPUs provided by this worker group."""
+        return sum(p.ngpus for p in self.policies)
 
 class DataReference:
     """Reference to data stored in Cross Node Distributed Dict."""
@@ -235,6 +242,12 @@ def _worker_loop(worker_id: int, worker_name: str, input_queue: Queue, output_qu
             # Set rank environment variable for the task
             os.environ["DRAGON_RANK"] = str(request.rank)
             
+            # Set GPU visibility for this rank
+            if request.gpu_ids:
+                os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(map(str, request.gpu_ids))
+            else:
+                os.environ["CUDA_VISIBLE_DEVICES"] = ""
+            
             response = WorkerResponse(
                 task_uid=request.task_uid,
                 rank=request.rank,
@@ -281,7 +294,7 @@ def _worker_loop(worker_id: int, worker_name: str, input_queue: Queue, output_qu
                         cwd=request.working_dir,
                         capture_output=True,
                         text=True,
-                        timeout=3600  # 1 hour timeout
+                        timeout=3600  # FIXME: should be user defined
                     )
                     
                     response.success = (result.returncode == 0)
@@ -308,6 +321,8 @@ def _worker_loop(worker_id: int, worker_name: str, input_queue: Queue, output_qu
         print(f"Worker {worker_id} ({worker_name}) fatal error: {e}")
         raise
     finally:
+        # FIXME: return value should be stored in ddict (not used)
+        # while the output should be flushed to the queue
         # Detach from DDict on exit
         try:
             ddict.detach()
@@ -334,12 +349,19 @@ class WorkerPool:
         
         self.output_queue: Optional[Queue] = None
         self.worker_queues: Dict[str, Queue] = {}
+        
+        # CPU slot tracking
         self.worker_slots: Dict[str, int] = {}
         self.worker_free_slots: Dict[str, int] = {}
+        
+        # GPU tracking
+        self.worker_gpus: Dict[str, int] = {}  # Total GPUs per worker
+        self.worker_free_gpus: Dict[str, List[int]] = {}  # Available GPU IDs per worker
         
         self.process_groups: List[ProcessGroup] = []
         self.total_workers = len(worker_configs)
         self.total_slots = sum(cfg.total_slots() for cfg in worker_configs)
+        self.total_gpus = sum(cfg.total_gpus() for cfg in worker_configs)
         self.initialized = False
         
     async def initialize(self):
@@ -359,13 +381,20 @@ class WorkerPool:
                 # Create dedicated input queue for this worker
                 input_queue = Queue()
                 self.worker_queues[worker_name] = input_queue
-
-                # Track slots
+                
+                # Track CPU slots
                 total_worker_slots = worker_config.total_slots()
                 self.worker_slots[worker_name] = total_worker_slots
                 self.worker_free_slots[worker_name] = total_worker_slots
                 
-                # Create ProcessGroup for this worker
+                # Track GPUs - assign sequential IDs
+                total_worker_gpus = worker_config.total_gpus()
+                self.worker_gpus[worker_name] = total_worker_gpus
+                
+                # Build list of available GPU IDs for this worker
+                gpu_ids = list(range(total_worker_gpus))
+                self.worker_free_gpus[worker_name] = gpu_ids.copy()
+                
                 process_group = ProcessGroup(restart=False)
                 
                 # Add templates for each policy
@@ -393,61 +422,96 @@ class WorkerPool:
             
             self.initialized = True
             
-            # Log configuration
+
             config_summary = []
             for cfg in self.worker_configs:
-                config_summary.append(f"{cfg.name}: {cfg.total_slots()} slots")
+                config_summary.append(f"{cfg.name}: {cfg.total_slots()} slots, {cfg.total_gpus()} GPUs")
             
             self.logger.info(
                 f"Worker pool initialized: {self.total_workers} workers, "
-                f"{self.total_slots} total slots. Config: {'; '.join(config_summary)}"
+                f"{self.total_slots} total slots, {self.total_gpus} total GPUs. "
+                f"Config: {'; '.join(config_summary)}"
             )
             
         except Exception as e:
             self.logger.exception(f"Failed to initialize worker pool: {e}")
             raise
     
-    def find_worker_for_task(self, ranks: int, preferred_worker: Optional[str] = None) -> Optional[str]:
-        """Find worker with sufficient free slots for task."""
+    def find_worker_for_task(self, ranks: int, gpus_per_rank: int = 0, 
+                            preferred_worker: Optional[str] = None) -> Optional[str]:
+        """Find worker with sufficient free CPU slots and GPUs."""
+        total_gpus_needed = ranks * gpus_per_rank
+        
         if preferred_worker and preferred_worker in self.worker_free_slots:
-            if self.worker_free_slots[preferred_worker] >= ranks:
+            if (self.worker_free_slots[preferred_worker] >= ranks and
+                len(self.worker_free_gpus[preferred_worker]) >= total_gpus_needed):
                 return preferred_worker
         
-        for worker_name, free_slots in self.worker_free_slots.items():
-            if free_slots >= ranks:
+        for worker_name in self.worker_free_slots.keys():
+            if (self.worker_free_slots[worker_name] >= ranks and
+                len(self.worker_free_gpus[worker_name]) >= total_gpus_needed):
                 return worker_name
         return None
     
-    def worker_has_capacity(self, worker_name: str, ranks: int) -> bool:
-        """Check if specific worker has capacity."""
+    def worker_has_capacity(self, worker_name: str, ranks: int, gpus_per_rank: int = 0) -> bool:
+        """Check if specific worker has CPU and GPU capacity."""
+        total_gpus_needed = ranks * gpus_per_rank
         return (worker_name in self.worker_free_slots and 
-                self.worker_free_slots[worker_name] >= ranks)
+                self.worker_free_slots[worker_name] >= ranks and
+                len(self.worker_free_gpus[worker_name]) >= total_gpus_needed)
     
     def worker_exists(self, worker_name: str) -> bool:
         """Check if worker exists."""
         return worker_name in self.worker_slots
     
-    def reserve_slots(self, worker_name: str, ranks: int) -> bool:
-        """Reserve slots on a worker."""
+    def reserve_resources(self, worker_name: str, ranks: int, gpus_per_rank: int = 0) -> Tuple[bool, Dict[int, List[int]]]:
+        """Reserve CPU slots and GPUs. Returns (success, gpu_allocations)."""
         if worker_name not in self.worker_free_slots:
-            return False
+            return False, {}
         
-        if self.worker_free_slots[worker_name] >= ranks:
-            self.worker_free_slots[worker_name] -= ranks
-            self.logger.debug(
-                f"Reserved {ranks} slots on {worker_name} "
-                f"({self.worker_free_slots[worker_name]}/{self.worker_slots[worker_name]} free)"
-            )
-            return True
-        return False
+        total_gpus_needed = ranks * gpus_per_rank
+        
+        if (self.worker_free_slots[worker_name] < ranks or
+            len(self.worker_free_gpus[worker_name]) < total_gpus_needed):
+            return False, {}
+        
+        # Reserve CPU slots
+        self.worker_free_slots[worker_name] -= ranks
+        
+        # Reserve GPUs and create allocation map
+        gpu_allocations = {}
+        if gpus_per_rank > 0:
+            for rank in range(ranks):
+                allocated_gpus = []
+                for _ in range(gpus_per_rank):
+                    gpu_id = self.worker_free_gpus[worker_name].pop(0)
+                    allocated_gpus.append(gpu_id)
+                gpu_allocations[rank] = allocated_gpus
+        
+        self.logger.debug(
+            f"Reserved {ranks} slots + {total_gpus_needed} GPUs on {worker_name} "
+            f"({self.worker_free_slots[worker_name]}/{self.worker_slots[worker_name]} slots free, "
+            f"{len(self.worker_free_gpus[worker_name])}/{self.worker_gpus[worker_name]} GPUs free)"
+        )
+        
+        return True, gpu_allocations
     
-    def release_slots(self, worker_name: str, ranks: int):
-        """Release slots back to worker."""
+    def release_resources(self, worker_name: str, ranks: int, gpu_allocations: Dict[int, List[int]]):
+        """Release CPU slots and GPUs back to worker."""
         if worker_name in self.worker_free_slots:
             self.worker_free_slots[worker_name] += ranks
+            
+            # Return GPUs to free pool
+            for rank_gpus in gpu_allocations.values():
+                self.worker_free_gpus[worker_name].extend(rank_gpus)
+            self.worker_free_gpus[worker_name].sort()
+            
+            total_gpus_returned = sum(len(gpus) for gpus in gpu_allocations.values())
+            
             self.logger.debug(
-                f"Released {ranks} slots on {worker_name} "
-                f"({self.worker_free_slots[worker_name]}/{self.worker_slots[worker_name]} free)"
+                f"Released {ranks} slots + {total_gpus_returned} GPUs on {worker_name} "
+                f"({self.worker_free_slots[worker_name]}/{self.worker_slots[worker_name]} slots free, "
+                f"{len(self.worker_free_gpus[worker_name])}/{self.worker_gpus[worker_name]} GPUs free)"
             )
     
     def submit_request(self, worker_name: str, request: WorkerRequest):
@@ -613,17 +677,17 @@ class DragonExecutionBackend(BaseExecutionBackend):
         resources = {
             "workers": [
                 {
-                    "name": "worker0",
+                    "name": "cpu_worker",
                     "policies": [
                         {"nprocs": 128, "policy": policy_n0},
                         {"nprocs": 128, "policy": policy_n1}
                     ]
                 },
                 {
-                    "name": "worker1",
+                    "name": "gpu_worker",
                     "policies": [
-                        {"nprocs": 128, "policy": policy_n2},
-                        {"nprocs": 128, "policy": policy_n3}
+                        {"nprocs": 128, "ngpus": 2, "policy": policy_n2},
+                        {"nprocs": 128, "ngpus": 2, "policy": policy_n3}
                     ]
                 }
             ]
@@ -644,6 +708,7 @@ class DragonExecutionBackend(BaseExecutionBackend):
         # Parse worker configuration
         self._worker_configs = self._parse_worker_config(self._resources)
         self._total_slots = sum(cfg.total_slots() for cfg in self._worker_configs)
+        self._total_gpus = sum(cfg.total_gpus() for cfg in self._worker_configs)
         
         # Other resources
         self._working_dir: str = self._resources.get("working_dir", os.getcwd())
@@ -686,6 +751,7 @@ class DragonExecutionBackend(BaseExecutionBackend):
                 policy_configs = []
                 for policy_idx, policy_dict in enumerate(policies_list):
                     nprocs = policy_dict.get("nprocs", 1)
+                    ngpus = policy_dict.get("ngpus", 0)
                     policy = policy_dict.get("policy", None)
                     
                     if policy is not None and not isinstance(policy, Policy):
@@ -693,17 +759,16 @@ class DragonExecutionBackend(BaseExecutionBackend):
                             f"Worker '{name}' policy {policy_idx}: 'policy' must be a Dragon Policy object or None"
                         )
                     
-                    policy_configs.append(PolicyConfig(nprocs=nprocs, policy=policy))
+                    policy_configs.append(PolicyConfig(nprocs=nprocs, policy=policy, ngpus=ngpus))
                 
                 configs.append(WorkerGroupConfig(name=name, policies=policy_configs))
             
             return configs
         else:
-            # Default: create single-process workers with auto-placement
             slots = int(resources.get("slots", mp.cpu_count() or 1))
             return [WorkerGroupConfig(
                 name="default_workers", 
-                policies=[PolicyConfig(nprocs=slots, policy=None)]
+                policies=[PolicyConfig(nprocs=slots, policy=None, ngpus=0)]
             )]
     
     def __await__(self):
@@ -769,7 +834,7 @@ class DragonExecutionBackend(BaseExecutionBackend):
 
             logger.info(
                 f"Dragon backend initialized: {len(self._worker_configs)} workers, "
-                f"{self._total_slots} total slots"
+                f"{self._total_slots} total slots, {self._total_gpus} total GPUs"
             )
 
         except Exception as e:
@@ -802,7 +867,7 @@ class DragonExecutionBackend(BaseExecutionBackend):
                 self._callback_func(task, "FAILED")
     
     async def _schedule_tasks(self) -> None:
-        """Scheduler: assigns tasks to workers with available slots and respects pinning policies."""
+        """Scheduler: assigns tasks to workers with GPU-aware placement."""
         while not self._shutdown_event.is_set():
             try:
                 # Get pending task (with timeout to check shutdown)
@@ -814,6 +879,7 @@ class DragonExecutionBackend(BaseExecutionBackend):
                 uid = task["uid"]
                 backend_kwargs = task.get('task_backend_specific_kwargs', {})
                 ranks = int(backend_kwargs.get("ranks", 1))
+                gpus_per_rank = int(backend_kwargs.get("gpus_per_rank", 0))
                 worker_hint = backend_kwargs.get("worker_hint")
                 
                 pinning_policy_str = backend_kwargs.get("pinning_policy", "").lower()
@@ -825,23 +891,24 @@ class DragonExecutionBackend(BaseExecutionBackend):
                 pinning_timeout = float(backend_kwargs.get("pinning_timeout", 30.0))
                 
                 worker_name = await self._apply_pinning_policy(
-                    task, ranks, worker_hint, pinning_policy, pinning_timeout
+                    task, ranks, gpus_per_rank, worker_hint, pinning_policy, pinning_timeout
                 )
                 
                 if not worker_name:
                     continue
                 
-                if not self._worker_pool.reserve_slots(worker_name, ranks):
+                success, gpu_allocations = self._worker_pool.reserve_resources(worker_name, ranks, gpus_per_rank)
+                if not success:
                     # Race condition - put back and retry
                     await self._pending_tasks.put(task)
                     continue
                 
                 try:
                     # Submit task to this specific worker
-                    await self._submit_task_to_worker(task, worker_name, ranks)
+                    await self._submit_task_to_worker(task, worker_name, ranks, gpu_allocations)
                 except Exception as e:
                     # Release slots on failure
-                    self._worker_pool.release_slots(worker_name, ranks)
+                    self._worker_pool.release_resources(worker_name, ranks, gpu_allocations)
                     task["exception"] = e
                     self._callback_func(task, "FAILED")
                 
@@ -852,7 +919,8 @@ class DragonExecutionBackend(BaseExecutionBackend):
     async def _apply_pinning_policy(
         self, 
         task: dict, 
-        ranks: int, 
+        ranks: int,
+        gpus_per_rank: int,
         worker_hint: Optional[str],
         pinning_policy: Optional[WorkerPinningPolicy],
         timeout: float
@@ -860,10 +928,10 @@ class DragonExecutionBackend(BaseExecutionBackend):
         """Apply worker pinning policy to find appropriate worker."""
         
         if not worker_hint or not pinning_policy:
-            worker_name = self._worker_pool.find_worker_for_task(ranks)
+            worker_name = self._worker_pool.find_worker_for_task(ranks, gpus_per_rank)
             while not worker_name and not self._shutdown_event.is_set():
                 await asyncio.sleep(0.01)
-                worker_name = self._worker_pool.find_worker_for_task(ranks)
+                worker_name = self._worker_pool.find_worker_for_task(ranks, gpus_per_rank)
             return worker_name
         
         if not self._worker_pool.worker_exists(worker_hint):
@@ -874,23 +942,23 @@ class DragonExecutionBackend(BaseExecutionBackend):
             return None
         
         if pinning_policy == WorkerPinningPolicy.AFFINITY:
-            if self._worker_pool.worker_has_capacity(worker_hint, ranks):
+            if self._worker_pool.worker_has_capacity(worker_hint, ranks, gpus_per_rank):
                 logger.debug(f"Task {task['uid']}: AFFINITY policy - using preferred worker {worker_hint}")
                 return worker_hint
             else:
-                worker_name = self._worker_pool.find_worker_for_task(ranks)
+                worker_name = self._worker_pool.find_worker_for_task(ranks, gpus_per_rank)
                 if worker_name:
-                    logger.debug(f"Task {task['uid']}: AFFINITY policy - fallback to {worker_name} (preferred {worker_hint} unavailable)")
+                    logger.debug(f"Task {task['uid']}: AFFINITY policy - fallback to {worker_name}")
                     return worker_name
                 while not worker_name and not self._shutdown_event.is_set():
                     await asyncio.sleep(0.01)
-                    worker_name = self._worker_pool.find_worker_for_task(ranks)
+                    worker_name = self._worker_pool.find_worker_for_task(ranks, gpus_per_rank)
                 return worker_name
         
         elif pinning_policy == WorkerPinningPolicy.STRICT:
             logger.debug(f"Task {task['uid']}: STRICT policy - waiting for worker {worker_hint}")
             while not self._shutdown_event.is_set():
-                if self._worker_pool.worker_has_capacity(worker_hint, ranks):
+                if self._worker_pool.worker_has_capacity(worker_hint, ranks, gpus_per_rank):
                     logger.debug(f"Task {task['uid']}: STRICT policy - worker {worker_hint} now available")
                     return worker_hint
                 await asyncio.sleep(0.01)
@@ -901,7 +969,7 @@ class DragonExecutionBackend(BaseExecutionBackend):
             start_time = time.time()
             
             while time.time() - start_time < timeout:
-                if self._worker_pool.worker_has_capacity(worker_hint, ranks):
+                if self._worker_pool.worker_has_capacity(worker_hint, ranks, gpus_per_rank):
                     logger.debug(f"Task {task['uid']}: SOFT policy - worker {worker_hint} available")
                     return worker_hint
                 await asyncio.sleep(0.01)
@@ -909,30 +977,34 @@ class DragonExecutionBackend(BaseExecutionBackend):
                     return None
             
             logger.debug(f"Task {task['uid']}: SOFT policy - timeout reached, using fallback")
-            worker_name = self._worker_pool.find_worker_for_task(ranks)
+            worker_name = self._worker_pool.find_worker_for_task(ranks, gpus_per_rank)
             while not worker_name and not self._shutdown_event.is_set():
                 await asyncio.sleep(0.01)
-                worker_name = self._worker_pool.find_worker_for_task(ranks)
+                worker_name = self._worker_pool.find_worker_for_task(ranks, gpus_per_rank)
             
             if worker_name:
                 logger.debug(f"Task {task['uid']}: SOFT policy - fallback to {worker_name}")
             return worker_name
         
         elif pinning_policy == WorkerPinningPolicy.EXCLUSIVE:
-            if self._worker_pool.worker_has_capacity(worker_hint, ranks):
+            if self._worker_pool.worker_has_capacity(worker_hint, ranks, gpus_per_rank):
                 logger.debug(f"Task {task['uid']}: EXCLUSIVE policy - using worker {worker_hint}")
                 return worker_hint
             else:
                 total_capacity = self._worker_pool.worker_slots.get(worker_hint, 0)
-                if ranks > total_capacity:
+                total_gpu_capacity = self._worker_pool.worker_gpus.get(worker_hint, 0)
+                total_gpus_needed = ranks * gpus_per_rank
+                
+                if ranks > total_capacity or total_gpus_needed > total_gpu_capacity:
                     error_msg = (
                         f"Task {task['uid']}: EXCLUSIVE policy - worker '{worker_hint}' "
-                        f"has insufficient total capacity ({total_capacity} slots) for {ranks} ranks"
+                        f"has insufficient total capacity ({total_capacity} slots, {total_gpu_capacity} GPUs) "
+                        f"for {ranks} ranks × {gpus_per_rank} GPUs/rank"
                     )
                 else:
                     error_msg = (
                         f"Task {task['uid']}: EXCLUSIVE policy - worker '{worker_hint}' "
-                        f"currently has insufficient free slots for {ranks} ranks"
+                        f"currently has insufficient free resources"
                     )
                 
                 logger.error(error_msg)
@@ -942,8 +1014,9 @@ class DragonExecutionBackend(BaseExecutionBackend):
         
         return None
     
-    async def _submit_task_to_worker(self, task: dict[str, Any], worker_name: str, ranks: int) -> None:
-        """Submit task to specific worker."""
+    async def _submit_task_to_worker(self, task: dict[str, Any], worker_name: str, 
+                                     ranks: int, gpu_allocations: Dict[int, List[int]]) -> None:
+        """Submit task to specific worker with GPU assignments."""
         uid = task["uid"]
         
         try:
@@ -956,12 +1029,15 @@ class DragonExecutionBackend(BaseExecutionBackend):
             
             # Create and submit requests for each rank to the specific worker
             for rank in range(ranks):
+                gpu_ids = gpu_allocations.get(rank, [])
+                
                 if is_function:
                     request = WorkerRequest(
                         task_uid=uid,
                         task_type=TaskType.FUNCTION,
                         rank=rank,
                         total_ranks=ranks,
+                        gpu_ids=gpu_ids,
                         function=task["function"],
                         args=task.get("args", ()),
                         kwargs=task.get("kwargs", {})
@@ -972,6 +1048,7 @@ class DragonExecutionBackend(BaseExecutionBackend):
                         task_type=TaskType.EXECUTABLE,
                         rank=rank,
                         total_ranks=ranks,
+                        gpu_ids=gpu_ids,
                         executable=task["executable"],
                         exec_args=list(task.get("args", [])),
                         working_dir=self._working_dir
@@ -985,6 +1062,7 @@ class DragonExecutionBackend(BaseExecutionBackend):
                 task_type=task_type,
                 ranks=ranks,
                 worker_name=worker_name,
+                gpu_allocations=gpu_allocations,
                 start_time=time.time()
             )
             
@@ -1009,22 +1087,22 @@ class DragonExecutionBackend(BaseExecutionBackend):
                     else:
                         break
                 
-                # Process completed tasks
                 for uid in completed_tasks:
                     if uid in self._running_tasks:
                         task_info = self._running_tasks[uid]
                         task = self.tasks.get(uid)
                         
                         if task:
-                            # Get aggregated result
                             result = await self._result_collector.get_task_result(uid)
                             if result:
                                 task.update(result)
                             
-                            # Release slots back to worker
-                            self._worker_pool.release_slots(task_info.worker_name, task_info.ranks)
+                            self._worker_pool.release_resources(
+                                task_info.worker_name, 
+                                task_info.ranks, 
+                                task_info.gpu_allocations
+                            )
                             
-                            # Determine status
                             if task.get("canceled", False):
                                 self._callback_func(task, "CANCELED")
                             elif task.get("exception") or task.get("exit_code", 0) != 0:
@@ -1053,10 +1131,12 @@ class DragonExecutionBackend(BaseExecutionBackend):
         task_info.canceled = True
         self._result_collector.cleanup_task(uid)
         
-        # Release slots
-        self._worker_pool.release_slots(task_info.worker_name, task_info.ranks)
+        self._worker_pool.release_resources(
+            task_info.worker_name, 
+            task_info.ranks, 
+            task_info.gpu_allocations
+        )
         
-        # Mark task as canceled
         if uid in self.tasks:
             self.tasks[uid]["canceled"] = True
         
@@ -1098,6 +1178,14 @@ class DragonExecutionBackend(BaseExecutionBackend):
         except (ValueError, TypeError):
             return False, "Task 'ranks' must be a valid integer"
         
+        gpus_per_rank = backend_kwargs.get("gpus_per_rank", 0)
+        try:
+            gpus_per_rank = int(gpus_per_rank)
+            if gpus_per_rank < 0:
+                return False, "Task 'gpus_per_rank' must be >= 0"
+        except (ValueError, TypeError):
+            return False, "Task 'gpus_per_rank' must be a valid integer"
+        
         pinning_policy = backend_kwargs.get("pinning_policy", "").lower()
         if pinning_policy:
             try:
@@ -1132,7 +1220,6 @@ class DragonExecutionBackend(BaseExecutionBackend):
         self._ensure_initialized()
         return self._ddict
     
-    # Compatibility methods
     def link_explicit_data_deps(self, src_task=None, dst_task=None, file_name=None, file_path=None):
         pass
     
@@ -1159,7 +1246,6 @@ class DragonExecutionBackend(BaseExecutionBackend):
             # Cancel all tasks
             await self.cancel_all_tasks()
             
-            # Stop scheduler
             if self._scheduler_task and not self._scheduler_task.done():
                 try:
                     await asyncio.wait_for(self._scheduler_task, timeout=5.0)
