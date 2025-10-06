@@ -58,6 +58,7 @@ class WorkerRequest:
     rank: int
     total_ranks: int
     gpu_ids: List[int] = field(default_factory=list)
+    use_ddict_storage: bool = False
     function: Optional[Callable] = None
     args: tuple = ()
     kwargs: dict = None
@@ -79,6 +80,8 @@ class WorkerResponse:
     success: bool
     worker_name: str = ""
     return_value: Any = None
+    stored_ref_key: Optional[str] = None
+    is_reference: bool = False
     stdout: str = ""
     stderr: str = ""
     exception: Optional[str] = None
@@ -92,7 +95,7 @@ class TaskInfo:
     ranks: int
     start_time: float
     worker_name: str = ""
-    gpu_allocations: Dict[int, List[int]] = field(default_factory=dict)  # rank -> gpu_ids
+    gpu_allocations: Dict[int, List[int]] = field(default_factory=dict) # rank -> gpu_ids
     canceled: bool = False
     completed_ranks: int = 0
 
@@ -125,10 +128,11 @@ class WorkerGroupConfig:
 class DataReference:
     """Reference to data stored in Cross Node Distributed Dict."""
 
-    def __init__(self, ref_id: str, backend_id: str, ddict: DDict):
+    def __init__(self, ref_id: str, backend_id: str, ddict: DDict, rank_info: Optional[Dict] = None):
         self._ref_id = ref_id
         self._backend_id = backend_id
         self._ddict = ddict
+        self._rank_info = rank_info
 
     @property
     def ref_id(self) -> str:
@@ -140,12 +144,29 @@ class DataReference:
 
     def resolve(self) -> Any:
         """Resolve reference to actual data."""
-        data_key = f"data_{self._ref_id}"
-        if data_key not in self._ddict:
-            raise KeyError(f"Reference data not found: {self._ref_id}")
-        return self._ddict[data_key]
+        if self._rank_info is None:
+            data_key = f"data_{self._ref_id}"
+            if data_key not in self._ddict:
+                raise KeyError(f"Reference data not found: {self._ref_id}")
+            return self._ddict[data_key]
+        else:
+            task_uid = self._rank_info["task_uid"]
+            rank_keys = self._rank_info["rank_keys"]
+            results = []
+            for ref_key in rank_keys:
+                if ref_key is None:
+                    results.append(None)
+                else:
+                    data_key = f"data_{ref_key}"
+                    if data_key in self._ddict:
+                        results.append(self._ddict[data_key])
+                    else:
+                        results.append(None)
+            return results
 
     def __repr__(self) -> str:
+        if self._rank_info:
+            return f"DataReference(ref_id='{self._ref_id}', backend_id='{self._backend_id}', ranks={len(self._rank_info['rank_keys'])})"
         return f"DataReference(ref_id='{self._ref_id}', backend_id='{self._backend_id}')"
 
 class SharedMemoryManager:
@@ -227,6 +248,8 @@ def _worker_loop(worker_id: int, worker_name: str, input_queue: Queue, output_qu
     os.environ["DRAGON_WORKER_ID"] = str(worker_id)
     os.environ["DRAGON_WORKER_NAME"] = worker_name
     
+    backend_id = os.environ.get("DRAGON_BACKEND_ID", f"dragon_{uuid.uuid4().hex[:8]}")
+    
     try:
         while True:
             # Get task from queue (blocking)
@@ -272,8 +295,24 @@ def _worker_loop(worker_id: int, worker_name: str, input_queue: Queue, output_qu
                             # Sync functions not supported - enforce async
                             raise RuntimeError('Sync functions are not supported, please define as async')
                         
+                        if result is not None and request.use_ddict_storage:
+                            ref_key = f"return_{request.task_uid}_rank_{request.rank}"
+                            try:
+                                ddict.pput(f"data_{ref_key}", result)
+                                ddict.pput(f"meta_{ref_key}", {
+                                    'backend_id': backend_id,
+                                    'stored_at': time.time()
+                                })
+                                response.stored_ref_key = ref_key
+                                response.is_reference = True
+                                response.return_value = None
+                            except Exception as store_error:
+                                raise RuntimeError(f"Failed to store return value in DDict: {store_error}")
+                        else:
+                            response.return_value = result
+                            response.is_reference = False
+                        
                         response.success = True
-                        response.return_value = result
                         response.stdout = out_buf.getvalue()
                         response.stderr = err_buf.getvalue()
                         response.exit_code = 0
@@ -294,7 +333,7 @@ def _worker_loop(worker_id: int, worker_name: str, input_queue: Queue, output_qu
                         cwd=request.working_dir,
                         capture_output=True,
                         text=True,
-                        timeout=3600  # FIXME: should be user defined
+                        timeout=3600 # FIXME: should be user defined
                     )
                     
                     response.success = (result.returncode == 0)
@@ -321,9 +360,6 @@ def _worker_loop(worker_id: int, worker_name: str, input_queue: Queue, output_qu
         print(f"Worker {worker_id} ({worker_name}) fatal error: {e}")
         raise
     finally:
-        # FIXME: return value should be stored in ddict (not used)
-        # while the output should be flushed to the queue
-        # Detach from DDict on exit
         try:
             ddict.detach()
         except Exception:
@@ -340,12 +376,13 @@ class WorkerPool:
     """
 
     def __init__(self, worker_configs: List[WorkerGroupConfig], ddict: DDict, 
-                 working_dir: str, logger: logging.Logger, system: System):
+                 working_dir: str, logger: logging.Logger, system: System, backend_id: str):
         self.worker_configs = worker_configs
         self.ddict = ddict
         self.working_dir = working_dir
         self.logger = logger
         self.system = system
+        self.backend_id = backend_id
         
         self.output_queue: Optional[Queue] = None
         self.worker_queues: Dict[str, Queue] = {}
@@ -402,6 +439,7 @@ class WorkerPool:
                     env = os.environ.copy()
                     env["DRAGON_WORKER_ID"] = str(worker_id)
                     env["DRAGON_WORKER_NAME"] = worker_name
+                    env["DRAGON_BACKEND_ID"] = self.backend_id
 
                     template = ProcessTemplate(
                         target=_worker_loop,
@@ -421,7 +459,6 @@ class WorkerPool:
                 worker_id += 1
             
             self.initialized = True
-            
 
             config_summary = []
             for cfg in self.worker_configs:
@@ -609,11 +646,21 @@ class ResultCollector:
         
         if len(responses) == 1:
             r = responses[0]
+            
+            if r.is_reference:
+                final_return = DataReference(
+                    ref_id=r.stored_ref_key,
+                    backend_id=self.shared_memory.backend_id,
+                    ddict=self.shared_memory.ddict
+                )
+            else:
+                final_return = r.return_value
+            
             result = {
                 "stdout": r.stdout,
                 "stderr": r.stderr,
                 "exit_code": r.exit_code,
-                "return_value": await self._maybe_create_reference(r.return_value, task_uid, r.rank),
+                "return_value": final_return,
                 "exception": r.exception
             }
         else:
@@ -622,20 +669,34 @@ class ResultCollector:
             max_exit_code = max(r.exit_code for r in responses)
             all_successful = all(r.success for r in responses)
             
-            # Collect return values
-            return_values = []
-            for r in responses:
-                if r.success and r.return_value is not None:
-                    ref_value = await self._maybe_create_reference(r.return_value, task_uid, r.rank)
-                    return_values.append(ref_value)
-                else:
-                    return_values.append(r.return_value)
+            has_any_reference = any(r.is_reference for r in responses if r.success)
+            
+            if has_any_reference:
+                rank_keys = []
+                for r in responses:
+                    if r.success and r.is_reference:
+                        rank_keys.append(r.stored_ref_key)
+                    else:
+                        rank_keys.append(None)
+                
+                final_return = DataReference(
+                    ref_id=f"unified_{task_uid}",
+                    backend_id=self.shared_memory.backend_id,
+                    ddict=self.shared_memory.ddict,
+                    rank_info={
+                        "task_uid": task_uid,
+                        "rank_keys": rank_keys
+                    }
+                )
+            else:
+                return_values = [r.return_value for r in responses]
+                final_return = return_values[0] if len(return_values) == 1 else return_values
             
             result = {
                 "stdout": "\n".join(stdout_parts),
                 "stderr": "\n".join(stderr_parts),
                 "exit_code": max_exit_code,
-                "return_value": return_values[0] if len(return_values) == 1 else return_values,
+                "return_value": final_return,
                 "exception": None if all_successful else "; ".join(
                     r.exception for r in responses if r.exception
                 )
@@ -644,20 +705,6 @@ class ResultCollector:
         # Cleanup
         self.cleanup_task(task_uid)
         return result
-    
-    async def _maybe_create_reference(self, value: Any, task_uid: str, rank: int) -> Any:
-        """Create reference if value is large enough."""
-        if value is None:
-            return None
-            
-        if self.shared_memory.should_use_reference(value):
-            try:
-                ref = await self.shared_memory.store_data(value)
-                self.logger.debug(f"Created reference for {task_uid}_rank_{rank}")
-                return ref
-            except Exception as e:
-                self.logger.warning(f"Failed to create reference: {e}")
-        return value
     
     def cleanup_task(self, task_uid: str):
         """Clean up task tracking."""
@@ -674,6 +721,10 @@ class DragonExecutionBackend(BaseExecutionBackend):
     - Tasks with same rank requirement run in parallel on different workers
     - High performance with minimal coordination overhead
     Example configuration:
+        policy_n0 = Policy(host_id=0, distribution=Policy.Distribution.BLOCK)
+        policy_n1 = Policy(host_id=1, distribution=Policy.Distribution.BLOCK)
+        policy_n2 = Policy(host_id=2, distribution=Policy.Distribution.BLOCK)
+        policy_n3 = Policy(host_id=3, distribution=Policy.Distribution.BLOCK)
         resources = {
             "workers": [
                 {
@@ -726,6 +777,7 @@ class DragonExecutionBackend(BaseExecutionBackend):
         self._shared_memory: Optional[SharedMemoryManager] = None
         self._result_collector: Optional[ResultCollector] = None
         self._worker_pool: Optional[WorkerPool] = None
+        self._backend_id: str = f"dragon_{uuid.uuid4().hex[:8]}"
 
         # Async management
         self._monitor_task: Optional[asyncio.Task] = None
@@ -824,7 +876,8 @@ class DragonExecutionBackend(BaseExecutionBackend):
             
             # Initialize worker pool with per-worker queues
             self._worker_pool = WorkerPool(
-                self._worker_configs, self._ddict, self._working_dir, logger, self._system_alloc
+                self._worker_configs, self._ddict, self._working_dir, logger, 
+                self._system_alloc, self._backend_id
             )
             await self._worker_pool.initialize()
             
@@ -834,7 +887,8 @@ class DragonExecutionBackend(BaseExecutionBackend):
 
             logger.info(
                 f"Dragon backend initialized: {len(self._worker_configs)} workers, "
-                f"{self._total_slots} total slots, {self._total_gpus} total GPUs"
+                f"{self._total_slots} total slots, {self._total_gpus} total GPUs, "
+                f"reference threshold: {self._reference_threshold} bytes"
             )
 
         except Exception as e:
@@ -1027,7 +1081,9 @@ class DragonExecutionBackend(BaseExecutionBackend):
             is_function = bool(task.get("function"))
             task_type = TaskType.FUNCTION if is_function else TaskType.EXECUTABLE
             
-            # Create and submit requests for each rank to the specific worker
+            backend_kwargs = task.get('task_backend_specific_kwargs', {})
+            use_ddict_storage = backend_kwargs.get('use_ddict_storage', False)
+            
             for rank in range(ranks):
                 gpu_ids = gpu_allocations.get(rank, [])
                 
@@ -1038,6 +1094,7 @@ class DragonExecutionBackend(BaseExecutionBackend):
                         rank=rank,
                         total_ranks=ranks,
                         gpu_ids=gpu_ids,
+                        use_ddict_storage=use_ddict_storage,
                         function=task["function"],
                         args=task.get("args", ()),
                         kwargs=task.get("kwargs", {})
@@ -1049,6 +1106,7 @@ class DragonExecutionBackend(BaseExecutionBackend):
                         rank=rank,
                         total_ranks=ranks,
                         gpu_ids=gpu_ids,
+                        use_ddict_storage=False,
                         executable=task["executable"],
                         exec_args=list(task.get("args", [])),
                         working_dir=self._working_dir
@@ -1259,11 +1317,9 @@ class DragonExecutionBackend(BaseExecutionBackend):
                 except asyncio.TimeoutError:
                     self._monitor_task.cancel()
             
-            # Shutdown worker pool
             if self._worker_pool:
                 await self._worker_pool.shutdown()
             
-            # Cleanup DDict
             if self._ddict:
                 try:
                     self._ddict.clear()
