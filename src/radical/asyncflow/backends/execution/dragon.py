@@ -2,9 +2,7 @@ import asyncio
 import logging
 import os
 import time
-import pickle
-import dill
-import cloudpickle
+import sys
 import uuid
 from typing import Any, Callable, Optional, Dict, List, Tuple
 from enum import Enum
@@ -36,11 +34,6 @@ except ImportError:  # pragma: no cover - environment without Dragon
 
 logger = logging.getLogger(__name__)
 
-# Default threshold for storing return values as DataReferences (1MB)
-DRAGON_DEFAULT_REF_THRESHOLD = int(
-    os.environ.get("DRAGON_DEFAULT_REF_THRESHOLD", 1024 * 1024)
-)
-
 class TaskType(Enum):
     """Enumeration of supported task types."""
     SINGLE_FUNCTION = "single_function"
@@ -62,7 +55,7 @@ class TaskInfo:
 
 @dataclass
 class ExecutableTaskCompletion:
-    """Direct task completion data from executable process."""
+    """Task completion data from executable process."""
     task_uid: str
     rank: int
     process_id: int
@@ -71,7 +64,7 @@ class ExecutableTaskCompletion:
     exit_code: int
     timestamp: float
     
-    def to_task_result(self) -> dict:
+    def to_result_dict(self) -> dict:
         """Convert to task result dictionary."""
         return {
             "stdout": self.stdout,
@@ -81,101 +74,117 @@ class ExecutableTaskCompletion:
             "exception": None if self.exit_code == 0 else f"Process exited with code {self.exit_code}"
         }
 
-class DataReference:
-    """Reference to data stored in Cross Node Distributed Dict."""
+@dataclass
+class FunctionTaskCompletion:
+    """Task completion data from function process - sent via queue."""
+    task_uid: str
+    rank: int
+    process_id: int
+    stdout: str
+    stderr: str
+    exit_code: int
+    timestamp: float
+    success: bool
+    exception: Optional[str]
+    traceback: Optional[str]
+    return_value: Any  # Actual value or DataReference
+    stored_in_ddict: bool  # True if return_value is in DDict
+    
+    def to_result_dict(self) -> dict:
+        """Convert to task result dictionary."""
+        return {
+            "stdout": self.stdout,
+            "stderr": self.stderr,
+            "exit_code": self.exit_code,
+            "return_value": self.return_value,
+            "exception": self.exception,
+            "success": self.success
+        }
 
-    def __init__(self, ref_id: str, backend_id: str, ddict: DDict):
-        self._ref_id = ref_id
-        self._backend_id = backend_id
+class DataReference:
+    """Zero-copy reference to function results stored in DDict.
+    
+    Points directly to result keys written by function wrapper.
+    User controls when to resolve and fetch data from DDict.
+    """
+
+    def __init__(self, task_uid: str, ranks: int, ddict: DDict, backend_id: str):
+        self._task_uid = task_uid
+        self._ranks = ranks
         self._ddict = ddict
+        self._backend_id = backend_id
 
     @property
-    def ref_id(self) -> str:
-        return self._ref_id
+    def task_uid(self) -> str:
+        return self._task_uid
+    
+    @property
+    def ranks(self) -> int:
+        return self._ranks
 
     @property
     def backend_id(self) -> str:
         return self._backend_id
 
     def resolve(self) -> Any:
-        """Resolve reference to actual data. User controls when this happens."""
-        data_key = f"data_{self._ref_id}"
+        """Resolve reference to actual return values from DDict.
         
-        if data_key not in self._ddict:
-            raise KeyError(f"Reference data not found: {self._ref_id}")
+        Fetches data directly from function-wrapper-written keys in DDict:
+        - Single rank (ranks=1): Returns single return_value
+        - Multi-rank (ranks>1): Returns list of return_values indexed by rank
+        """
+        if self._ranks == 1:
+            # Single rank - return single value
+            result_key = f"return_{self._task_uid}_rank_0"
+            if result_key not in self._ddict:
+                raise KeyError(f"Result data not found for task: {self._task_uid}")
             
-        return self._ddict[data_key]
+            return self._ddict[result_key]
+        else:
+            # Multi-rank - return list of values
+            return_values = []
+            for rank in range(self._ranks):
+                result_key = f"return_{self._task_uid}_rank_{rank}"
+                if result_key not in self._ddict:
+                    raise KeyError(f"Result data not found for task {self._task_uid} rank {rank}")
+                
+                return_values.append(self._ddict[result_key])
+            
+            return return_values
 
     def __repr__(self) -> str:
-        return f"DataReference(ref_id='{self._ref_id}', backend_id='{self._backend_id}')"
+        return f"DataReference(task_uid='{self._task_uid}', ranks={self._ranks}, backend_id='{self._backend_id}')"
 
 class SharedMemoryManager:
-    """Manages data storage using DDict exclusively."""
+    """Manages optional DDict storage for large function results."""
 
-    def __init__(self, ddict: DDict, system: System, logger: logging.Logger, reference_threshold: int = DRAGON_DEFAULT_REF_THRESHOLD):
+    def __init__(self, ddict: DDict, system: System, logger: logging.Logger):
         self.ddict = ddict
         self.system = system
         self.logger = logger
         self.backend_id = f"dragon_{uuid.uuid4().hex[:8]}"
-        self.reference_threshold = reference_threshold
 
     async def initialize(self):
         """Initialize the storage manager."""
-        self.logger.debug(f"SharedMemoryManager initialized with DDict-only storage (threshold: {self.reference_threshold} bytes)")
+        self.logger.debug(f"SharedMemoryManager initialized with optional DDict storage")
 
-    def should_use_reference(self, data: Any) -> bool:
-        """Determine if data should be stored as reference based on size threshold."""
-        try:
-            estimated_size = self._estimate_size(data)
-            return estimated_size >= self.reference_threshold
-        except Exception:
-            return False
-
-    def _estimate_size(self, data: Any) -> int:
-        """Estimate serialized size of data."""
-        if isinstance(data, (str, bytes)):
-            return len(data)
-        elif isinstance(data, (list, tuple, dict)) and hasattr(data, '__len__'):
-            return len(data) * 100  # Rough estimate
-
-        try:
-            return len(pickle.dumps(data))
-        except Exception:
-            return 1000
-
-    async def store_data(self, data: Any, node_id: int = 0) -> DataReference:
-        """Store data in DDict and return reference."""
-        ref_id = f"ref_{uuid.uuid4().hex}"
+    def create_data_reference(self, task_uid: str, ranks: int) -> DataReference:
+        """Create a zero-copy reference to existing result keys in DDict.
         
-        try:
-            self._store_in_ddict(ref_id, data)
-            self.logger.debug(f"Stored data {ref_id} in DDict")
-        except Exception as e:
-            self.logger.error(f"Failed to store data {ref_id}: {e}")
-            raise
-            
-        return DataReference(ref_id, self.backend_id, self.ddict)
-
-    def _store_in_ddict(self, ref_id: str, data: Any):
-        """Store data directly in DDict."""
-        self.ddict.pput(f"data_{ref_id}", data)
-        self.ddict.pput(f"meta_{ref_id}", {
-            'backend_id': self.backend_id,
-            'stored_at': time.time()
-        })
+        Creates a reference object that points to
+        keys: return_{task_uid}_rank_{i}
+        """
+        return DataReference(task_uid, ranks, self.ddict, self.backend_id)
 
     def cleanup_reference(self, ref: DataReference):
-        """Clean up reference data."""
+        """Clean up reference data from DDict."""
         try:
-            meta_key = f"meta_{ref.ref_id}"
-            data_key = f"data_{ref.ref_id}"
-
-            for key in [meta_key, data_key]:
-                if key in self.ddict:
-                    del self.ddict[key]
-                    
+            for rank in range(ref.ranks):
+                result_key = f"return_{ref.task_uid}_rank_{rank}"
+                if result_key in self.ddict:
+                    del self.ddict[result_key]
         except Exception as e:
-            self.logger.warning(f"Error cleaning up reference {ref.ref_id}: {e}")
+            self.logger.warning(f"Error cleaning up reference {ref.task_uid}: {e}")
 
     # DDict operations for direct task data sharing
     def store_task_data(self, key: str, data: Any) -> None:
@@ -210,7 +219,7 @@ class SharedMemoryManager:
             self.logger.warning(f"Error clearing DDict data: {e}")
 
 class ResultCollector:
-    """Direct queue consumption for executables."""
+    """Unified queue-based result collection for both executable and function tasks."""
 
     def __init__(self, shared_memory_manager: SharedMemoryManager, result_queue: Queue, logger: logging.Logger):
         self.shared_memory = shared_memory_manager
@@ -218,81 +227,126 @@ class ResultCollector:
         self.result_queue = result_queue
         self.logger = logger
         
-        # Track only completion counts, not actual results
-        self.executable_completion_counts: Dict[str, int] = {}  # task_uid -> received_count
-        self.executable_expected_counts: Dict[str, int] = {}   # task_uid -> expected_count
-        self.executable_aggregated_results: Dict[str, List[ExecutableTaskCompletion]] = {}  # temporary aggregation
+        # Track completion for all task types
+        self.completion_counts: Dict[str, int] = {}  # task_uid -> received_count
+        self.expected_counts: Dict[str, int] = {}   # task_uid -> expected_count
+        self.aggregated_results: Dict[str, List] = {}  # task_uid -> [completions]
 
-    def register_executable_task(self, task_uid: str, ranks: int):
-        """Register an executable task for result tracking."""
-        self.executable_expected_counts[task_uid] = ranks
-        self.executable_completion_counts[task_uid] = 0
-        self.executable_aggregated_results[task_uid] = []  # All tasks use aggregation
+    def register_task(self, task_uid: str, ranks: int):
+        """Register any task (executable or function) for result tracking."""
+        self.expected_counts[task_uid] = ranks
+        self.completion_counts[task_uid] = 0
+        self.aggregated_results[task_uid] = []
 
-    def try_consume_executable_result(self) -> Optional[str]:
+    def try_consume_result(self) -> Optional[str]:
         """Try to consume one result from queue. Returns task_uid if task completed, None otherwise."""
         try:
             result = self.result_queue.get(block=False)
-            if isinstance(result, ExecutableTaskCompletion):
-                return self._process_executable_completion(result)
-            elif result == "SHUTDOWN":
+            if result == "SHUTDOWN":
                 return None
+            
+            if isinstance(result, (ExecutableTaskCompletion, FunctionTaskCompletion)):
+                return self._process_completion(result)
+                
         except Exception:
             # Queue empty
             pass
         return None
 
-    def _process_executable_completion(self, completion: ExecutableTaskCompletion) -> Optional[str]:
-        """Process completion directly and return task_uid if task is now complete."""
+    def _process_completion(self, completion) -> Optional[str]:
+        """Process completion and return task_uid if task is now complete."""
         task_uid = completion.task_uid
         
-        if task_uid not in self.executable_expected_counts:
+        if task_uid not in self.expected_counts:
             self.logger.warning(f"Received completion for unregistered task {task_uid}")
             return None
 
         # Increment completion count
-        self.executable_completion_counts[task_uid] += 1
+        self.completion_counts[task_uid] += 1
+        self.aggregated_results[task_uid].append(completion)
         
-        expected = self.executable_expected_counts[task_uid]
-        received = self.executable_completion_counts[task_uid]
-        
-        # Both single and multi-rank use same aggregation path
-        self.executable_aggregated_results[task_uid].append(completion)
+        expected = self.expected_counts[task_uid]
+        received = self.completion_counts[task_uid]
         
         if received >= expected:
             return task_uid
                 
         return None
 
-    def get_completed_executable_task(self, task_uid: str) -> Optional[dict]:
+    def get_completed_task(self, task_uid: str) -> Optional[dict]:
         """Get completed task data and clean up tracking."""
-        if task_uid not in self.executable_expected_counts:
+        if task_uid not in self.expected_counts:
             return None
             
-        results = self.executable_aggregated_results.get(task_uid, [])
+        results = self.aggregated_results.get(task_uid, [])
         if not results:
             return None
             
         # Sort by rank
         results.sort(key=lambda r: r.rank)
         
+        # Determine if this is function or executable task
+        is_function_task = isinstance(results[0], FunctionTaskCompletion)
+        
+        if is_function_task:
+            result_data = self._aggregate_function_results(task_uid, results)
+        else:
+            result_data = self._aggregate_executable_results(results)
+        
+        # Clean up tracking
+        self.cleanup_task(task_uid)
+        return result_data
+
+    def _aggregate_function_results(self, task_uid: str, results: List[FunctionTaskCompletion]) -> dict:
+        """Aggregate function task results."""
         if len(results) == 1:
-            # Single rank result
+            # Single rank - return as-is
             result = results[0]
-            result_data = {
+            return {
                 "stdout": result.stdout,
                 "stderr": result.stderr,
                 "exit_code": result.exit_code,
-                "return_value": None,
-                "exception": None if result.exit_code == 0 else f"Process exited with code {result.exit_code}"
+                "return_value": result.return_value,
+                "exception": result.exception,
+                "success": result.success
             }
         else:
-            # Multi-rank - aggregate results
+            # Multi-rank - aggregate
+            stdout_parts = [f"Rank {r.rank}: {r.stdout}" for r in results]
+            stderr_parts = [f"Rank {r.rank}: {r.stderr}" for r in results]
+            max_exit_code = max(r.exit_code for r in results)
+            all_successful = all(r.success for r in results)
+            
+            # Collect return values
+            return_values = [r.return_value for r in results]
+            
+            # If any stored in DDict, create single reference for all ranks
+            if any(r.stored_in_ddict for r in results):
+                return_value = self.shared_memory.create_data_reference(task_uid, len(results))
+            else:
+                return_value = return_values
+            
+            return {
+                "stdout": "\n".join(stdout_parts),
+                "stderr": "\n".join(stderr_parts),
+                "exit_code": max_exit_code,
+                "return_value": return_value,
+                "exception": None if all_successful else "; ".join(
+                    str(r.exception) for r in results if not r.success
+                ),
+                "success": all_successful
+            }
+
+    def _aggregate_executable_results(self, results: List[ExecutableTaskCompletion]) -> dict:
+        """Aggregate executable task results."""
+        if len(results) == 1:
+            return results[0].to_result_dict()
+        else:
             stdout_parts = [f"Rank {r.rank}: {r.stdout}" for r in results]
             stderr_parts = [f"Rank {r.rank}: {r.stderr}" for r in results]
             max_exit_code = max(r.exit_code for r in results)
             
-            result_data = {
+            return {
                 "stdout": "\n".join(stdout_parts),
                 "stderr": "\n".join(stderr_parts),
                 "exit_code": max_exit_code,
@@ -300,124 +354,20 @@ class ResultCollector:
                 "exception": None if max_exit_code == 0 else f"One or more processes failed"
             }
 
-        # Clean up tracking
-        self.cleanup_executable_task(task_uid)
-        return result_data
-
-    def cleanup_executable_task(self, task_uid: str):
+    def cleanup_task(self, task_uid: str):
         """Clean up task tracking data."""
-        self.executable_completion_counts.pop(task_uid, None)
-        self.executable_expected_counts.pop(task_uid, None)
-        self.executable_aggregated_results.pop(task_uid, None)
+        self.completion_counts.pop(task_uid, None)
+        self.expected_counts.pop(task_uid, None)
+        self.aggregated_results.pop(task_uid, None)
 
-    def is_executable_task_complete(self, task_uid: str) -> bool:
+    def is_task_complete(self, task_uid: str) -> bool:
         """Check if task is complete based on completion counts."""
-        if task_uid not in self.executable_expected_counts:
+        if task_uid not in self.expected_counts:
             return False
         
-        expected = self.executable_expected_counts[task_uid]
-        received = self.executable_completion_counts.get(task_uid, 0)
+        expected = self.expected_counts[task_uid]
+        received = self.completion_counts.get(task_uid, 0)
         return received >= expected
-
-    async def collect_function_results(self, uid: str, ranks: int, task: dict):
-        """Collect function results from DDict."""
-        completion_keys = [f"{uid}_rank_{rank}_completed" for rank in range(ranks)]
-        await self._wait_for_completion_keys(completion_keys)
-
-        results = []
-        stdout_parts = {}
-        stderr_parts = {}
-        return_values = []
-
-        for rank in range(ranks):
-            result_key = f"{uid}_rank_{rank}"
-            result_data = self._get_ddict_result(result_key, rank)
-            results.append(result_data)
-            stdout_parts[rank] = result_data.get('stdout', '')
-            stderr_parts[rank] = result_data.get('stderr', '')
-
-            if result_data.get('success', False) and result_data.get('return_value') is not None:
-                referenced_value = await self._store_return_value(
-                    result_data['return_value'], uid, rank
-                )
-                return_values.append(referenced_value)
-            else:
-                return_values.append(result_data.get('return_value'))
-
-        self._set_function_task_results(task, results, stdout_parts, stderr_parts, return_values, ranks)
-        self._cleanup_ddict_entries(uid, ranks)
-
-    async def _store_return_value(self, value: Any, uid: str, rank: int) -> Any:
-        """Storage of return value using shared memory."""
-        if self.shared_memory.should_use_reference(value):
-            try:
-                ref = await self.shared_memory.store_data(value, node_id=0)
-                self.logger.debug(f"Created reference for {uid}_rank_{rank} result")
-                return ref
-            except Exception as e:
-                self.logger.warning(f"Failed to create reference for {uid}_rank_{rank}: {e}")
-        return value
-
-    async def _wait_for_completion_keys(self, completion_keys, timeout: int = 30):
-        """Wait for DDict completion keys."""
-        wait_count = 0
-        max_wait = timeout * 10  # Check every 0.1 seconds
-
-        while wait_count < max_wait:
-            completed = sum(1 for key in completion_keys if key in self.ddict)
-            if completed >= len(completion_keys):
-                break
-            await asyncio.sleep(0.1)
-            wait_count += 1
-
-    def _get_ddict_result(self, result_key: str, rank: int) -> dict:
-        """Get result from DDict with error handling."""
-        try:
-            if result_key in self.ddict:
-                return self.ddict[result_key]
-        except Exception as e:
-            self.logger.warning(f"Error reading DDict result for rank {rank}: {e}")
-
-        return {
-            'success': False,
-            'exception': f'No result found for rank {rank}',
-            'exit_code': 1,
-            'rank': rank,
-            'stdout': '',
-            'stderr': f'No result found for rank {rank}'
-        }
-
-    def _set_function_task_results(self, task: dict, results, stdout_parts, stderr_parts, return_values, ranks: int):
-        """Set aggregated function results with return values."""
-        all_successful = all(r.get('success', False) for r in results)
-        max_exit_code = max((r.get('exit_code', 1) for r in results), default=0)
-
-        combined_stdout = "\n".join(f"Rank {i}: {stdout_parts.get(i, '')}" for i in range(ranks))
-        combined_stderr = "\n".join(f"Rank {i}: {stderr_parts.get(i, '')}" for i in range(ranks))
-
-        task.update({
-            "stdout": combined_stdout,
-            "stderr": combined_stderr,
-            "exit_code": max_exit_code,
-            "return_value": return_values[0] if len(return_values) == 1 else return_values,
-            "exception": None if all_successful else "; ".join(
-                str(r.get('exception', 'Unknown error')) 
-                for r in results if not r.get('success', False)
-            )
-        })
-
-    def _cleanup_ddict_entries(self, uid: str, ranks: int):
-        """Clean up DDict entries."""
-        try:
-            for rank in range(ranks):
-                result_key = f"{uid}_rank_{rank}"
-                completion_key = f"{uid}_rank_{rank}_completed"
-                if result_key in self.ddict:
-                    del self.ddict[result_key]
-                if completion_key in self.ddict:
-                    del self.ddict[completion_key]
-        except Exception as e:
-            self.logger.warning(f"Error cleaning DDict entries for {uid}: {e}")
 
 class TaskLauncher:
     """Unified task launching for all task types."""
@@ -478,7 +428,6 @@ class TaskLauncher:
         backend_kwargs = task.get('task_backend_specific_kwargs', {})
         ranks = int(backend_kwargs.get("ranks", 2))
 
-        # FIXME: pass Policy and other attrs to Process/Group init
         if task_type.name.startswith("MPI_"):
             mpi = backend_kwargs.get("pmi", None)
             if mpi is None:
@@ -509,41 +458,38 @@ class TaskLauncher:
 
     async def _create_function_process(self, task: dict, rank: int) -> Process:
         """Create a single function process."""
-        uid = task["uid"]
-        function = task["function"]
-        args = task.get("args", ())
-        kwargs = task.get("kwargs", {})
+        backend_kwargs = task.get('task_backend_specific_kwargs', {})
+        use_ddict_storage = backend_kwargs.get('use_ddict_storage', False)
 
         return Process(
-            target=_function_worker,
-            args=(self.ddict, task, uid, rank)
+            target=_function_wrapper,
+            args=(self.result_queue, self.ddict, task, rank, use_ddict_storage)
         )
 
     def _create_executable_process(self, task: dict, rank: int) -> Process:
-        """Create a single executable process with result queue integration."""
+        """Create a single executable process."""
         executable = task["executable"]
         args = list(task.get("args", []))
         uid = task["uid"]
 
         return Process(
-            target=_executable_worker,
+            target=_executable_wrapper,
             args=(self.result_queue, executable, args, uid, rank, self.working_dir)
         )
 
     async def _add_function_processes_to_group(self, group: ProcessGroup, task: dict, ranks: int) -> None:
         """Add function processes to process group."""
         uid = task["uid"]
-        function = task["function"]
-        args = task.get("args", ())
-        kwargs = task.get("kwargs", {})
+        backend_kwargs = task.get('task_backend_specific_kwargs', {})
+        use_ddict_storage = backend_kwargs.get('use_ddict_storage', False)
 
         for rank in range(ranks):
             env = os.environ.copy()
             env["DRAGON_RANK"] = str(rank)
 
             template = ProcessTemplate(
-                target=_function_worker,
-                args=(self.ddict, task, uid, rank),
+                target=_function_wrapper,
+                args=(self.result_queue, self.ddict, task, rank, use_ddict_storage),
                 env=env,
                 cwd=self.working_dir,
                 stdout=Popen.PIPE,
@@ -553,7 +499,7 @@ class TaskLauncher:
             group.add_process(nproc=1, template=template)
 
     def _add_executable_processes_to_group(self, group: ProcessGroup, task: dict, ranks: int) -> None:
-        """Add executable processes to process group with result queue integration."""
+        """Add executable processes to process group."""
         executable = task["executable"]
         args = list(task.get("args", []))
         uid = task["uid"]
@@ -563,7 +509,7 @@ class TaskLauncher:
             env["DRAGON_RANK"] = str(rank)
 
             template = ProcessTemplate(
-                target=_executable_worker,
+                target=_executable_wrapper,
                 args=(self.result_queue, executable, args, uid, rank, self.working_dir),
                 env=env,
                 cwd=self.working_dir,
@@ -571,8 +517,8 @@ class TaskLauncher:
             group.add_process(nproc=1, template=template)
 
 
-def _executable_worker(result_queue: Queue, executable: str, args: list, task_uid: str, rank: int, working_dir: str):
-    """Worker function that executes executable and pushes completion directly to queue."""
+def _executable_wrapper(result_queue: Queue, executable: str, args: list, task_uid: str, rank: int, working_dir: str):
+    """wrapper function that executes executable and pushes completion to queue."""
     import subprocess
     import time
     
@@ -625,13 +571,17 @@ def _executable_worker(result_queue: Queue, executable: str, args: list, task_ui
         result_queue.put(completion, block=True)
 
 
-def _function_worker(d: DDict, task: dict, task_uid: str, rank: int = 0):
-    """Worker function to execute user functions in separate Dragon processes."""
+def _function_wrapper(result_queue: Queue, ddict: DDict, task: dict, rank: int, use_ddict_storage: bool):
+    """wrapper function that executes user functions and pushes completion to queue.
+    
+    DDict is only used when user explicitly sets use_ddict_storage=True.
+    Otherwise, return value is sent directly via queue.
+    """
     import io
     import sys
     import traceback
-
-    # Set environment variable for rank
+    
+    task_uid = task["uid"]
     os.environ["DRAGON_RANK"] = str(rank)
 
     # Capture stdout/stderr
@@ -651,55 +601,68 @@ def _function_worker(d: DDict, task: dict, task_uid: str, rank: int = 0):
         else:
             raise RuntimeError('Sync functions are not supported, please define it as async')
 
-        # Store successful result
-        result_data = {
-            'success': True,
-            'return_value': result,
-            'stdout': out_buf.getvalue(),
-            'stderr': err_buf.getvalue(),
-            'exception': None,
-            'exit_code': 0,
-            'rank': rank,
-            'task_uid': task_uid
-        }
+        # Store in DDict only if user requested
+        stored_in_ddict = False
+        return_value_for_queue = result
+        
+        if use_ddict_storage:
+            result_key = f"return_{task_uid}_rank_{rank}"
+            ddict.pput(result_key, result)
+            stored_in_ddict = True
+            return_value_for_queue = None
+
+        # Create completion and send via queue
+        completion = FunctionTaskCompletion(
+            task_uid=task_uid,
+            rank=rank,
+            process_id=os.getpid(),
+            stdout=out_buf.getvalue(),
+            stderr=err_buf.getvalue(),
+            exit_code=0,
+            timestamp=time.time(),
+            success=True,
+            exception=None,
+            traceback=None,
+            return_value=return_value_for_queue,
+            stored_in_ddict=stored_in_ddict
+        )
 
     except Exception as e:
-        # Store error result
-        result_data = {
-            'success': False,
-            'return_value': None,
-            'stdout': out_buf.getvalue(),
-            'stderr': err_buf.getvalue(),
-            'exception': str(e),
-            'exit_code': 1,
-            'traceback': traceback.format_exc(),
-            'rank': rank,
-            'task_uid': task_uid
-        }
+        # Error case
+        completion = FunctionTaskCompletion(
+            task_uid=task_uid,
+            rank=rank,
+            process_id=os.getpid(),
+            stdout=out_buf.getvalue(),
+            stderr=err_buf.getvalue(),
+            exit_code=1,
+            timestamp=time.time(),
+            success=False,
+            exception=str(e),
+            traceback=traceback.format_exc(),
+            return_value=None,
+            stored_in_ddict=False
+        )
 
     finally:
-        # Restore stdout/stderr
         sys.stdout, sys.stderr = old_out, old_err
 
-        # Store results in DDict
+        # Send completion to queue
         try:
-            result_key = f"{task_uid}_rank_{rank}"
-            completion_key = f"{task_uid}_rank_{rank}_completed"
+            result_queue.put(completion, block=True, timeout=30)
+        except Exception as queue_error:
+            print(f"Failed to send completion to queue: {queue_error}", file=sys.stderr)
 
-            d.pput(result_key, result_data)
-            d.pput(completion_key, True)
-        except Exception:
-            pass
-
-        # Detach from DDict
+        # Detach from DDict if used
         try:
-            d.detach()
+            if stored_in_ddict:
+                ddict.detach()
         except Exception:
             pass
 
 
 class DragonExecutionBackend(BaseExecutionBackend):
-    """Dragon execution backend with direct queue consumption
+    """Dragon execution backend with unified queue-based architecture
     
                 ┌────────────────────────────┐
                 │  DRAGON EXECUTION BACKEND  │
@@ -712,26 +675,36 @@ class DragonExecutionBackend(BaseExecutionBackend):
               ▼                              ▼
      ┌────────────────────┐       ┌────────────────────┐
      │ Executable Tasks   │       │ Function Tasks     │
-     │ Process / Group    │       │ Process / Group    │
-     │ _executable_worker │       │ _function_worker   │
+     │ _executable_wrapper │       │ _function_wrapper   │
      └──────────┬─────────┘       └──────────┬─────────┘
                 ▼                            ▼
-     ┌────────────────────┐       ┌────────────────────┐
-     │   DRAGON QUEUE     │       │    DRAGON DDICT    │
-     └──────────┬─────────┘       └──────────┬─────────┘
-                ▼                            ▼
-     ┌────────────────────┐       ┌────────────────────┐
-     │ DirectResult       │       │ FunctionResult     │
-     │ Collector          │       │ Collector          │
-     └──────────┬─────────┘       └──────────┬─────────┘
-                ▼                            ▼
-              ┌──────────────┐───────────────┐
-              │    MONITOR LOOP (tasks, cb)  │
-              └──────────────┬───────────────┘
-                             ▼
-                ┌────────────────────────┐
-                │   WORKFLOW CALLBACKS   │
-                └────────────────────────┘
+     ┌──────────────────────────────────────────┐
+     │         DRAGON QUEUE (Unified)           │
+     │  ExecutableCompletion | FunctionCompletion │
+     └──────────────────┬───────────────────────┘
+                        ▼
+              ┌───────────────────┐
+              │  ResultCollector  │
+              │   (Unified Logic) │
+              └─────────┬─────────┘
+                        ▼
+           ┌────────────┴────────────┐
+           ▼                         ▼
+    ┌──────────────┐      ┌──────────────────┐
+    │ Small Results│      │ Large Results    │
+    │ (via Queue)  │      │ (DDict optional) │
+    └──────────────┘      └──────────────────┘
+                        ▼
+              ┌──────────────┐
+              │ DataReference│
+              │  .resolve()  │
+              └──────────────┘
+    
+    Characteristics:
+    - Single unified queue for all tasks
+    - DDict only for large results or user-requested storage
+    - Consistent result collection pattern
+    - Lower latency for small function results
     """
 
     @typeguard.typechecked
@@ -753,9 +726,6 @@ class DragonExecutionBackend(BaseExecutionBackend):
         self._slots: int = int(self._resources.get("slots", mp.cpu_count() or 1))
         self._free_slots: int = self._slots
         self._working_dir: str = self._resources.get("working_dir", os.getcwd())
-        
-        # User-configurable reference threshold
-        self._reference_threshold: int = int(self._resources.get("reference_threshold", DRAGON_DEFAULT_REF_THRESHOLD))
 
         # Task tracking
         self._running_tasks: dict[str, TaskInfo] = {}
@@ -797,7 +767,7 @@ class DragonExecutionBackend(BaseExecutionBackend):
 
     async def _initialize(self) -> None:
         try:
-            logger.debug("Initializing Dragon backend with DDict...")
+            logger.debug("Initializing Dragon backend with unified queue architecture...")
             await self._initialize_dragon()
 
             # Initialize system allocation
@@ -806,8 +776,8 @@ class DragonExecutionBackend(BaseExecutionBackend):
             nnodes = self._system_alloc.nnodes
             logger.debug(f"System allocation created with {nnodes} nodes")
 
-            # Initialize DDict
-            logger.debug("Creating DDict with proper parameters...")
+            # Initialize DDict (optional - only for large results)
+            logger.debug("Creating DDict")
             if not self._ddict:
                 self._ddict = DDict(
                     n_nodes=nnodes,
@@ -818,32 +788,36 @@ class DragonExecutionBackend(BaseExecutionBackend):
                 )
             logger.debug("DDict created successfully")
 
-            # Initialize global result queue
-            logger.debug("Creating global result queue...")
-            self._result_queue = Queue(maxsize=10000)
+            # Initialize global result queue (unified for all task types)
+            logger.debug("Creating unified result queue...")
+            self._result_queue = Queue()
             logger.debug("Result queue created successfully")
 
-            # Initialize shared memory manager with user-configurable threshold
+            # Initialize shared memory manager
             self._shared_memory = SharedMemoryManager(
                 self._ddict, 
                 self._system_alloc, 
-                logger,
-                reference_threshold=self._reference_threshold
+                logger
             )
             await self._shared_memory.initialize()
 
             # Initialize utilities
             self._result_collector = ResultCollector(self._shared_memory, self._result_queue, logger)
-            self._task_launcher = TaskLauncher(self._ddict, self._result_queue, self._working_dir, logger)
+            self._task_launcher = TaskLauncher(
+                self._ddict, 
+                self._result_queue, 
+                self._working_dir, 
+                logger
+            )
 
             # Start task monitoring
-            logger.debug("Starting task monitoring...")
+            logger.debug("Starting unified task monitoring...")
             self._monitor_task = asyncio.create_task(self._monitor_tasks())
             await asyncio.sleep(0.1)
 
             logger.info(
                 f"Dragon backend initialized with {self._slots} slots, "
-                f"DDict on {nnodes} nodes, reference threshold: {self._reference_threshold} bytes"
+                f"unified queue architecture"
             )
         except Exception as e:
             logger.exception(f"Failed to initialize Dragon backend: {str(e)}")
@@ -858,7 +832,7 @@ class DragonExecutionBackend(BaseExecutionBackend):
                 mp.set_start_method("dragon", force=True)
         except RuntimeError:
             pass
-        logger.debug("Dragon backend active with DDict-only storage and user-controlled resolution.")
+        logger.debug("Dragon backend active with unified queue-based architecture.")
 
     def register_callback(self, callback: Callable) -> None:
         self._callback_func = callback
@@ -899,10 +873,8 @@ class DragonExecutionBackend(BaseExecutionBackend):
         self._free_slots -= ranks
 
         try:
-            # Register executable tasks with result collector
-            task_type = self._task_launcher._determine_task_type(task)
-            if task_type.name.endswith("_EXECUTABLE"):
-                self._result_collector.register_executable_task(uid, ranks)
+            # Register all tasks with unified result collector
+            self._result_collector.register_task(uid, ranks)
 
             # Launch task using unified launcher
             task_info = await self._task_launcher.launch_task(task)
@@ -914,31 +886,18 @@ class DragonExecutionBackend(BaseExecutionBackend):
             raise
 
     async def _monitor_tasks(self) -> None:
-        """Monitor running tasks with direct queue consumption for executables."""
+        """Monitor running tasks with unified queue consumption."""
         while not self._shutdown_event.is_set():
             try:
-                # Process executable completions from queue
+                # Batch consume queue results (unified for all task types)
                 completed_tasks = []
 
-                # Batch consume queue results
                 for _ in range(1000):  # Process up to 1000 results per iteration
-                    completed_task_uid = self._result_collector.try_consume_executable_result()
+                    completed_task_uid = self._result_collector.try_consume_result()
                     if completed_task_uid:
                         completed_tasks.append(completed_task_uid)
                     else:
                         break
-
-                # Check all running tasks for completion
-                for uid, task_info in list(self._running_tasks.items()):
-                    task = self.tasks.get(uid)
-                    if not task:
-                        if uid not in completed_tasks:
-                            completed_tasks.append(uid)
-                        continue
-
-                    if await self._check_task_completion(uid, task_info, task):
-                        if uid not in completed_tasks:
-                            completed_tasks.append(uid)
 
                 # Process all completed tasks
                 for uid in completed_tasks:
@@ -947,6 +906,11 @@ class DragonExecutionBackend(BaseExecutionBackend):
                         task = self.tasks.get(uid)
                         
                         if task:
+                            # Get aggregated results from collector
+                            result_data = self._result_collector.get_completed_task(uid)
+                            if result_data:
+                                task.update(result_data)
+                            
                             # Determine task status and notify callback
                             if task.get("canceled", False):
                                 self._callback_func(task, "CANCELED")
@@ -967,63 +931,6 @@ class DragonExecutionBackend(BaseExecutionBackend):
                 logger.exception(f"Error in task monitoring: {e}")
                 await asyncio.sleep(1)
 
-    async def _check_task_completion(self, uid: str, task_info: TaskInfo, task: dict) -> bool:
-        """Check if task is complete and collect results."""
-        try:
-            if task_info.canceled:
-                task.update({
-                    "canceled": True,
-                    "exception": "Task was canceled",
-                    "exit_code": -1,
-                    "return_value": None
-                })
-                return True
-
-            # Handle executable tasks with direct queue consumption
-            if task_info.task_type.name.endswith("_EXECUTABLE"):
-                if self._result_collector.is_executable_task_complete(uid):
-                    completed_data = self._result_collector.get_completed_executable_task(uid)
-                    if completed_data:
-                        task.update(completed_data)
-                    return True
-                return False
-
-            # Handle function tasks using DDict
-            elif task_info.task_type.name.endswith("_FUNCTION"):
-                if self._is_function_task_complete(uid, task_info):
-                    await self._result_collector.collect_function_results(uid, task_info.ranks, task)
-                    return True
-                return False
-
-        except Exception as e:
-            logger.exception(f"Error checking task completion for {uid}: {e}")
-            self._set_task_failed(task, str(e))
-            return True
-
-        return False
-
-    def _is_function_task_complete(self, uid: str, task_info: TaskInfo) -> bool:
-        """Check if function task is complete by checking processes and DDict keys."""
-        # Check if processes are still running
-        if task_info.process and task_info.process.is_alive:
-            return False
-        elif task_info.group and not task_info.group.inactive_puids:
-            return False
-
-        # Check if all completion keys are present in DDict
-        completion_keys = [f"{uid}_rank_{rank}_completed" for rank in range(task_info.ranks)]
-        completed = sum(1 for key in completion_keys if key in self._ddict)
-        return completed >= len(completion_keys)
-
-    def _set_task_failed(self, task: dict, error_msg: str):
-        """Mark task as failed."""
-        task.update({
-            "exception": error_msg,
-            "exit_code": 1,
-            "stderr": task.get("stderr", "") + f"\nError: {error_msg}",
-            "return_value": None
-        })
-
     async def cancel_task(self, uid: str) -> bool:
         """Cancel a specific running task with proper cleanup."""
         self._ensure_initialized()
@@ -1038,13 +945,10 @@ class DragonExecutionBackend(BaseExecutionBackend):
             if success:
                 task_info.canceled = True
 
-                # Clean up based on task type
-                if task_info.task_type.name.endswith("_FUNCTION"):
-                    self._result_collector._cleanup_ddict_entries(uid, task_info.ranks)
-                elif task_info.task_type.name.endswith("_EXECUTABLE"):
-                    self._result_collector.cleanup_executable_task(uid)
+                # Clean up result collector tracking
+                self._result_collector.cleanup_task(uid)
                 
-                # Clean up data references
+                # Clean up data references if stored in DDict
                 try:
                     task_result = self.tasks.get(uid, {}).get("return_value")
                     if isinstance(task_result, DataReference):
