@@ -50,6 +50,11 @@ class WorkerPinningPolicy(Enum):
     AFFINITY = "affinity"  # Prefer hinted worker, use others if not immediately available
     EXCLUSIVE = "exclusive" # Only hinted worker can run, reject if insufficient capacity
 
+class WorkerType(Enum):
+    """Worker type enumeration."""
+    COMPUTE = "compute"
+    TRAINING = "training"
+
 @dataclass
 class WorkerRequest:
     """Request sent to worker pool."""
@@ -95,35 +100,82 @@ class TaskInfo:
     ranks: int
     start_time: float
     worker_name: str = ""
-    gpu_allocations: Dict[int, List[int]] = field(default_factory=dict) # rank -> gpu_ids
+    gpu_allocations: Dict[int, List[int]] = field(default_factory=dict)
     canceled: bool = False
     completed_ranks: int = 0
 
 @dataclass
 class PolicyConfig:
-    """Configuration for a single policy (ProcessTemplate)."""
-    nprocs: int
+    """Configuration for a single policy.
+    
+    For COMPUTE workers: nprocs MUST be specified
+    For TRAINING workers: nprocs MUST be None (omitted)
+    """
     policy: Optional[Policy] = None
+    nprocs: Optional[int] = None
     ngpus: int = 0
 
 @dataclass
 class WorkerGroupConfig:
-    """Configuration for a worker group (ProcessGroup) with node placement.
+    """Unified configuration for worker groups.
     
     Attributes:
-        name: Worker group name for identification
-        policies: List of PolicyConfig, each becomes a ProcessTemplate
+        name: Worker group name
+        worker_type: COMPUTE or TRAINING
+        policies: List of PolicyConfig objects
+        kwargs: Additional config (for training: passed to configure_training_group)
+    
+    Examples:
+        # Compute worker
+        WorkerGroupConfig(
+            name="compute",
+            worker_type=WorkerType.COMPUTE,
+            policies=[PolicyConfig(policy=p, nprocs=128, ngpus=2)]
+        )
+        
+        # Training worker
+        WorkerGroupConfig(
+            name="training",
+            worker_type=WorkerType.TRAINING,
+            policies=[PolicyConfig(policy=p1), PolicyConfig(policy=p2)],
+            kwargs={'nprocs': 2, 'ppn': 32}
+        )
     """
     name: str
+    worker_type: WorkerType = WorkerType.COMPUTE
     policies: List[PolicyConfig] = field(default_factory=list)
+    kwargs: Dict[str, Any] = field(default_factory=dict)
+    
+    def __post_init__(self):
+        """Validate configuration."""
+        if self.worker_type == WorkerType.TRAINING:
+            for i, pc in enumerate(self.policies):
+                if pc.nprocs is not None:
+                    raise ValueError(
+                        f"Training worker '{self.name}': PolicyConfig[{i}] must NOT specify nprocs"
+                    )
+        else:  # COMPUTE
+            for i, pc in enumerate(self.policies):
+                if pc.nprocs is None:
+                    raise ValueError(
+                        f"Compute worker '{self.name}': PolicyConfig[{i}] must specify nprocs"
+                    )
     
     def total_slots(self) -> int:
-        """Total CPU slots provided by this worker group."""
-        return sum(p.nprocs for p in self.policies)
+        """Total CPU slots."""
+        if self.worker_type == WorkerType.TRAINING:
+            if 'nprocs' in self.kwargs:
+                return int(self.kwargs['nprocs'])
+            return len(self.policies)
+        else:
+            return sum(p.nprocs for p in self.policies)
     
     def total_gpus(self) -> int:
-        """Total GPUs provided by this worker group."""
-        return sum(p.ngpus for p in self.policies)
+        """Total GPUs."""
+        if self.worker_type == WorkerType.TRAINING:
+            return 0  # Training workers manage GPUs via policies
+        else:
+            return sum(p.ngpus for p in self.policies)
 
 class DataReference:
     """Reference to data stored in Cross Node Distributed Dict."""
@@ -150,7 +202,6 @@ class DataReference:
                 raise KeyError(f"Reference data not found: {self._ref_id}")
             return self._ddict[data_key]
         else:
-            task_uid = self._rank_info["task_uid"]
             rank_keys = self._rank_info["rank_keys"]
             results = []
             for ref_key in rank_keys:
@@ -170,7 +221,7 @@ class DataReference:
         return f"DataReference(ref_id='{self._ref_id}', backend_id='{self._backend_id}')"
 
 class SharedMemoryManager:
-    """Manages data storage using DDict exclusively."""
+    """Manages data storage using DDict."""
 
     def __init__(self, ddict: DDict, system: System, logger: logging.Logger, 
                  reference_threshold: int = DRAGON_DEFAULT_REF_THRESHOLD):
@@ -181,27 +232,8 @@ class SharedMemoryManager:
         self.reference_threshold = reference_threshold
 
     async def initialize(self):
-        """Initialize the storage manager."""
+        """Initialize storage manager."""
         self.logger.debug(f"SharedMemoryManager initialized (threshold: {self.reference_threshold} bytes)")
-
-    def should_use_reference(self, data: Any) -> bool:
-        """Determine if data should be stored as reference based on size threshold."""
-        try:
-            estimated_size = self._estimate_size(data)
-            return estimated_size >= self.reference_threshold
-        except Exception:
-            return False
-
-    def _estimate_size(self, data: Any) -> int:
-        """Estimate serialized size of data."""
-        if isinstance(data, (str, bytes)):
-            return len(data)
-        elif isinstance(data, (list, tuple, dict)) and hasattr(data, '__len__'):
-            return len(data) * 100
-        try:
-            return len(pickle.dumps(data))
-        except Exception:
-            return 1000
 
     async def store_data(self, data: Any, node_id: int = 0) -> DataReference:
         """Store data in DDict and return reference."""
@@ -215,7 +247,7 @@ class SharedMemoryManager:
         return DataReference(ref_id, self.backend_id, self.ddict)
 
     def _store_in_ddict(self, ref_id: str, data: Any):
-        """Store data directly in DDict."""
+        """Store data in DDict."""
         self.ddict.pput(f"data_{ref_id}", data)
         self.ddict.pput(f"meta_{ref_id}", {
             'backend_id': self.backend_id,
@@ -249,6 +281,19 @@ def _worker_loop(worker_id: int, worker_name: str, input_queue: Queue, output_qu
     os.environ["DRAGON_WORKER_NAME"] = worker_name
     
     backend_id = os.environ.get("DRAGON_BACKEND_ID", f"dragon_{uuid.uuid4().hex[:8]}")
+    dragon_cuda_visible = os.environ.get("CUDA_VISIBLE_DEVICES", None)
+    
+    # Map Dragon training env vars to PyTorch standard names
+    if "DRAGON_PG_RANK" in os.environ:
+        os.environ["RANK"] = os.environ["DRAGON_PG_RANK"]
+    if "DRAGON_PG_LOCAL_RANK" in os.environ:
+        os.environ["LOCAL_RANK"] = os.environ["DRAGON_PG_LOCAL_RANK"]
+    if "DRAGON_PG_WORLD_SIZE" in os.environ:
+        os.environ["WORLD_SIZE"] = os.environ["DRAGON_PG_WORLD_SIZE"]
+    if "DRAGON_PG_MASTER_ADDR" in os.environ and "MASTER_ADDR" not in os.environ:
+        os.environ["MASTER_ADDR"] = os.environ["DRAGON_PG_MASTER_ADDR"]
+    if "DRAGON_PG_MASTER_PORT" in os.environ and "MASTER_PORT" not in os.environ:
+        os.environ["MASTER_PORT"] = os.environ["DRAGON_PG_MASTER_PORT"]
     
     try:
         while True:
@@ -268,8 +313,8 @@ def _worker_loop(worker_id: int, worker_name: str, input_queue: Queue, output_qu
             # Set GPU visibility for this rank
             if request.gpu_ids:
                 os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(map(str, request.gpu_ids))
-            else:
-                os.environ["CUDA_VISIBLE_DEVICES"] = ""
+            elif dragon_cuda_visible is not None:
+                os.environ["CUDA_VISIBLE_DEVICES"] = dragon_cuda_visible
             
             response = WorkerResponse(
                 task_uid=request.task_uid,
@@ -386,14 +431,13 @@ class WorkerPool:
         
         self.output_queue: Optional[Queue] = None
         self.worker_queues: Dict[str, Queue] = {}
-        
         # CPU slot tracking
         self.worker_slots: Dict[str, int] = {}
         self.worker_free_slots: Dict[str, int] = {}
-        
         # GPU tracking
-        self.worker_gpus: Dict[str, int] = {}  # Total GPUs per worker
-        self.worker_free_gpus: Dict[str, List[int]] = {}  # Available GPU IDs per worker
+        self.worker_gpus: Dict[str, int] = {}
+        self.worker_free_gpus: Dict[str, List[int]] = {}
+        self.worker_types: Dict[str, WorkerType] = {}
         
         self.process_groups: List[ProcessGroup] = []
         self.total_workers = len(worker_configs)
@@ -402,7 +446,7 @@ class WorkerPool:
         self.initialized = False
         
     async def initialize(self):
-        """Initialize worker pool with per-worker queues."""
+        """Initialize worker pool."""
         if self.initialized:
             return
         
@@ -414,10 +458,12 @@ class WorkerPool:
             
             for worker_config in self.worker_configs:
                 worker_name = worker_config.name
+                worker_type = worker_config.worker_type
                 
                 # Create dedicated input queue for this worker
                 input_queue = Queue()
                 self.worker_queues[worker_name] = input_queue
+                self.worker_types[worker_name] = worker_type
                 
                 # Track CPU slots
                 total_worker_slots = worker_config.total_slots()
@@ -427,42 +473,58 @@ class WorkerPool:
                 # Track GPUs - assign sequential IDs
                 total_worker_gpus = worker_config.total_gpus()
                 self.worker_gpus[worker_name] = total_worker_gpus
+                self.worker_free_gpus[worker_name] = list(range(total_worker_gpus))
                 
-                # Build list of available GPU IDs for this worker
-                gpu_ids = list(range(total_worker_gpus))
-                self.worker_free_gpus[worker_name] = gpu_ids.copy()
-                
-                process_group = ProcessGroup(restart=False)
-                
-                # Add templates for each policy
-                for policy_config in worker_config.policies:
-                    env = os.environ.copy()
-                    env["DRAGON_WORKER_ID"] = str(worker_id)
-                    env["DRAGON_WORKER_NAME"] = worker_name
-                    env["DRAGON_BACKEND_ID"] = self.backend_id
-
-                    template = ProcessTemplate(
-                        target=_worker_loop,
-                        args=(worker_id, worker_name, input_queue, self.output_queue, 
-                              self.ddict, self.working_dir),
-                        env=env,
-                        cwd=self.working_dir,
-                        policy=policy_config.policy
-                    )
+                if worker_type == WorkerType.TRAINING:
+                    # Training worker: extract policies and pass kwargs to configure_training_group
+                    config_kwargs = {
+                        "training_fn": _worker_loop,
+                        "training_args": (worker_id, worker_name, input_queue, self.output_queue, 
+                                        self.ddict, self.working_dir),
+                        "policies": [pc.policy for pc in worker_config.policies]
+                    }
+                    config_kwargs.update(worker_config.kwargs)
                     
-                    process_group.add_process(nproc=policy_config.nprocs, template=template)
-                
-                # Initialize and start
-                process_group.init()
-                process_group.start()
-                self.process_groups.append(process_group)
-                worker_id += 1
+                    self.logger.info(f"Creating training worker '{worker_name}' with {total_worker_slots} slots")
+                    
+                    process_group = ProcessGroup.configure_training_group(**config_kwargs)
+                    process_group.init()
+                    process_group.start()
+                    self.process_groups.append(process_group)
+                    
+                    worker_id += 1
+                    
+                else:
+                    # Compute worker: use PolicyConfig.nprocs
+                    process_group = ProcessGroup(restart=False)
+                    
+                    for policy_config in worker_config.policies:
+                        env = os.environ.copy()
+                        env["DRAGON_WORKER_ID"] = str(worker_id)
+                        env["DRAGON_WORKER_NAME"] = worker_name
+                        env["DRAGON_BACKEND_ID"] = self.backend_id
+
+                        template = ProcessTemplate(
+                            target=_worker_loop,
+                            args=(worker_id, worker_name, input_queue, self.output_queue, 
+                                  self.ddict, self.working_dir),
+                            env=env,
+                            cwd=self.working_dir,
+                            policy=policy_config.policy
+                        )
+                        
+                        process_group.add_process(nproc=policy_config.nprocs, template=template)
+                        worker_id += policy_config.nprocs
+                    
+                    process_group.init()
+                    process_group.start()
+                    self.process_groups.append(process_group)
             
             self.initialized = True
-
+            
             config_summary = []
             for cfg in self.worker_configs:
-                config_summary.append(f"{cfg.name}: {cfg.total_slots()} slots, {cfg.total_gpus()} GPUs")
+                config_summary.append(f"{cfg.name} ({cfg.worker_type.value}): {cfg.total_slots()} slots, {cfg.total_gpus()} GPUs")
             
             self.logger.info(
                 f"Worker pool initialized: {self.total_workers} workers, "
@@ -475,26 +537,52 @@ class WorkerPool:
             raise
     
     def find_worker_for_task(self, ranks: int, gpus_per_rank: int = 0, 
-                            preferred_worker: Optional[str] = None) -> Optional[str]:
-        """Find worker with sufficient free CPU slots and GPUs."""
+                            preferred_worker: Optional[str] = None,
+                            worker_type_hint: Optional[str] = None) -> Optional[str]:
+        """Find worker with sufficient capacity."""
         total_gpus_needed = ranks * gpus_per_rank
         
         if preferred_worker and preferred_worker in self.worker_free_slots:
-            if (self.worker_free_slots[preferred_worker] >= ranks and
-                len(self.worker_free_gpus[preferred_worker]) >= total_gpus_needed):
-                return preferred_worker
+            worker_type = self.worker_types.get(preferred_worker)
+            if worker_type == WorkerType.TRAINING:
+                if self.worker_free_slots[preferred_worker] >= ranks:
+                    return preferred_worker
+            else:
+                if (self.worker_free_slots[preferred_worker] >= ranks and
+                    len(self.worker_free_gpus[preferred_worker]) >= total_gpus_needed):
+                    return preferred_worker
         
         for worker_name in self.worker_free_slots.keys():
-            if (self.worker_free_slots[worker_name] >= ranks and
-                len(self.worker_free_gpus[worker_name]) >= total_gpus_needed):
-                return worker_name
+            if worker_type_hint:
+                try:
+                    target_type = WorkerType(worker_type_hint.lower())
+                    if self.worker_types.get(worker_name) != target_type:
+                        continue
+                except ValueError:
+                    pass
+            
+            worker_type = self.worker_types.get(worker_name)
+            if worker_type == WorkerType.TRAINING:
+                if self.worker_free_slots[worker_name] >= ranks:
+                    return worker_name
+            else:
+                if (self.worker_free_slots[worker_name] >= ranks and
+                    len(self.worker_free_gpus[worker_name]) >= total_gpus_needed):
+                    return worker_name
+        
         return None
     
     def worker_has_capacity(self, worker_name: str, ranks: int, gpus_per_rank: int = 0) -> bool:
-        """Check if specific worker has CPU and GPU capacity."""
+        """Check if worker has capacity."""
+        if worker_name not in self.worker_free_slots:
+            return False
+        
+        worker_type = self.worker_types.get(worker_name)
+        if worker_type == WorkerType.TRAINING:
+            return self.worker_free_slots[worker_name] >= ranks
+        
         total_gpus_needed = ranks * gpus_per_rank
-        return (worker_name in self.worker_free_slots and 
-                self.worker_free_slots[worker_name] >= ranks and
+        return (self.worker_free_slots[worker_name] >= ranks and
                 len(self.worker_free_gpus[worker_name]) >= total_gpus_needed)
     
     def worker_exists(self, worker_name: str) -> bool:
@@ -502,12 +590,25 @@ class WorkerPool:
         return worker_name in self.worker_slots
     
     def reserve_resources(self, worker_name: str, ranks: int, gpus_per_rank: int = 0) -> Tuple[bool, Dict[int, List[int]]]:
-        """Reserve CPU slots and GPUs. Returns (success, gpu_allocations)."""
+        """Reserve resources."""
         if worker_name not in self.worker_free_slots:
             return False, {}
         
-        total_gpus_needed = ranks * gpus_per_rank
+        worker_type = self.worker_types.get(worker_name)
         
+        if worker_type == WorkerType.TRAINING:
+            if self.worker_free_slots[worker_name] < ranks:
+                return False, {}
+            
+            self.worker_free_slots[worker_name] -= ranks
+            self.logger.debug(
+                f"Reserved {ranks} slots on training worker {worker_name} "
+                f"({self.worker_free_slots[worker_name]}/{self.worker_slots[worker_name]} slots free)"
+            )
+            return True, {}
+        
+        # Compute worker
+        total_gpus_needed = ranks * gpus_per_rank
         if (self.worker_free_slots[worker_name] < ranks or
             len(self.worker_free_gpus[worker_name]) < total_gpus_needed):
             return False, {}
@@ -534,25 +635,30 @@ class WorkerPool:
         return True, gpu_allocations
     
     def release_resources(self, worker_name: str, ranks: int, gpu_allocations: Dict[int, List[int]]):
-        """Release CPU slots and GPUs back to worker."""
+        """Release resources."""
         if worker_name in self.worker_free_slots:
             self.worker_free_slots[worker_name] += ranks
             
-            # Return GPUs to free pool
-            for rank_gpus in gpu_allocations.values():
-                self.worker_free_gpus[worker_name].extend(rank_gpus)
-            self.worker_free_gpus[worker_name].sort()
-            
-            total_gpus_returned = sum(len(gpus) for gpus in gpu_allocations.values())
-            
-            self.logger.debug(
-                f"Released {ranks} slots + {total_gpus_returned} GPUs on {worker_name} "
-                f"({self.worker_free_slots[worker_name]}/{self.worker_slots[worker_name]} slots free, "
-                f"{len(self.worker_free_gpus[worker_name])}/{self.worker_gpus[worker_name]} GPUs free)"
-            )
+            worker_type = self.worker_types.get(worker_name)
+            if worker_type == WorkerType.TRAINING:
+                self.logger.debug(
+                    f"Released {ranks} slots on training worker {worker_name} "
+                    f"({self.worker_free_slots[worker_name]}/{self.worker_slots[worker_name]} slots free)"
+                )
+            else:
+                for rank_gpus in gpu_allocations.values():
+                    self.worker_free_gpus[worker_name].extend(rank_gpus)
+                self.worker_free_gpus[worker_name].sort()
+                
+                total_gpus_returned = sum(len(gpus) for gpus in gpu_allocations.values())
+                self.logger.debug(
+                    f"Released {ranks} slots + {total_gpus_returned} GPUs on {worker_name} "
+                    f"({self.worker_free_slots[worker_name]}/{self.worker_slots[worker_name]} slots free, "
+                    f"{len(self.worker_free_gpus[worker_name])}/{self.worker_gpus[worker_name]} GPUs free)"
+                )
     
     def submit_request(self, worker_name: str, request: WorkerRequest):
-        """Submit task request to specific worker."""
+        """Submit task request to worker."""
         if not self.initialized:
             raise RuntimeError("Worker pool not initialized")
         
@@ -566,7 +672,7 @@ class WorkerPool:
             raise
     
     def try_get_response(self) -> Optional[WorkerResponse]:
-        """Try to get response from output queue (non-blocking)."""
+        """Try to get response from output queue."""
         try:
             return self.output_queue.get(block=False)
         except:
@@ -720,29 +826,66 @@ class DragonExecutionBackend(BaseExecutionBackend):
     - Slot reservation ensures tasks go to workers with capacity
     - Tasks with same rank requirement run in parallel on different workers
     - High performance with minimal coordination overhead
+    - Support for both compute and training workers
+    
     Example configuration:
+        from radical.asyncflow.backends.execution.dragon import (
+            WorkerGroupConfig, PolicyConfig, WorkerType
+        )
+        from dragon.infrastructure.policy import Policy
+        
+        # Define policies for node placement
         policy_n0 = Policy(host_id=0, distribution=Policy.Distribution.BLOCK)
         policy_n1 = Policy(host_id=1, distribution=Policy.Distribution.BLOCK)
-        policy_n2 = Policy(host_id=2, distribution=Policy.Distribution.BLOCK)
-        policy_n3 = Policy(host_id=3, distribution=Policy.Distribution.BLOCK)
-        resources = {
-            "workers": [
-                {
-                    "name": "cpu_worker",
-                    "policies": [
-                        {"nprocs": 128, "policy": policy_n0},
-                        {"nprocs": 128, "policy": policy_n1}
-                    ]
-                },
-                {
-                    "name": "gpu_worker",
-                    "policies": [
-                        {"nprocs": 128, "ngpus": 2, "policy": policy_n2},
-                        {"nprocs": 128, "ngpus": 2, "policy": policy_n3}
-                    ]
-                }
+        
+        # Compute worker
+        compute_worker = WorkerGroupConfig(
+            name="cpu_worker",
+            worker_type=WorkerType.COMPUTE,
+            policies=[
+                PolicyConfig(policy=policy_n0, nprocs=128),
+                PolicyConfig(policy=policy_n1, nprocs=128)
             ]
-        }
+        )
+        
+        # GPU compute worker
+        gpu_worker = WorkerGroupConfig(
+            name="gpu_worker",
+            worker_type=WorkerType.COMPUTE,
+            policies=[
+                PolicyConfig(policy=policy_n0, nprocs=128, ngpus=2),
+                PolicyConfig(policy=policy_n1, nprocs=128, ngpus=2)
+            ]
+        )
+        
+        # Training worker (for distributed training with DDP/NCCL)
+        import socket
+        hostname = socket.gethostname()
+        
+        policy_rank0 = Policy(
+            placement=Policy.Placement.HOST_NAME,
+            host_name=hostname,
+            gpu_affinity=[0]
+        )
+        policy_rank1 = Policy(
+            placement=Policy.Placement.HOST_NAME,
+            host_name=hostname,
+            gpu_affinity=[1]
+        )
+        
+        training_worker = WorkerGroupConfig(
+            name="training_worker",
+            worker_type=WorkerType.TRAINING,
+            policies=[
+                PolicyConfig(policy=policy_rank0),
+                PolicyConfig(policy=policy_rank1)
+            ],
+            kwargs={'nprocs': 2, 'ppn': 32, 'port': 29500}
+        )
+        
+        # Create backend
+        resources = {"workers": [compute_worker, gpu_worker, training_worker]}
+        backend = await DragonExecutionBackend(resources)
     """
     
     @typeguard.typechecked
@@ -785,41 +928,33 @@ class DragonExecutionBackend(BaseExecutionBackend):
         self._shutdown_event = asyncio.Event()
     
     def _parse_worker_config(self, resources: dict) -> List[WorkerGroupConfig]:
-        """Parse worker configuration from resources."""
+        """Parse worker configuration from resources.
+        
+        If no workers specified, creates a default compute worker.
+        """
         if "workers" in resources:
-            configs = []
-            for idx, worker_cfg in enumerate(resources["workers"]):
-                name = worker_cfg.get("name")
-                if not name:
-                    raise ValueError(f"Worker config {idx}: 'name' is required")
-                
-                policies_list = worker_cfg.get("policies")
-                if not policies_list:
-                    raise ValueError(f"Worker '{name}': 'policies' list is required")
-                
-                if not isinstance(policies_list, list):
-                    raise TypeError(f"Worker '{name}': 'policies' must be a list")
-                
-                policy_configs = []
-                for policy_idx, policy_dict in enumerate(policies_list):
-                    nprocs = policy_dict.get("nprocs", 1)
-                    ngpus = policy_dict.get("ngpus", 0)
-                    policy = policy_dict.get("policy", None)
-                    
-                    if policy is not None and not isinstance(policy, Policy):
-                        raise TypeError(
-                            f"Worker '{name}' policy {policy_idx}: 'policy' must be a Dragon Policy object or None"
-                        )
-                    
-                    policy_configs.append(PolicyConfig(nprocs=nprocs, policy=policy, ngpus=ngpus))
-                
-                configs.append(WorkerGroupConfig(name=name, policies=policy_configs))
+            workers = resources["workers"]
+            if not isinstance(workers, list):
+                raise TypeError("resources['workers'] must be a list of WorkerGroupConfig objects")
             
-            return configs
+            if not workers:
+                raise ValueError("resources['workers'] cannot be empty")
+            
+            for idx, worker in enumerate(workers):
+                if not isinstance(worker, WorkerGroupConfig):
+                    raise TypeError(
+                        f"Worker at index {idx} must be a WorkerGroupConfig object. "
+                        f"Got {type(worker).__name__} instead."
+                    )
+            
+            return workers
         else:
+            # No workers specified - create default compute worker
             slots = int(resources.get("slots", mp.cpu_count() or 1))
+            logger.info(f"No workers specified, creating default compute worker with {slots} slots")
             return [WorkerGroupConfig(
-                name="default_workers", 
+                name="default_worker",
+                worker_type=WorkerType.COMPUTE,
                 policies=[PolicyConfig(nprocs=slots, policy=None, ngpus=0)]
             )]
     
@@ -921,10 +1056,9 @@ class DragonExecutionBackend(BaseExecutionBackend):
                 self._callback_func(task, "FAILED")
     
     async def _schedule_tasks(self) -> None:
-        """Scheduler: assigns tasks to workers with GPU-aware placement."""
+        """Scheduler: assigns tasks to workers."""
         while not self._shutdown_event.is_set():
             try:
-                # Get pending task (with timeout to check shutdown)
                 try:
                     task = await asyncio.wait_for(self._pending_tasks.get(), timeout=0.1)
                 except asyncio.TimeoutError:
@@ -935,6 +1069,7 @@ class DragonExecutionBackend(BaseExecutionBackend):
                 ranks = int(backend_kwargs.get("ranks", 1))
                 gpus_per_rank = int(backend_kwargs.get("gpus_per_rank", 0))
                 worker_hint = backend_kwargs.get("worker_hint")
+                worker_type_hint = backend_kwargs.get("worker_type")
                 
                 pinning_policy_str = backend_kwargs.get("pinning_policy", "").lower()
                 try:
@@ -945,7 +1080,7 @@ class DragonExecutionBackend(BaseExecutionBackend):
                 pinning_timeout = float(backend_kwargs.get("pinning_timeout", 30.0))
                 
                 worker_name = await self._apply_pinning_policy(
-                    task, ranks, gpus_per_rank, worker_hint, pinning_policy, pinning_timeout
+                    task, ranks, gpus_per_rank, worker_hint, worker_type_hint, pinning_policy, pinning_timeout
                 )
                 
                 if not worker_name:
@@ -953,7 +1088,7 @@ class DragonExecutionBackend(BaseExecutionBackend):
                 
                 success, gpu_allocations = self._worker_pool.reserve_resources(worker_name, ranks, gpus_per_rank)
                 if not success:
-                    # Race condition - put back and retry
+
                     await self._pending_tasks.put(task)
                     continue
                 
@@ -976,16 +1111,17 @@ class DragonExecutionBackend(BaseExecutionBackend):
         ranks: int,
         gpus_per_rank: int,
         worker_hint: Optional[str],
+        worker_type_hint: Optional[str],
         pinning_policy: Optional[WorkerPinningPolicy],
         timeout: float
     ) -> Optional[str]:
         """Apply worker pinning policy to find appropriate worker."""
         
         if not worker_hint or not pinning_policy:
-            worker_name = self._worker_pool.find_worker_for_task(ranks, gpus_per_rank)
+            worker_name = self._worker_pool.find_worker_for_task(ranks, gpus_per_rank, worker_type_hint=worker_type_hint)
             while not worker_name and not self._shutdown_event.is_set():
                 await asyncio.sleep(0.01)
-                worker_name = self._worker_pool.find_worker_for_task(ranks, gpus_per_rank)
+                worker_name = self._worker_pool.find_worker_for_task(ranks, gpus_per_rank, worker_type_hint=worker_type_hint)
             return worker_name
         
         if not self._worker_pool.worker_exists(worker_hint):
@@ -1000,13 +1136,13 @@ class DragonExecutionBackend(BaseExecutionBackend):
                 logger.debug(f"Task {task['uid']}: AFFINITY policy - using preferred worker {worker_hint}")
                 return worker_hint
             else:
-                worker_name = self._worker_pool.find_worker_for_task(ranks, gpus_per_rank)
+                worker_name = self._worker_pool.find_worker_for_task(ranks, gpus_per_rank, worker_type_hint=worker_type_hint)
                 if worker_name:
                     logger.debug(f"Task {task['uid']}: AFFINITY policy - fallback to {worker_name}")
                     return worker_name
                 while not worker_name and not self._shutdown_event.is_set():
                     await asyncio.sleep(0.01)
-                    worker_name = self._worker_pool.find_worker_for_task(ranks, gpus_per_rank)
+                    worker_name = self._worker_pool.find_worker_for_task(ranks, gpus_per_rank, worker_type_hint=worker_type_hint)
                 return worker_name
         
         elif pinning_policy == WorkerPinningPolicy.STRICT:
@@ -1031,10 +1167,10 @@ class DragonExecutionBackend(BaseExecutionBackend):
                     return None
             
             logger.debug(f"Task {task['uid']}: SOFT policy - timeout reached, using fallback")
-            worker_name = self._worker_pool.find_worker_for_task(ranks, gpus_per_rank)
+            worker_name = self._worker_pool.find_worker_for_task(ranks, gpus_per_rank, worker_type_hint=worker_type_hint)
             while not worker_name and not self._shutdown_event.is_set():
                 await asyncio.sleep(0.01)
-                worker_name = self._worker_pool.find_worker_for_task(ranks, gpus_per_rank)
+                worker_name = self._worker_pool.find_worker_for_task(ranks, gpus_per_rank, worker_type_hint=worker_type_hint)
             
             if worker_name:
                 logger.debug(f"Task {task['uid']}: SOFT policy - fallback to {worker_name}")
@@ -1070,7 +1206,7 @@ class DragonExecutionBackend(BaseExecutionBackend):
     
     async def _submit_task_to_worker(self, task: dict[str, Any], worker_name: str, 
                                      ranks: int, gpu_allocations: Dict[int, List[int]]) -> None:
-        """Submit task to specific worker with GPU assignments."""
+        """Submit task to specific worker."""
         uid = task["uid"]
         
         try:
