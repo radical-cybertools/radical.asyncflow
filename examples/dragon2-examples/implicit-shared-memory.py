@@ -5,7 +5,7 @@ import numpy as np
 
 from radical.asyncflow import DragonExecutionBackend, WorkflowEngine
 from radical.asyncflow.logging import init_default_logger
-from radical.asyncflow.backends.execution.dragon import DataReference
+from radical.asyncflow.backends.execution.dragon import DataReference, WorkerGroupConfig, WorkerType, PolicyConfig
 
 logger = logging.getLogger(__name__)
 
@@ -20,8 +20,6 @@ async def main():
     policy_n1 = Policy(host_id=1, distribution=Policy.Distribution.BLOCK)
     policy_n2 = Policy(host_id=2, distribution=Policy.Distribution.BLOCK)
     policy_n3 = Policy(host_id=3, distribution=Policy.Distribution.BLOCK)
-    
-
 
     w0 = WorkerGroupConfig(name="worker0",
                            worker_type=WorkerType.COMPUTE,

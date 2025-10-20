@@ -9,18 +9,22 @@ logger = logging.getLogger(__name__)
 
 
 async def main():
+    import dragon
+    import multiprocessing as mp
     # Create backend and workflow
+    mp.set_start_method("dragon")
     backend = await DragonExecutionBackend()
-    init_default_logger(logging.DEBUG)
+    init_default_logger(logging.INFO)
     flow = await WorkflowEngine.create(backend=backend)
 
-    task1_resources = {"ranks": 256}
+    task1_resources = {"ranks": 2}
 
-    @flow.executable_task
+    @flow.function_task
     async def task1(task_description=task1_resources):
-        import os
-        exec1 = os.path.join(os.getcwd(), 'hello_world.sh')
-        return exec1
+        import socket
+        import asyncio
+        await asyncio.sleep(2)
+        return socket.gethostname()
 
     async def run_wf(wf_id):
         logger.info(f"Starting workflow {wf_id} at {time.time()}")
@@ -30,7 +34,14 @@ async def main():
         logger.info(t1_result)
 
     # Run workflows concurrently
-    await asyncio.gather(*[run_wf(i) for i in range(1)])
+    x = time.time()
+    results = await asyncio.gather(*[task1() for i in range(10000)])
+    y = time.time()
+
+    print(f'TTX: {y-x}s, THP: {10000/(y-x)}tasks/s')
+
+    for r in results:
+        print(r)
 
     await flow.shutdown()
 
