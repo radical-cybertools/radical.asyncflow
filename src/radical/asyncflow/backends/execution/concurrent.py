@@ -64,11 +64,11 @@ class ConcurrentExecutionBackend(BaseExecutionBackend):
             )
             return task, "FAILED"
 
-
     @staticmethod
     def _run_async_in_process(func, args, kwargs):
         """Execute async function in isolated executor process."""
         import asyncio
+
         # asyncio.run() creates, uses, and closes the event loop automatically
         return asyncio.run(func(*args, **kwargs))
 
