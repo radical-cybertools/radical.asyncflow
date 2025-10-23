@@ -1,6 +1,8 @@
 import asyncio
 import logging
 import subprocess
+
+from functools import partial
 from concurrent.futures import Executor
 from typing import Any, Callable, Optional
 
@@ -62,17 +64,25 @@ class ConcurrentExecutionBackend(BaseExecutionBackend):
             )
             return task, "FAILED"
 
+
+    @staticmethod
+    def _run_async_in_process(func, args, kwargs):
+        """Execute async function in isolated executor process."""
+        import asyncio
+        # asyncio.run() creates, uses, and closes the event loop automatically
+        return asyncio.run(func(*args, **kwargs))
+
     async def _execute_function(self, task: dict) -> tuple[dict, str]:
-        """Execute function task."""
+        """Execute function task supported in executor."""
         func = task["function"]
         args = task.get("args", [])
         kwargs = task.get("kwargs", {})
 
-        if asyncio.iscoroutinefunction(func):
-            result = await func(*args, **kwargs)
-        else:
-            loop = asyncio.get_running_loop()
-            result = await loop.run_in_executor(self.executor, func, *args, **kwargs)
+        loop = asyncio.get_running_loop()
+
+        executor_func = partial(self._run_async_in_process, func, args, kwargs)
+
+        result = await loop.run_in_executor(self.executor, executor_func)
 
         task.update({"return_value": result, "stdout": str(result), "exit_code": 0})
         return task, "DONE"
