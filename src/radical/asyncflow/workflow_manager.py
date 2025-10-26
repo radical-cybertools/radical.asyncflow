@@ -974,7 +974,7 @@ class WorkflowEngine:
                     await asyncio.sleep(0.01)
 
             except asyncio.CancelledError:
-                logger.debug("Run component cancelled")
+                logger.debug("Run component stopped")
                 break
             except Exception as e:
                 logger.exception(f"Error in run loop: {e}")
