@@ -1,11 +1,17 @@
 import asyncio
 import logging
 import subprocess
-from concurrent.futures import Executor
+
+from concurrent.futures import Executor, ProcessPoolExecutor
 from typing import Any, Callable, Optional
 
 from ...constants import StateMapper
 from .base import BaseExecutionBackend, Session
+
+try:
+    import cloudpickle
+except ImportError:
+    cloudpickle = None
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +23,12 @@ class ConcurrentExecutionBackend(BaseExecutionBackend):
         if not isinstance(executor, Executor):
             err = "Executor must be ThreadPoolExecutor or ProcessPoolExecutor"
             raise TypeError(err)
+
+        if isinstance(executor, ProcessPoolExecutor) and cloudpickle is None:
+            raise ImportError(
+                "ProcessPoolExecutor requires 'cloudpickle'. "
+                "Install it with: pip install cloudpickle"
+            )
 
         self.executor = executor
         self.tasks: dict[str, asyncio.Task] = {}
@@ -62,17 +74,40 @@ class ConcurrentExecutionBackend(BaseExecutionBackend):
             )
             return task, "FAILED"
 
+    @staticmethod
+    def _run_in_process(func, args, kwargs):
+        """Execute async function in isolated executor process."""
+        func = cloudpickle.loads(func)
+        return asyncio.run(func(*args, **kwargs))
+
+    @staticmethod
+    def _run_in_thread(func, args, kwargs):
+        """Execute async function in isolated executor process."""
+        return asyncio.run(func(*args, **kwargs))
+
     async def _execute_function(self, task: dict) -> tuple[dict, str]:
-        """Execute function task."""
+        """Execute async function task in Process/Thread PoolExecutor."""
         func = task["function"]
         args = task.get("args", [])
         kwargs = task.get("kwargs", {})
 
-        if asyncio.iscoroutinefunction(func):
-            result = await func(*args, **kwargs)
+        # Serialize the async function
+        if isinstance(self.executor, ProcessPoolExecutor):
+            func = cloudpickle.dumps(func)
+            exec_wrapper = self._run_in_process
         else:
-            loop = asyncio.get_running_loop()
-            result = await loop.run_in_executor(self.executor, func, *args, **kwargs)
+            exec_wrapper = self._run_in_thread
+
+        loop = asyncio.get_running_loop()
+
+        # Submit to the executor
+        result = await loop.run_in_executor(
+            self.executor,
+            exec_wrapper,
+            func,
+            args,
+            kwargs,
+        )
 
         task.update({"return_value": result, "stdout": str(result), "exit_code": 0})
         return task, "DONE"
