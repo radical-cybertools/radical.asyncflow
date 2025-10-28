@@ -492,8 +492,6 @@ class WorkerPool:
                     process_group.start()
                     self.process_groups.append(process_group)
                     
-                    worker_id += 1
-                    
                 else:
                     # Compute worker: use PolicyConfig.nprocs
                     process_group = ProcessGroup(restart=False)
@@ -514,11 +512,12 @@ class WorkerPool:
                         )
                         
                         process_group.add_process(nproc=policy_config.nprocs, template=template)
-                        worker_id += policy_config.nprocs
-                    
+
                     process_group.init()
                     process_group.start()
                     self.process_groups.append(process_group)
+
+                worker_id += 1
             
             self.initialized = True
             
@@ -539,9 +538,10 @@ class WorkerPool:
     def find_worker_for_task(self, ranks: int, gpus_per_rank: int = 0, 
                             preferred_worker: Optional[str] = None,
                             worker_type_hint: Optional[str] = None) -> Optional[str]:
-        """Find worker with sufficient capacity."""
+        """Find worker with sufficient capacity using least-loaded strategy."""
         total_gpus_needed = ranks * gpus_per_rank
         
+        # Check preferred worker first
         if preferred_worker and preferred_worker in self.worker_free_slots:
             worker_type = self.worker_types.get(preferred_worker)
             if worker_type == WorkerType.TRAINING:
@@ -552,7 +552,11 @@ class WorkerPool:
                     len(self.worker_free_gpus[preferred_worker]) >= total_gpus_needed):
                     return preferred_worker
         
+        # Find all eligible workers and pick the least loaded one
+        eligible_workers = []
+
         for worker_name in self.worker_free_slots.keys():
+            # Filter by worker type if specified
             if worker_type_hint:
                 try:
                     target_type = WorkerType(worker_type_hint.lower())
@@ -562,13 +566,21 @@ class WorkerPool:
                     pass
             
             worker_type = self.worker_types.get(worker_name)
+            
+            # Check if worker has sufficient capacity
             if worker_type == WorkerType.TRAINING:
                 if self.worker_free_slots[worker_name] >= ranks:
-                    return worker_name
+                    eligible_workers.append((worker_name, self.worker_free_slots[worker_name]))
             else:
                 if (self.worker_free_slots[worker_name] >= ranks and
                     len(self.worker_free_gpus[worker_name]) >= total_gpus_needed):
-                    return worker_name
+                    eligible_workers.append((worker_name, self.worker_free_slots[worker_name]))
+        
+        # Return the worker with the most free slots (least loaded)
+        if eligible_workers:
+            # Sort by free slots (descending) to get least loaded worker
+            eligible_workers.sort(key=lambda x: x[1], reverse=True)
+            return eligible_workers[0][0]
         
         return None
     
@@ -684,22 +696,51 @@ class WorkerPool:
             return
         
         try:
+            self.logger.info("Initiating worker pool shutdown...")
+            
+            # Send shutdown signal (None) to each worker process
+            # Each worker has multiple processes, so we need to send one None per process
             for worker_name, input_queue in self.worker_queues.items():
                 worker_slots = self.worker_slots[worker_name]
+                self.logger.debug(f"Sending {worker_slots} shutdown signals to {worker_name}")
                 for _ in range(worker_slots):
-                    input_queue.put(None)
+                    try:
+                        input_queue.put(None, timeout=1.0)
+                    except Exception as e:
+                        self.logger.warning(f"Failed to send shutdown signal to {worker_name}: {e}")
             
-            # Stop all process groups
+            # Give processes time to finish current work and exit cleanly
+            await asyncio.sleep(0.5)
+            
+            # Join and stop all process groups
             for idx, process_group in enumerate(self.process_groups):
                 try:
-                    if not process_group.inactive_puids:
+                    self.logger.debug(f"Stopping ProcessGroup {idx}")
+                    
+                    # Join first to wait for processes to exit
+                    try:
+                        process_group.join(timeout=5.0)
+                        self.logger.debug(f"ProcessGroup {idx} joined successfully")
+                    except Exception as e:
+                        self.logger.warning(f"ProcessGroup {idx} join timeout or error: {e}")
+                    
+                    # Then stop and close
+                    try:
                         process_group.stop()
+                        self.logger.debug(f"ProcessGroup {idx} stopped")
+                    except Exception as e:
+                        self.logger.debug(f"ProcessGroup {idx} stop error (may already be stopped): {e}")
+                    
+                    try:
                         process_group.close()
-                        self.logger.debug(f"Stopped ProcessGroup {idx + 1}")
-                except DragonUserCodeError:
-                    pass
+                        self.logger.debug(f"ProcessGroup {idx} closed")
+                    except Exception as e:
+                        self.logger.debug(f"ProcessGroup {idx} close error: {e}")
+                        
+                except DragonUserCodeError as e:
+                    self.logger.debug(f"ProcessGroup {idx} user code error during shutdown: {e}")
                 except Exception as e:
-                    self.logger.warning(f"Error stopping ProcessGroup {idx + 1}: {e}")
+                    self.logger.warning(f"Error stopping ProcessGroup {idx}: {e}")
             
             self.logger.info("Worker pool shutdown complete")
             
@@ -1435,31 +1476,53 @@ class DragonExecutionBackend(BaseExecutionBackend):
             return
         
         try:
+            logger.info("Starting Dragon backend shutdown...")
             self._shutdown_event.set()
             
-            # Cancel all tasks
-            await self.cancel_all_tasks()
+            # Cancel all running tasks
+            canceled = await self.cancel_all_tasks()
+            if canceled > 0:
+                logger.info(f"Canceled {canceled} running tasks")
             
+            # Stop scheduler
             if self._scheduler_task and not self._scheduler_task.done():
+                logger.debug("Stopping scheduler task...")
                 try:
                     await asyncio.wait_for(self._scheduler_task, timeout=5.0)
                 except asyncio.TimeoutError:
+                    logger.warning("Scheduler task timeout, canceling...")
                     self._scheduler_task.cancel()
+                    try:
+                        await self._scheduler_task
+                    except asyncio.CancelledError:
+                        pass
             
             # Stop monitoring
             if self._monitor_task and not self._monitor_task.done():
+                logger.debug("Stopping monitor task...")
                 try:
                     await asyncio.wait_for(self._monitor_task, timeout=5.0)
                 except asyncio.TimeoutError:
+                    logger.warning("Monitor task timeout, canceling...")
                     self._monitor_task.cancel()
+                    try:
+                        await self._monitor_task
+                    except asyncio.CancelledError:
+                        pass
             
+            # Shutdown worker pool (this waits for worker processes to exit)
             if self._worker_pool:
+                logger.debug("Shutting down worker pool...")
                 await self._worker_pool.shutdown()
+                logger.debug("Worker pool shutdown complete")
             
+            # Clean up DDict
             if self._ddict:
                 try:
+                    logger.debug("Cleaning up DDict...")
                     self._ddict.clear()
                     self._ddict.destroy()
+                    logger.debug("DDict cleanup complete")
                 except Exception as e:
                     logger.warning(f"Error cleaning up DDict: {e}")
             
