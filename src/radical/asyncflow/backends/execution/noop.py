@@ -1,3 +1,11 @@
+"""No-operation execution backend for testing and development.
+
+This module provides a no-op backend that simulates task execution without actually
+running any tasks.
+"""
+
+from __future__ import annotations
+
 from typing import Callable
 
 from ...constants import StateMapper
@@ -7,16 +15,16 @@ from .base import BaseExecutionBackend, Session
 class NoopExecutionBackend(BaseExecutionBackend):
     """A no-operation execution backend for testing and development purposes.
 
-    This backend simulates task execution without actually running any tasks.
-    All submitted tasks immediately return dummy output and transition to DONE state.
-    Useful for testing workflow logic without computational overhead.
+    This backend simulates task execution without actually running any tasks. All
+    submitted tasks immediately return dummy output and transition to DONE state. Useful
+    for testing workflow logic without computational overhead.
     """
 
     def __init__(self):
         """Initialize the no-op execution backend.
 
-        Sets up dummy task storage, session, and default callback function.
-        Registers backend states and confirms successful initialization.
+        Sets up dummy task storage, session, and default callback function. Registers
+        backend states and confirms successful initialization.
         """
         self.tasks = {}
         self.session = Session()
@@ -41,7 +49,6 @@ class NoopExecutionBackend(BaseExecutionBackend):
         Note:
             This is a no-op implementation that performs no actions.
         """
-        pass
 
     def get_task_states_map(self):
         """Retrieve a mapping of task IDs to their current states.
@@ -71,10 +78,18 @@ class NoopExecutionBackend(BaseExecutionBackend):
         Note:
             This is a no-op implementation that performs no actual task building.
         """
-        pass
 
-    async def cancel_task(self, uid: str) -> None:
-        pass
+    async def cancel_task(self, uid: str) -> bool:
+        """Cancel a task by its UID.
+
+        Args:
+            uid: The UID of the task to cancel.
+
+        Returns:
+            bool: Always returns False since noop backend doesn't track running tasks
+                  that can be cancelled.
+        """
+        return False
 
     async def submit_tasks(self, tasks):
         """Submit tasks for mock execution.
@@ -105,7 +120,6 @@ class NoopExecutionBackend(BaseExecutionBackend):
         Note:
             This is a no-op implementation as this backend doesn't handle dependencies.
         """
-        pass
 
     def link_implicit_data_deps(self, src_task, dst_task):
         """Handle implicit data dependencies for a task.
@@ -117,12 +131,10 @@ class NoopExecutionBackend(BaseExecutionBackend):
         Note:
             This is a no-op implementation as this backend doesn't handle dependencies.
         """
-        pass
 
     async def shutdown(self) -> None:
         """Shutdown the no-op execution backend.
 
-        Performs cleanup operations. Since this is a no-op backend, no actual
-        resources need to be cleaned up.
+        Performs cleanup operations. Since this is a no-op backend, no actual resources
+        need to be cleaned up.
         """
-        pass

@@ -3,38 +3,39 @@
 
 This guide walks you through running a **single workflow with task dependencies** using `radical.asyncflow`.
 
-You’ll learn how to define tasks, set dependencies, execute the workflow, and shut down the engine gracefully.
+You'll learn how to define tasks, set dependencies, execute the workflow, and shut down the engine gracefully.
 
 ---
 
 ## Prerequisites
 
-- Make sure you have installed `radical.asyncflow` in your Python environment.  
-- You also need a working Jupyter Notebook or Python >=3.8.
+- Make sure you have installed `radical.asyncflow` in your Python environment.
+- You also need a working Jupyter Notebook or Python >=3.9.
 
 ---
 
 ## Import the necessary modules
 
-You’ll need `time`, `asyncio`, and the key classes from `radical.asyncflow`.
+You'll need `time`, `asyncio`, and the key classes from `radical.asyncflow`.
 
 ```python
 import time
 import asyncio
 
-from concurrent.futures import ThreadPoolExecutor
-
-from radical.asyncflow import WorkflowEngine, ConcurrentExecutionBackend
+from radical.asyncflow import WorkflowEngine, factory
 ```
 
 ---
 
 ## Set up the workflow engine
 
-We initialize the workflow engine with a `ConcurrentExecutionBackend` using Python’s `ThreadPoolExecutor` or `ProcessPoolExecutor`.
+We initialize the workflow engine using the backend factory to create a concurrent execution backend.
 
 ```python
-backend = await ConcurrentExecutionBackend(ThreadPoolExecutor())
+backend = await factory.create_backend("concurrent", config={
+    "max_workers": 4,
+    "executor_type": "thread"  # or "process"
+})
 flow = await WorkflowEngine.create(backend=backend)
 ```
 
@@ -64,7 +65,7 @@ async def task3(t1_result, t2_result):
     return time.time()
 ```
 
-!!! note  
+!!! note
 - `task3` depends on the outputs of `task1` and `task2`.
 - You express this dependency by calling `task3(task1(), task2())`.
 - `task1` and `task2` will be automatically resolved during runtime and their values will be assigned to `task3` accordingly.
@@ -113,7 +114,7 @@ Here’s an example of the output you might see:
 
 ---
 
-!!! warning 
+!!! warning
 
 Make sure to **await the shutdown** of the `WorkflowEngine` before your script exits. Otherwise, resources may leak.
 
@@ -122,9 +123,9 @@ Make sure to **await the shutdown** of the `WorkflowEngine` before your script e
 ## Summary
 You now know how to:
 
-- Define a set of tasks with dependencies.  
-- Submit them to the workflow engine.  
-- Run the workflow asynchronously.  
+- Define a set of tasks with dependencies.
+- Submit them to the workflow engine.
+- Run the workflow asynchronously.
 - Shut down the engine properly.
 
 ---

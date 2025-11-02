@@ -1,7 +1,7 @@
 
 # Best Practices for AsyncFlow
 
-AsyncFlow is built on top of Python’s `asyncio`, combining asynchronous execution and task dependency management with a simple API.  
+AsyncFlow is built on top of Python’s `asyncio`, combining asynchronous execution and task dependency management with a simple API.
 This page outlines **recommended practices** when using AsyncFlow effectively in your projects.
 
 ---
@@ -28,7 +28,7 @@ By following these best practices, you can:
 - Prefer pure functions or side-effect-free coroutines as tasks.
 - Use `@flow.function_task` or `@flow.executable_task` decorators consistently.
 
-!!! tip 
+!!! tip
 
 Name your tasks clearly to improve logs and debugging
 ```python
@@ -124,8 +124,8 @@ Logs show task dependencies, execution order, errors.
 
 !!! success
 
-- Define tasks clearly and concisely.  
-- Pass tasks as arguments to express dependencies.  
-- Only await at the top level.  
-- Shut down cleanly.  
-- Log at `DEBUG` level when needed.  
+- Define tasks clearly and concisely.
+- Pass tasks as arguments to express dependencies.
+- Only await at the top level.
+- Shut down cleanly.
+- Log at `DEBUG` level when needed.

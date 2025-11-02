@@ -2,11 +2,11 @@ name: RADICAL-AsyncFlow
 icon: https://radical-cybertools.github.io/assets/radical-logo-transparent.png
 headline: High Performance Asynchronous Workflow Scripting Library
 description: |
-  RADICAL-AsyncFlow (RAF) is an asynchronous scripting library for building 
-  high-performance, scalable workflows that run on HPC systems, clusters, 
-  and local machines. Designed for flexibility and speed, it allows users 
-  to compose complex workflows from async and sync tasks with clear 
-  dependencies, while ensuring efficient execution at any scale with 
+  RADICAL-AsyncFlow (RAF) is an asynchronous scripting library for building
+  high-performance, scalable workflows that run on HPC systems, clusters,
+  and local machines. Designed for flexibility and speed, it allows users
+  to compose complex workflows from async and sync tasks with clear
+  dependencies, while ensuring efficient execution at any scale with
   different execution backends.
 
 language: Python
@@ -20,4 +20,3 @@ documentation:
   general: https://radical-cybertools.github.io/radical.asyncflow/
   installation: https://radical-cybertools.github.io/radical.asyncflow/install/
   tutorial: https://radical-cybertools.github.io/radical.asyncflow/basic/index.html
-

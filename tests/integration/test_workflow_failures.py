@@ -8,8 +8,7 @@ from radical.asyncflow import ConcurrentExecutionBackend, WorkflowEngine
 
 @pytest.mark.asyncio
 async def test_task_failure_handling():
-    """
-    Test the workflow engine's ability to handle task failures.
+    """Test the workflow engine's ability to handle task failures.
 
     This test verifies that:
     - A successful task returns the expected result.
@@ -53,9 +52,9 @@ async def test_task_failure_handling():
 
 @pytest.mark.asyncio
 async def test_awaiting_failed_task_propagates_exception():
-    """
-    Test that awaiting a failed task in a workflow propagates
-    the exception to dependent tasks.
+    """Test that awaiting a failed task in a workflow propagates the exception to
+    dependent tasks.
+
     This test verifies that when a task (`task1`) raises an
     exception, any subsequent task (`task2`) that awaits its
     result does not execute, and the exception is properly
@@ -86,11 +85,11 @@ async def test_awaiting_failed_task_propagates_exception():
 
 @pytest.mark.asyncio
 async def test_independent_workflow_failures_do_not_affect_others():
-    """
-    Test that failure in one async workflow does not impact other
-    concurrently running workflows. Workflow 0 is designed to fail
-    at task1. Other workflows should complete successfully regardless
-    of the failure in workflow 0.
+    """Test that failure in one async workflow does not impact other concurrently
+    running workflows.
+
+    Workflow 0 is designed to fail at task1. Other workflows should complete
+    successfully regardless of the failure in workflow 0.
     """
 
     backend = await ConcurrentExecutionBackend(ThreadPoolExecutor())

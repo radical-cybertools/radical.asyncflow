@@ -1,4 +1,13 @@
+"""Concurrent execution backend using Python's concurrent.futures.
+
+This module provides a backend that executes tasks using ThreadPoolExecutor or
+ProcessPoolExecutor from the concurrent.futures module.
+"""
+
+from __future__ import annotations
+
 import asyncio
+import gc
 import logging
 import subprocess
 
@@ -31,7 +40,7 @@ class ConcurrentExecutionBackend(BaseExecutionBackend):
             )
 
         self.executor = executor
-        self.tasks: dict[str, asyncio.Task] = {}
+        self.tasks: dict[str, dict] = {}
         self.session = Session()
         self._callback_func: Optional[Callable] = None
         self._initialized = False
@@ -115,27 +124,50 @@ class ConcurrentExecutionBackend(BaseExecutionBackend):
     async def _execute_command(self, task: dict) -> tuple[dict, str]:
         """Execute command task."""
         cmd = " ".join([task["executable"]] + task.get("arguments", []))
-
+        process = None
         try:
             process = await asyncio.create_subprocess_shell(
-                cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+                cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                close_fds=True,
             )
+
+            # Communicate and get results
             stdout, stderr = await process.communicate()
+            exit_code = process.returncode
+
+            # Force cleanup of the process to prevent ResourceWarnings
+            if process.returncode is None:
+                process.terminate()
+                try:
+                    await asyncio.wait_for(process.wait(), timeout=1.0)
+                except asyncio.TimeoutError:
+                    process.kill()
+                    await process.wait()
 
             task.update(
                 {
                     "stdout": stdout.decode(),
                     "stderr": stderr.decode(),
-                    "exit_code": process.returncode,
+                    "exit_code": exit_code,
                 }
             )
 
         except Exception:
-            # Fallback to thread executor
+            # Fallback to thread executor with proper subprocess configuration
+            def run_subprocess():
+                result = subprocess.run(  # noqa: S602
+                    cmd,
+                    shell=True,
+                    capture_output=True,
+                    text=True,
+                    close_fds=True,
+                )
+                return result
+
             loop = asyncio.get_running_loop()
-            result = await loop.run_in_executor(
-                self.executor, subprocess.run, cmd, True, True
-            )
+            result = await loop.run_in_executor(self.executor, run_subprocess)
 
             task.update(
                 {
@@ -145,27 +177,35 @@ class ConcurrentExecutionBackend(BaseExecutionBackend):
                 }
             )
 
+        finally:
+            # Ensure process cleanup to prevent ResourceWarnings
+            if process is not None and process.returncode is None:
+                try:
+                    process.terminate()
+                    await asyncio.wait_for(process.wait(), timeout=1.0)
+                except asyncio.TimeoutError:
+                    process.kill()
+                    await process.wait()
+                except Exception as e:
+                    # Log cleanup errors but don't fail the task
+                    logger.debug(f"Process cleanup error: {e}")
+
         state = "DONE" if task["exit_code"] == 0 else "FAILED"
         return task, state
 
     async def _handle_task(self, task: dict) -> None:
         """Handle task execution with callback."""
         result_task, state = await self._execute_task(task)
+        if self._callback_func:
+            self._callback_func(result_task, state)
 
-        self._callback_func(result_task, state)
-
-    async def submit_tasks(self, tasks: list[dict[str, Any]]) -> list[asyncio.Task]:
+    async def submit_tasks(self, tasks: list[dict[str, Any]]) -> None:
         """Submit tasks for execution."""
-        submitted_tasks = []
-
         for task in tasks:
             future = asyncio.create_task(self._handle_task(task))
-            submitted_tasks.append(future)
 
             self.tasks[task["uid"]] = task
             self.tasks[task["uid"]]["future"] = future
-
-        return submitted_tasks
 
     async def cancel_task(self, uid: str) -> bool:
         """Cancel a task by its UID.
@@ -181,7 +221,8 @@ class ConcurrentExecutionBackend(BaseExecutionBackend):
             task = self.tasks[uid]
             future = task["future"]
             if future and future.cancel():
-                self._callback_func(task, "CANCELED")
+                if self._callback_func:
+                    self._callback_func(task, "CANCELED")
                 return True
         return False
 
@@ -196,27 +237,57 @@ class ConcurrentExecutionBackend(BaseExecutionBackend):
         return cancelled_count
 
     async def shutdown(self) -> None:
-        """Shutdown the executor."""
+        """Shutdown the executor with proper resource cleanup."""
         await self.cancel_all_tasks()
+
+        # Give time for tasks to complete cleanup
+        await asyncio.sleep(0.1)
+
+        # Shutdown executor
         self.executor.shutdown(wait=True)
+
+        # Force garbage collection to clean up any remaining resources
+        gc.collect()
+
         logger.info("Concurrent execution backend shutdown complete")
 
     def build_task(self, uid, task_desc, task_specific_kwargs):
-        pass
+        """Build or prepare a task for execution.
+
+        Note:
+            This is a no-op implementation for the concurrent backend.
+        """
 
     def link_explicit_data_deps(
         self, src_task=None, dst_task=None, file_name=None, file_path=None
     ):
-        pass
+        """Link explicit data dependencies between tasks.
+
+        Note:
+            This is a no-op implementation for the concurrent backend.
+        """
 
     def link_implicit_data_deps(self, src_task, dst_task):
-        pass
+        """Link implicit data dependencies between tasks.
+
+        Note:
+            This is a no-op implementation for the concurrent backend.
+        """
 
     def state(self):
-        pass
+        """Get the current state of the execution backend.
 
-    def task_state_cb(self):
-        pass
+        Returns:
+            str: Always returns 'RUNNING' for active backend.
+        """
+        return "RUNNING"
+
+    def task_state_cb(self, task: dict, state: str) -> None:
+        """Callback function invoked when a task's state changes.
+
+        Note:
+            This is a no-op implementation for the concurrent backend.
+        """
 
     async def __aenter__(self):
         """Async context manager entry."""
