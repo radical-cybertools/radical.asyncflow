@@ -35,7 +35,7 @@ backend = RadicalExecutionBackend({'resource': 'local.localhost'})
 ```
 
 !!! success
-**One line change** transforms your workflow from local thread execution to distributed HPC execution across thousands of nodes.
+    **One line change** transforms your workflow from local thread execution to distributed HPC execution across thousands of nodes.
 
 ## Complete HPC Workflow Example
 
@@ -57,12 +57,12 @@ flow = WorkflowEngine(backend=backend)
 1. Configure for HPC execution - can target supercomputers, GPU clusters, local resources
 
 !!! tip
-**HPC Resource Configuration**: The `resource` parameter can be configured for various HPC systems:
-- `'local.localhost'` for local testing
-- `'ornl.summit'` for Oak Ridge Summit supercomputer
-- `'tacc.frontera'` for TACC Frontera system
-- `'anl.theta'` for Argonne Theta system
-- Custom configurations for your institutional clusters
+    **HPC Resource Configuration**: The `resource` parameter can be configured for various HPC systems:
+    - `'local.localhost'` for local testing
+    - `'ornl.summit'` for Oak Ridge Summit supercomputer
+    - `'tacc.frontera'` for TACC Frontera system
+    - `'anl.theta'` for Argonne Theta system
+    - Custom configurations for your institutional clusters
 
 ### Define Executable Tasks for HPC
 
@@ -83,11 +83,52 @@ async def task3(*args):
 1. `@flow.executable_task` creates tasks that execute as shell commands on HPC nodes
 
 !!! info
-**Executable Tasks**: Unlike function tasks, executable tasks return shell commands that are executed on remote HPC nodes, allowing you to leverage:
-- **Specialized HPC software** installed on compute nodes
-- **High-performance compiled applications**
-- **GPU-accelerated programs**
-- **MPI-based parallel applications**
+    **Executable Tasks**: Unlike function tasks, executable tasks return shell commands that are executed on remote HPC nodes, allowing you to leverage:
+    - **Specialized HPC software** installed on compute nodes
+    - **High-performance compiled applications**
+    - **GPU-accelerated programs**
+    - **MPI-based parallel applications**
+
+
+### Assign Resources for your application (task)
+
+Asyncflow and depending on the use `ExecutionBackend` supports the assignment of resources to each task. This is part of having a full and granular controll on the parallelism that asyncflow can offer.  
+Both `@flow.executable_task` and `@flow.function_task` can do that by passing `task_description` to your function `kwargs` during task definition or task invocation.
+
+```python
+@flow.function_task
+async def mpi_func(task_description={'ranks': 8, 'type': 'mpi'}):
+    """
+    multi-rank task that executes on N ranks in parallel.
+    """
+    # Initialize MPI communicator
+    comm = MPI.COMM_WORLD
+    rank = comm.Get_rank()
+    size = comm.Get_size()
+
+    # Each rank does work here
+    print(f"[Task1] Rank {rank}/{size} running on host: {os.uname().nodename}")
+
+    # Example: distributed computation
+    local_value = rank * 2
+    total_sum = comm.allreduce(local_value, op=MPI.SUM)
+
+    # Only rank 0 prints or returns results
+    if rank == 0:
+        print(f"[Task1] Total sum across {size} ranks = {total_sum}")
+        return {"sum": total_sum}
+    else:
+        return None
+```
+
+!!! note
+    Specifying `task_description` keys and values depends on the corresponding used `ExecutionBackend`. The example above reelect the usage of `RadicalExecutionBackend`.
+    For more information about what each task accpets as a resource parameters, please refer
+    to the corresponding runtime system (`ExecutionBackend`) documentation.
+
+!!! note
+    If the same `task_description` key (for example, `'ranks'`) is specified both during task definition and again at invocation time, the most recent value — provided at invocation — will take precedence and override the previous one.
+
 
 ### Define Workflow with Dependencies
 
@@ -105,7 +146,7 @@ async def run_wf(wf_id):
 1. Task3 depends on both task1 and task2 completion, but they execute on HPC nodes
 
 !!! note
-**Dependency Handling**: AsyncFlow automatically handles task dependencies across distributed HPC nodes, ensuring proper execution order while maximizing parallelism.
+    **Dependency Handling**: AsyncFlow automatically handles task dependencies across distributed HPC nodes, ensuring proper execution order while maximizing parallelism.
 
 ### Execute Multiple Workflows on HPC
 
@@ -181,7 +222,7 @@ backend = RadicalExecutionBackend({
 ```
 
 !!! warning
-**Resource Management**: Always call `await flow.shutdown()` to properly release HPC resources and prevent job queue issues.
+    **Resource Management**: Always call `await flow.shutdown()` to properly release HPC resources and prevent job queue issues.
 
 ## Real-World HPC Use Cases
 
@@ -194,7 +235,7 @@ backend = RadicalExecutionBackend({
 **Engineering Simulation**: Run computational fluid dynamics, finite element analysis, or structural optimization across distributed computing resources.
 
 !!! tip
-**Development Strategy**: Start with `ConcurrentExecutionBackend` for local development and testing, then seamlessly switch to `RadicalExecutionBackend` for production HPC runs.
+    **Development Strategy**: Start with `ConcurrentExecutionBackend` for local development and testing, then seamlessly switch to `RadicalExecutionBackend` for production HPC runs.
 
 ## The AsyncFlow Advantage
 
