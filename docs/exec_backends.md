@@ -50,7 +50,7 @@ from radical.asyncflow import RadicalExecutionBackend
 from radical.asyncflow import WorkflowEngine
 
 # HPC backend configuration
-backend = RadicalExecutionBackend({'resource': 'local.localhost'}) # (1)!
+backend = RadicalExecutionBackend({'nodes': 1, 'resource': 'local.localhost'}) # (1)!
 flow = WorkflowEngine(backend=backend)
 ```
 

@@ -30,7 +30,7 @@ Documentation = "https://radical-cybertools.github.io/radical.asyncflow"
 
 [project.optional-dependencies]
 dask = ["dask[distributed]"]
-radicalpilot = ["radical.pilot==1.100.0"]
+radicalpilot = ["radical.pilot"]
 
 
 lint = ["ruff"]
