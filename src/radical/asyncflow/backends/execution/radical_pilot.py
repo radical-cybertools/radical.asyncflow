@@ -200,7 +200,7 @@ class RadicalExecutionBackend(BaseExecutionBackend):
             logger.info("RadicalPilot execution backend started successfully\n")
 
         except Exception as e:
-            logger.exception(f"RadicalPilot backend failed to start due to: {e}, terminating\n")
+            logger.exception(f"RadicalPilot backend failed: {e}, terminating\n")
             raise
 
         except (KeyboardInterrupt, SystemExit) as e:
