@@ -12,7 +12,7 @@ async def main():
     init_default_logger(logging.INFO)
 
     # Create backend and workflow
-    backend = await RadicalExecutionBackend({"resource": "local.localhost"})
+    backend = await RadicalExecutionBackend({"nodes": 1, "resource": "local.localhost"})
     flow = await WorkflowEngine.create(backend=backend)
 
     task1_resources = {"ranks": 1, "gpus_per_rank": 1}

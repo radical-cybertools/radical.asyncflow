@@ -18,7 +18,7 @@ Currently, RAF supports the following execution backends:
 
 ---
 
-## Basic Usage
+Basic Usage
 
 ```python
 import asyncio

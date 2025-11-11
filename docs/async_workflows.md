@@ -22,7 +22,7 @@ graph TD
 ```
 
 !!! success "Performance Benefit"
-This approach can significantly reduce total execution time by allowing independent workflows to run concurrently.
+    This approach can significantly reduce total execution time by allowing independent workflows to run concurrently.
 
 
 ### Example Code
@@ -89,13 +89,13 @@ asyncio.run(main())
 
 
 !!! tip "Key Characteristics"
-- Workflows execute concurrently
-- Total time is determined by the longest-running workflow
-- More efficient but requires proper async/await syntax
-- Better resource utilization
+    - Workflows execute concurrently
+    - Total time is determined by the longest-running workflow
+    - More efficient but requires proper async/await syntax
+    - Better resource utilization
 
 
 
 !!! important "When to Use Each"
-- Use synchronous when workflows must run in sequence or have dependencies
-- Use asynchronous when workflows are independent and you want better performance
+    - Use synchronous when workflows must run in sequence or have dependencies
+    - Use asynchronous when workflows are independent and you want better performance

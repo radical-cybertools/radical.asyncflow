@@ -22,11 +22,11 @@ graph TD
 ```
 
 !!! note
-`Block` entity can have DAG shaped workflows where some workflows depends on others. 
+    `Block` entity can have DAG shaped workflows where some workflows depend on others. 
 
 ## Example: Independent Blocks
 
-Below is a full working example using `ConcurrentExecutionBackend` and Python's asyncio to execute three blocks in parallel, each with four dependent steps.
+Below is a full working example using `ConcurrentExecutionBackend` and Python's `asyncio` to execute three blocks in parallel, each with four dependent steps.
 
 ### Setup
 
@@ -84,7 +84,7 @@ async def create_workflow(name):
 ```
 
 !!! success
-`@asyncflow.function_task` turns a regular `async` function into an `AsyncFlow` task, which can be tracked, scheduled, and executed by the workflow engine.
+    `@asyncflow.function_task` turns a regular `async` function into an `AsyncFlow` task, which can be tracked, scheduled, and executed by the workflow engine.
 
 ### Define a Composite Workflow Block
 
@@ -100,7 +100,7 @@ async def create_block(name: str, *args):
 1. Define one composite workflow block containing multiple dependent steps
 
 !!! tip
-The `@asyncflow.block` decorator groups a set of dependent tasks into a single logical unit (a "block"). This creates a composite workflow that can be executed dependently or independently from other blocks.
+    The `@asyncflow.block` decorator groups a set of dependent tasks into a single logical unit (a "block"). This creates a composite workflow that can be executed dependently or independently from other blocks.
 
 ### Run All Blocks Concurrently
 
@@ -206,9 +206,9 @@ await asyncflow.shutdown() # (2)!
     ```
 
 !!! note
-- Each block executes its steps sequentially.
-- All blocks run concurrently.
-- AsyncFlow handles scheduling and dependencies automatically.
+    - Each block executes its steps sequentially.
+    - All blocks run concurrently.
+    - AsyncFlow handles scheduling and dependencies automatically.
 
 ## Example: Blocks with Dependency
 To represent the previous example as a `DAG` then all you need to do is to
@@ -312,7 +312,7 @@ await block3
 
 
 !!! warning
-Do not forget to `await asyncflow.shutdown()` when you are done — otherwise, resources may remain allocated.
+    Do not forget to `await asyncflow.shutdown()` when you are done — otherwise, resources may remain allocated.
 
 !!! tip
-You can replace `ConcurrentExecutionBackend` with `RadicalExecutionBackend` if you want to run on an HPC cluster instead of local threads/processes.
+    You can replace `ConcurrentExecutionBackend` with `RadicalExecutionBackend` if you want to run on an HPC cluster instead of local threads/processes.

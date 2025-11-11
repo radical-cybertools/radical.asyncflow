@@ -28,14 +28,13 @@ By following these best practices, you can:
 - Prefer pure functions or side-effect-free coroutines as tasks.
 - Use `@flow.function_task` or `@flow.executable_task` decorators consistently.
 
-!!! tip 
-
-Name your tasks clearly to improve logs and debugging
-```python
-@flow.function_task
-async def fetch_data(url):
-    ...
-```
+!!! tip
+    Name your tasks clearly to improve logs and debugging
+    ```python
+    @flow.function_task
+    async def fetch_data(url):
+        ...
+    ```
 ---
 
 ## Use Dependencies Correctly
@@ -45,7 +44,7 @@ Tasks can depend on the output of other tasks:
 - Don’t block unnecessarily: let AsyncFlow schedule dependencies.
 
 !!! tip
-Tasks that don’t depend on each other run in parallel automatically.
+    Tasks that don’t depend on each other run in parallel automatically.
 
 ```python
 asyncflow = await WorkflowManager.create(dry_run=True)
@@ -76,8 +75,7 @@ result = task_c(task_a(), task_b()) # (3)!
 - Awaiting early forces serialization and kills concurrency.
 
 !!! warning
-
-Avoid this as it will be slower:
+    Avoid this as it will be slower:
 
 ```python
 await task_a()
@@ -91,7 +89,7 @@ result = await task_c(task_a(), task_b())
 
 ---
 
-## Use `await flow.shutdown()`
+## Graceful Shutdown
 
 Always shut down the flow explicitly when finished:
 - Releases resources (e.g., thread pools, processes).
@@ -123,9 +121,8 @@ Logs show task dependencies, execution order, errors.
 ---
 
 !!! success
-
-- Define tasks clearly and concisely.  
-- Pass tasks as arguments to express dependencies.  
-- Only await at the top level.  
-- Shut down cleanly.  
-- Log at `DEBUG` level when needed.  
+    - Define tasks clearly and concisely.  
+    - Pass tasks as arguments to express dependencies.  
+    - Only await at the top level.  
+    - Shut down cleanly.  
+    - Log at `DEBUG` level when needed.  

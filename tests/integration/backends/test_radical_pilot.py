@@ -14,7 +14,7 @@ from radical.asyncflow import (
 @pytest_asyncio.fixture(scope="module")
 async def backend():
     """Initialize RadicalExecutionBackend once for all tests."""
-    be = await RadicalExecutionBackend({"resource": "local.localhost"})
+    be = await RadicalExecutionBackend({"nodes": 1, "resource": "local.localhost"})
     yield be
     await be.shutdown()
 
