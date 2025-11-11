@@ -92,7 +92,7 @@ async def task3(*args):
 
 ### Assign Resources for your application (task)
 
-Asyncflow and depending on the use `ExecutionBackend` supports the assignment of resources to each task. This is part of having a full and granular controll on the parallelism that asyncflow can offer.  
+Depending on the `ExecutionBackend` used, Asyncflow supports passing and assigning multiple/different task and resources parameters to each task. This is part of having a full and granular control on the parallelism that asyncflow can offer.  
 Both `@flow.executable_task` and `@flow.function_task` can do that by passing `task_description` to your function `kwargs` during task definition or task invocation.
 
 ```python
@@ -122,8 +122,8 @@ async def mpi_func(task_description={'ranks': 8, 'type': 'mpi'}):
 ```
 
 !!! note
-    Specifying `task_description` keys and values depends on the corresponding used `ExecutionBackend`. The example above reelect the usage of `RadicalExecutionBackend`.
-    For more information about what each task accpets as a resource parameters, please refer
+    Specifying `task_description` keys and values depends on the corresponding `ExecutionBackend used`. The example above reflects the usage of `RadicalExecutionBackend`.
+    For more information about what each task accepts as a resource parameters, please refer
     to the corresponding runtime system (`ExecutionBackend`) documentation.
 
 !!! note

@@ -89,7 +89,7 @@ result = await task_c(task_a(), task_b())
 
 ---
 
-## Appropriate Waiting
+## Graceful Shutdown
 
 Always shut down the flow explicitly when finished:
 - Releases resources (e.g., thread pools, processes).

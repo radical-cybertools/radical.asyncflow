@@ -22,7 +22,7 @@ graph TD
 ```
 
 !!! note
-    `Block` entity can have DAG shaped workflows where some workflows depends on others. 
+    `Block` entity can have DAG shaped workflows where some workflows depend on others. 
 
 ## Example: Independent Blocks
 
