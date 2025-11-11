@@ -152,8 +152,8 @@ class RadicalExecutionBackend(BaseExecutionBackend):
 
         # This will allow us to have better control
         # on the error coming from the pilot object
-        if 'exit_on_error' not in self.resources:
-            self.resources['exit_on_error'] = False
+        if "exit_on_error" not in self.resources:
+            self.resources["exit_on_error"] = False
 
     def __await__(self):
         """Make RadicalExecutionBackend awaitable."""
@@ -319,16 +319,15 @@ class RadicalExecutionBackend(BaseExecutionBackend):
             yield masters_uids[current_master]
             current_master = (current_master + 1) % len(self.masters)
 
-
     def register_pilot_callback(self, pilot, state) -> None:
         """Handle pilot state changes and ensure task callbacks are fired."""
         # For some reason radical.pilot reports
         # twice that the pilot has failed
         if state == rp.FAILED:
-            if hasattr(self, '_pilot_failed'):
+            if hasattr(self, "_pilot_failed"):
                 return
 
-            logger.error(f'{pilot.uid} has failed: {pilot}')
+            logger.error(f"{pilot.uid} has failed: {pilot}")
             self._pilot_failed = True
 
             try:
@@ -346,7 +345,6 @@ class RadicalExecutionBackend(BaseExecutionBackend):
                         self._callback_func(task, task.state)
             except Exception as e:
                 logger.exception(f"Error handling pilot failure: {e}")
-
 
     def register_callback(self, func: Callable) -> None:
         """Register a callback function for task state changes.
