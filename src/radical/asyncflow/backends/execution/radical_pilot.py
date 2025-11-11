@@ -328,7 +328,7 @@ class RadicalExecutionBackend(BaseExecutionBackend):
             if hasattr(self, '_pilot_failed'):
                 return
 
-            logger.error(f'{pilot.uid} has failed: {pilot.as_dict()}')
+            logger.error(f'{pilot.uid} has failed: {pilot}')
             self._pilot_failed = True
 
             try:
