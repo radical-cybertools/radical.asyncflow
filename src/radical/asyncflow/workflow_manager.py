@@ -818,10 +818,6 @@ class WorkflowEngine:
                                     comp_desc, failed_deps
                                 )
                             )
-                            logger.error(
-                                f"Dependency failure for {comp_desc['name']}: "
-                                f"{chained_exception}"
-                            )
                             self.handle_task_failure(
                                 comp_desc,
                                 self.components[comp_uid]["future"],

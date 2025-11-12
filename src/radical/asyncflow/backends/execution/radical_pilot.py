@@ -197,14 +197,14 @@ class RadicalExecutionBackend(BaseExecutionBackend):
                 running_state=rp.AGENT_EXECUTING,
             )
 
-            logger.info("RadicalPilot execution backend started successfully\n")
+            logger.info("RadicalPilot execution backend started successfully")
 
         except Exception as e:
-            logger.exception(f"RadicalPilot backend failed: {e}, terminating\n")
+            logger.exception(f"RadicalPilot execution backend failed: {e}, terminating")
             raise
 
         except (KeyboardInterrupt, SystemExit) as e:
-            msg = f"Radical backend failed: {e}, check {self.session.path}"
+            msg = f"Radical execution backend failed: {e}, check {self.session.path}"
             raise SystemExit(msg) from e
 
     def get_task_states_map(self) -> StateMapper:
@@ -342,7 +342,7 @@ class RadicalExecutionBackend(BaseExecutionBackend):
                 # This ensures WorkflowEngine is notified
                 for task in rp_tasks:
                     if task.state != rp.DONE:
-                        self._callback_func(task, task.state)
+                        self._callback_func(task, rp.FAILED)
             except Exception as e:
                 logger.exception(f"Error handling pilot failure: {e}")
 
