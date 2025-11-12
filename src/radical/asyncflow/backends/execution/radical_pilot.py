@@ -332,7 +332,7 @@ class RadicalExecutionBackend(BaseExecutionBackend):
 
             try:
                 # Get actual task objects from task manager
-                tasks_ids = [uid for uid in self.tasks.keys()]
+                tasks_ids = list(self.tasks.keys())
                 rp_tasks = self.task_manager.get_tasks(tasks_ids)
 
                 if not rp_tasks:
