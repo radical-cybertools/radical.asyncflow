@@ -1,0 +1,1157 @@
+<!DOCTYPE html><html lang=en class=no-js><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><link href=https://github.com/radical-cybertools/radical.asyncflow/api/radical/asyncflow/backends/execution/radical_pilot/ rel=canonical><link href=../noop/ rel=prev><link href=../../../constants/ rel=next><link rel=icon href=../../../../../../assets/images/favicon.png><meta name=generator content="mkdocs-1.5.3, mkdocs-material-9.5.9"><title>radical_pilot - AsyncFlow</title><link rel=stylesheet href=../../../../../../assets/stylesheets/main.f2e4d321.min.css><link rel=stylesheet href=../../../../../../assets/stylesheets/palette.06af60db.min.css><link rel=preconnect href=https://fonts.gstatic.com crossorigin><link rel=stylesheet href="https://fonts.googleapis.com/css?family=Segoe+UI:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback"><style>:root{--md-text-font:"Segoe UI";--md-code-font:"Roboto Mono"}</style><link rel=stylesheet href=../../../../../../assets/_mkdocstrings.css><link rel=stylesheet href=../../../../../../css/extra.css><script>__md_scope=new URL("../../../../../..",location),__md_hash=e=>[...e].reduce((e,_)=>(e<<5)-e+_.charCodeAt(0),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script><link href=../../../../../../assets/stylesheets/glightbox.min.css rel=stylesheet><script src=../../../../../../assets/javascripts/glightbox.min.js></script><style id=glightbox-style>
+            html.glightbox-open { overflow: initial; height: 100%; }
+            .gslide-title { margin-top: 0px; user-select: text; }
+            .gslide-desc { color: #666; user-select: text; }
+            .gslide-image img { background: white; }
+            .gscrollbar-fixer { padding-right: 15px; }
+            .gdesc-inner { font-size: 0.75rem; }
+            body[data-md-color-scheme="slate"] .gdesc-inner { background: var(--md-default-bg-color); }
+            body[data-md-color-scheme="slate"] .gslide-title { color: var(--md-default-fg-color); }
+            body[data-md-color-scheme="slate"] .gslide-desc { color: var(--md-default-fg-color); }
+        </style></head> <body dir=ltr data-md-color-scheme=default data-md-color-primary=black data-md-color-accent=indigo> <input class=md-toggle data-md-toggle=drawer type=checkbox id=__drawer autocomplete=off> <input class=md-toggle data-md-toggle=search type=checkbox id=__search autocomplete=off> <label class=md-overlay for=__drawer></label> <div data-md-component=skip> <a href=#radicalasyncflowbackendsexecutionradical_pilot class=md-skip> Skip to content </a> </div> <div data-md-component=announce> </div> <header class="md-header md-header--shadow md-header--lifted" data-md-component=header> <nav class="md-header__inner md-grid" aria-label=Header> <a href=../../../../../.. title=AsyncFlow class="md-header__button md-logo" aria-label=AsyncFlow data-md-component=logo> <svg xmlns=http://www.w3.org/2000/svg viewbox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54Z"></path></svg> </a> <label class="md-header__button md-icon" for=__drawer> <svg xmlns=http://www.w3.org/2000/svg viewbox="0 0 24 24"><path d="M3 6h18v2H3V6m0 5h18v2H3v-2m0 5h18v2H3v-2Z"></path></svg> </label> <div class=md-header__title data-md-component=header-title> <div class=md-header__ellipsis> <div class=md-header__topic> <span class=md-ellipsis> AsyncFlow </span> </div> <div class=md-header__topic data-md-component=header-topic> <span class=md-ellipsis> radical_pilot </span> </div> </div> </div> <form class=md-header__option data-md-component=palette> <input class=md-option data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme=default data-md-color-primary=black data-md-color-accent=indigo aria-label="Switch to dark mode" type=radio name=__palette id=__palette_0> <label class="md-header__button md-icon" title="Switch to dark mode" for=__palette_1 hidden> <svg xmlns=http://www.w3.org/2000/svg viewbox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3 3.19.09m3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95 2.06.05m-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31Z"></path></svg> </label> <input class=md-option data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme=slate data-md-color-primary=black data-md-color-accent=indigo aria-label="Switch to light mode" type=radio name=__palette id=__palette_1> <label class="md-header__button md-icon" title="Switch to light mode" for=__palette_0 hidden> <svg xmlns=http://www.w3.org/2000/svg viewbox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5c-.84 0-1.65.15-2.39.42L12 2M3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29L3.34 7m.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14L3.36 17M20.65 7l-1.77 3.79a7.023 7.023 0 0 0-2.38-4.15l4.15.36m-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29L20.64 17M12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44L12 22Z"></path></svg> </label> </form> <script>var media,input,key,value,palette=__md_get("__palette");if(palette&&palette.color){"(prefers-color-scheme)"===palette.color.media&&(media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']"),palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent"));for([key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script> <label class="md-header__button md-icon" for=__search> <svg xmlns=http://www.w3.org/2000/svg viewbox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.516 6.516 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5Z"></path></svg> </label> <div class=md-search data-md-component=search role=dialog> <label class=md-search__overlay for=__search></label> <div class=md-search__inner role=search> <form class=md-search__form name=search> <input type=text class=md-search__input name=query aria-label=Search placeholder=Search autocapitalize=off autocorrect=off autocomplete=off spellcheck=false data-md-component=search-query required> <label class="md-search__icon md-icon" for=__search> <svg xmlns=http://www.w3.org/2000/svg viewbox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.516 6.516 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5Z"></path></svg> <svg xmlns=http://www.w3.org/2000/svg viewbox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11h12Z"></path></svg> </label> <nav class=md-search__options aria-label=Search> <a href=javascript:void(0) class="md-search__icon md-icon" title=Share aria-label=Share data-clipboard data-clipboard-text data-md-component=search-share tabindex=-1> <svg xmlns=http://www.w3.org/2000/svg viewbox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7 0-.24-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9a3 3 0 0 0-3 3 3 3 0 0 0 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.15c-.05.21-.08.43-.08.66 0 1.61 1.31 2.91 2.92 2.91 1.61 0 2.92-1.3 2.92-2.91A2.92 2.92 0 0 0 18 16.08Z"></path></svg> </a> <button type=reset class="md-search__icon md-icon" title=Clear aria-label=Clear tabindex=-1> <svg xmlns=http://www.w3.org/2000/svg viewbox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12 19 6.41Z"></path></svg> </button> </nav> <div class=md-search__suggest data-md-component=search-suggest></div> </form> <div class=md-search__output> <div class=md-search__scrollwrap data-md-scrollfix> <div class=md-search-result data-md-component=search-result> <div class=md-search-result__meta> Initializing search </div> <ol class=md-search-result__list role=presentation></ol> </div> </div> </div> </div> </div> <div class=md-header__source> <a href=https://github.com/radical-cybertools/radical.asyncflow title="Go to repository" class=md-source data-md-component=source> <div class="md-source__icon md-icon"> <svg xmlns=http://www.w3.org/2000/svg viewbox="0 0 448 512"><!-- Font Awesome Free 6.5.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2023 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81z"></path></svg> </div> <div class=md-source__repository> AsyncFlow </div> </a> </div> </nav> <nav class=md-tabs aria-label=Tabs data-md-component=tabs> <div class=md-grid> <ul class=md-tabs__list> <li class=md-tabs__item> <a href=../../../../../.. class=md-tabs__link> Home </a> </li> <li class=md-tabs__item> <a href=../../../../../../basic/ class=md-tabs__link> Getting Started </a> </li> <li class=md-tabs__item> <a href=../../../../../../best_practice/ class=md-tabs__link> Best Practices </a> </li> <li class=md-tabs__item> <a href=../../../../../../async_workflows/ class=md-tabs__link> Workflows </a> </li> <li class=md-tabs__item> <a href=../../../../../../composite_workflow/ class=md-tabs__link> Composite Workflows </a> </li> <li class="md-tabs__item md-tabs__item--active"> <a href=../base/ class=md-tabs__link> API Reference </a> </li> </ul> </div> </nav> </header> <div class=md-container data-md-component=container> <main class=md-main data-md-component=main> <div class="md-main__inner md-grid"> <div class="md-sidebar md-sidebar--primary" data-md-component=sidebar data-md-type=navigation> <div class=md-sidebar__scrollwrap> <div class=md-sidebar__inner> <nav class="md-nav md-nav--primary md-nav--lifted md-nav--integrated" aria-label=Navigation data-md-level=0> <label class=md-nav__title for=__drawer> <a href=../../../../../.. title=AsyncFlow class="md-nav__button md-logo" aria-label=AsyncFlow data-md-component=logo> <svg xmlns=http://www.w3.org/2000/svg viewbox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54Z"></path></svg> </a> AsyncFlow </label> <div class=md-nav__source> <a href=https://github.com/radical-cybertools/radical.asyncflow title="Go to repository" class=md-source data-md-component=source> <div class="md-source__icon md-icon"> <svg xmlns=http://www.w3.org/2000/svg viewbox="0 0 448 512"><!-- Font Awesome Free 6.5.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2023 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81z"></path></svg> </div> <div class=md-source__repository> AsyncFlow </div> </a> </div> <ul class=md-nav__list data-md-scrollfix> <li class="md-nav__item md-nav__item--nested"> <input class="md-nav__toggle md-toggle " type=checkbox id=__nav_1> <label class=md-nav__link for=__nav_1 id=__nav_1_label tabindex=0> <span class=md-ellipsis> Home </span> <span class="md-nav__icon md-icon"></span> </label> <nav class=md-nav data-md-level=1 aria-labelledby=__nav_1_label aria-expanded=false> <label class=md-nav__title for=__nav_1> <span class="md-nav__icon md-icon"></span> Home </label> <ul class=md-nav__list data-md-scrollfix> <li class=md-nav__item> <a href=../../../../../.. class=md-nav__link> <span class=md-ellipsis> Introduction </span> </a> </li> <li class=md-nav__item> <a href=../../../../../../install/ class=md-nav__link> <span class=md-ellipsis> Installation </span> </a> </li> </ul> </nav> </li> <li class="md-nav__item md-nav__item--nested"> <input class="md-nav__toggle md-toggle " type=checkbox id=__nav_2> <label class=md-nav__link for=__nav_2 id=__nav_2_label tabindex=0> <span class=md-ellipsis> Getting Started </span> <span class="md-nav__icon md-icon"></span> </label> <nav class=md-nav data-md-level=1 aria-labelledby=__nav_2_label aria-expanded=false> <label class=md-nav__title for=__nav_2> <span class="md-nav__icon md-icon"></span> Getting Started </label> <ul class=md-nav__list data-md-scrollfix> <li class=md-nav__item> <a href=../../../../../../basic/ class=md-nav__link> <span class=md-ellipsis> Basic Usage </span> </a> </li> </ul> </nav> </li> <li class="md-nav__item md-nav__item--nested"> <input class="md-nav__toggle md-toggle " type=checkbox id=__nav_3> <label class=md-nav__link for=__nav_3 id=__nav_3_label tabindex=0> <span class=md-ellipsis> Best Practices </span> <span class="md-nav__icon md-icon"></span> </label> <nav class=md-nav data-md-level=1 aria-labelledby=__nav_3_label aria-expanded=false> <label class=md-nav__title for=__nav_3> <span class="md-nav__icon md-icon"></span> Best Practices </label> <ul class=md-nav__list data-md-scrollfix> <li class=md-nav__item> <a href=../../../../../../best_practice/ class=md-nav__link> <span class=md-ellipsis> Best Practices </span> </a> </li> </ul> </nav> </li> <li class="md-nav__item md-nav__item--nested"> <input class="md-nav__toggle md-toggle " type=checkbox id=__nav_4> <label class=md-nav__link for=__nav_4 id=__nav_4_label tabindex=0> <span class=md-ellipsis> Workflows </span> <span class="md-nav__icon md-icon"></span> </label> <nav class=md-nav data-md-level=1 aria-labelledby=__nav_4_label aria-expanded=false> <label class=md-nav__title for=__nav_4> <span class="md-nav__icon md-icon"></span> Workflows </label> <ul class=md-nav__list data-md-scrollfix> <li class=md-nav__item> <a href=../../../../../../async_workflows/ class=md-nav__link> <span class=md-ellipsis> Asynchronous Workflows </span> </a> </li> <li class=md-nav__item> <a href=../../../../../../exec_backends/ class=md-nav__link> <span class=md-ellipsis> Execution Backends </span> </a> </li> </ul> </nav> </li> <li class=md-nav__item> <a href=../../../../../../composite_workflow/ class=md-nav__link> <span class=md-ellipsis> Composite Workflows </span> </a> </li> <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested"> <input class="md-nav__toggle md-toggle " type=checkbox id=__nav_6 checked> <label class=md-nav__link for=__nav_6 id=__nav_6_label tabindex> <span class=md-ellipsis> API Reference </span> <span class="md-nav__icon md-icon"></span> </label> <nav class=md-nav data-md-level=1 aria-labelledby=__nav_6_label aria-expanded=true> <label class=md-nav__title for=__nav_6> <span class="md-nav__icon md-icon"></span> API Reference </label> <ul class=md-nav__list data-md-scrollfix> <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested"> <input class="md-nav__toggle md-toggle " type=checkbox id=__nav_6_1 checked> <label class=md-nav__link for=__nav_6_1 id=__nav_6_1_label tabindex> <span class=md-ellipsis> AsyncFlow </span> <span class="md-nav__icon md-icon"></span> </label> <nav class=md-nav data-md-level=2 aria-labelledby=__nav_6_1_label aria-expanded=true> <label class=md-nav__title for=__nav_6_1> <span class="md-nav__icon md-icon"></span> AsyncFlow </label> <ul class=md-nav__list data-md-scrollfix> <li class="md-nav__item md-nav__item--active md-nav__item--nested"> <input class="md-nav__toggle md-toggle " type=checkbox id=__nav_6_1_1 checked> <label class=md-nav__link for=__nav_6_1_1 id=__nav_6_1_1_label tabindex=0> <span class=md-ellipsis> radical </span> <span class="md-nav__icon md-icon"></span> </label> <nav class=md-nav data-md-level=3 aria-labelledby=__nav_6_1_1_label aria-expanded=true> <label class=md-nav__title for=__nav_6_1_1> <span class="md-nav__icon md-icon"></span> radical </label> <ul class=md-nav__list data-md-scrollfix> <li class="md-nav__item md-nav__item--active md-nav__item--nested"> <input class="md-nav__toggle md-toggle " type=checkbox id=__nav_6_1_1_1 checked> <label class=md-nav__link for=__nav_6_1_1_1 id=__nav_6_1_1_1_label tabindex=0> <span class=md-ellipsis> asyncflow </span> <span class="md-nav__icon md-icon"></span> </label> <nav class=md-nav data-md-level=4 aria-labelledby=__nav_6_1_1_1_label aria-expanded=true> <label class=md-nav__title for=__nav_6_1_1_1> <span class="md-nav__icon md-icon"></span> asyncflow </label> <ul class=md-nav__list data-md-scrollfix> <li class="md-nav__item md-nav__item--active md-nav__item--nested"> <input class="md-nav__toggle md-toggle " type=checkbox id=__nav_6_1_1_1_1 checked> <label class=md-nav__link for=__nav_6_1_1_1_1 id=__nav_6_1_1_1_1_label tabindex=0> <span class=md-ellipsis> backends </span> <span class="md-nav__icon md-icon"></span> </label> <nav class=md-nav data-md-level=5 aria-labelledby=__nav_6_1_1_1_1_label aria-expanded=true> <label class=md-nav__title for=__nav_6_1_1_1_1> <span class="md-nav__icon md-icon"></span> backends </label> <ul class=md-nav__list data-md-scrollfix> <li class="md-nav__item md-nav__item--active md-nav__item--nested"> <input class="md-nav__toggle md-toggle " type=checkbox id=__nav_6_1_1_1_1_1 checked> <label class=md-nav__link for=__nav_6_1_1_1_1_1 id=__nav_6_1_1_1_1_1_label tabindex=0> <span class=md-ellipsis> execution </span> <span class="md-nav__icon md-icon"></span> </label> <nav class=md-nav data-md-level=6 aria-labelledby=__nav_6_1_1_1_1_1_label aria-expanded=true> <label class=md-nav__title for=__nav_6_1_1_1_1_1> <span class="md-nav__icon md-icon"></span> execution </label> <ul class=md-nav__list data-md-scrollfix> <li class=md-nav__item> <a href=../base/ class=md-nav__link> <span class=md-ellipsis> base </span> </a> </li> <li class=md-nav__item> <a href=../concurrent/ class=md-nav__link> <span class=md-ellipsis> concurrent </span> </a> </li> <li class=md-nav__item> <a href=../dask_parallel/ class=md-nav__link> <span class=md-ellipsis> dask_parallel </span> </a> </li> <li class=md-nav__item> <a href=../noop/ class=md-nav__link> <span class=md-ellipsis> noop </span> </a> </li> <li class="md-nav__item md-nav__item--active"> <input class="md-nav__toggle md-toggle" type=checkbox id=__toc> <label class="md-nav__link md-nav__link--active" for=__toc> <span class=md-ellipsis> radical_pilot </span> <span class="md-nav__icon md-icon"></span> </label> <a href=./ class="md-nav__link md-nav__link--active"> <span class=md-ellipsis> radical_pilot </span> </a> <nav class="md-nav md-nav--secondary" aria-label="Table of contents"> <label class=md-nav__title for=__toc> <span class="md-nav__icon md-icon"></span> Table of contents </label> <ul class=md-nav__list data-md-component=toc data-md-scrollfix> <li class=md-nav__item> <a href=#radical.asyncflow.backends.execution.radical_pilot class=md-nav__link> <span class=md-ellipsis> <code class="doc-symbol doc-symbol-toc doc-symbol-module"></code>&nbsp;radical_pilot </span> </a> </li> <li class=md-nav__item> <a href=#radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend class=md-nav__link> <span class=md-ellipsis> <code class="doc-symbol doc-symbol-toc doc-symbol-class"></code>&nbsp;RadicalExecutionBackend </span> </a> <nav class=md-nav aria-label= RadicalExecutionBackend> <ul class=md-nav__list> <li class=md-nav__item> <a href=#radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend.__await__ class=md-nav__link> <span class=md-ellipsis> <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;__await__ </span> </a> </li> <li class=md-nav__item> <a href=#radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend.get_task_states_map class=md-nav__link> <span class=md-ellipsis> <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;get_task_states_map </span> </a> </li> <li class=md-nav__item> <a href=#radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend.setup_raptor_mode class=md-nav__link> <span class=md-ellipsis> <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;setup_raptor_mode </span> </a> </li> <li class=md-nav__item> <a href=#radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend.select_master class=md-nav__link> <span class=md-ellipsis> <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;select_master </span> </a> </li> <li class=md-nav__item> <a href=#radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend.handle_pilot_state_callback class=md-nav__link> <span class=md-ellipsis> <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;handle_pilot_state_callback </span> </a> </li> <li class=md-nav__item> <a href=#radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend.register_callback class=md-nav__link> <span class=md-ellipsis> <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;register_callback </span> </a> </li> <li class=md-nav__item> <a href=#radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend.build_task class=md-nav__link> <span class=md-ellipsis> <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;build_task </span> </a> </li> <li class=md-nav__item> <a href=#radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend.link_explicit_data_deps class=md-nav__link> <span class=md-ellipsis> <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;link_explicit_data_deps </span> </a> </li> <li class=md-nav__item> <a href=#radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend.link_implicit_data_deps class=md-nav__link> <span class=md-ellipsis> <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;link_implicit_data_deps </span> </a> </li> <li class=md-nav__item> <a href=#radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend.submit_tasks class=md-nav__link> <span class=md-ellipsis> <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;submit_tasks </span> </a> </li> <li class=md-nav__item> <a href=#radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend.cancel_task class=md-nav__link> <span class=md-ellipsis> <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;cancel_task </span> </a> </li> <li class=md-nav__item> <a href=#radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend.get_nodelist class=md-nav__link> <span class=md-ellipsis> <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;get_nodelist </span> </a> </li> <li class=md-nav__item> <a href=#radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend.state class=md-nav__link> <span class=md-ellipsis> <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;state </span> </a> </li> <li class=md-nav__item> <a href=#radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend.task_state_cb class=md-nav__link> <span class=md-ellipsis> <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;task_state_cb </span> </a> </li> <li class=md-nav__item> <a href=#radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend.shutdown class=md-nav__link> <span class=md-ellipsis> <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;shutdown </span> </a> </li> <li class=md-nav__item> <a href=#radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend.__aenter__ class=md-nav__link> <span class=md-ellipsis> <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;__aenter__ </span> </a> </li> <li class=md-nav__item> <a href=#radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend.__aexit__ class=md-nav__link> <span class=md-ellipsis> <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;__aexit__ </span> </a> </li> <li class=md-nav__item> <a href=#radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend.create class=md-nav__link> <span class=md-ellipsis> <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;create </span> </a> </li> </ul> </nav> </li> <li class=md-nav__item> <a href=#radical.asyncflow.backends.execution.radical_pilot.service_ready_callback class=md-nav__link> <span class=md-ellipsis> <code class="doc-symbol doc-symbol-toc doc-symbol-function"></code>&nbsp;service_ready_callback </span> </a> </li> </ul> </nav> </li> </ul> </nav> </li> </ul> </nav> </li> <li class=md-nav__item> <a href=../../../constants/ class=md-nav__link> <span class=md-ellipsis> constants </span> </a> </li> <li class=md-nav__item> <a href=../../../data/ class=md-nav__link> <span class=md-ellipsis> data </span> </a> </li> <li class=md-nav__item> <a href=../../../errors/ class=md-nav__link> <span class=md-ellipsis> errors </span> </a> </li> <li class=md-nav__item> <a href=../../../logging/ class=md-nav__link> <span class=md-ellipsis> logging </span> </a> </li> <li class=md-nav__item> <a href=../../../utils/ class=md-nav__link> <span class=md-ellipsis> utils </span> </a> </li> <li class=md-nav__item> <a href=../../../workflow_manager/ class=md-nav__link> <span class=md-ellipsis> workflow_manager </span> </a> </li> </ul> </nav> </li> </ul> </nav> </li> </ul> </nav> </li> </ul> </nav> </li> </ul> </nav> </div> </div> </div> <div class=md-content data-md-component=content> <article class="md-content__inner md-typeset"> <h1 id=radicalasyncflowbackendsexecutionradical_pilot>radical.asyncflow.backends.execution.radical_pilot<a class=headerlink href=#radicalasyncflowbackendsexecutionradical_pilot title="Permanent link">¶</a></h1> <div class="doc doc-object doc-module"> <a id=radical.asyncflow.backends.execution.radical_pilot></a> <div class="doc doc-contents first"> <div class="doc doc-children"> <div class="doc doc-object doc-class"> <h2 id=radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend class="doc doc-heading"> <code class="doc-symbol doc-symbol-heading doc-symbol-class"></code> <span class="doc doc-object-name doc-class-name">RadicalExecutionBackend</span> <a href=#radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend class=headerlink title="Permanent link">¶</a></h2> <div class="doc-signature highlight"><pre><span></span><code><span class=nf>RadicalExecutionBackend</span><span class=p>(</span><span class=n>resources</span><span class=p>:</span> <span class=n><span title=dict>dict</span></span><span class=p>,</span> <span class=n>raptor_config</span><span class=p>:</span> <span class=n><span title=typing.Optional>Optional</span></span><span class=p>[</span><span class=n><span title=dict>dict</span></span><span class=p>]</span> <span class=o>=</span> <span class=kc>None</span><span class=p>)</span>
+</code></pre></div> <div class="doc doc-contents "> <p class="doc doc-class-bases"> Bases: <code><a class="autorefs autorefs-internal" title="<code>radical.asyncflow.backends.execution.base.BaseExecutionBackend</code>" href=../base/#radical.asyncflow.backends.execution.base.BaseExecutionBackend>BaseExecutionBackend</a></code></p> <p>Radical Pilot-based execution backend for large-scale HPC task execution.</p> <p>The RadicalExecutionBackend manages computing resources and task execution using the Radical Pilot framework. It interfaces with various resource management systems (SLURM, FLUX, etc.) on diverse HPC machines, providing capabilities for session management, task lifecycle control, and resource allocation.</p> <p>This backend supports both traditional task execution and advanced features like Raptor mode for high-throughput computing scenarios. It handles pilot submission, task management, and provides data dependency linking mechanisms.</p> <p><span class=doc-section-title>Attributes:</span></p> <table> <thead> <tr> <th>Name</th> <th>Type</th> <th>Description</th> </tr> </thead> <tbody> <tr class=doc-section-item> <td><code><span title=radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend.session>session</span></code></td> <td> <code><span title=radical.pilot.Session>Session</span></code> </td> <td> <div class=doc-md-description> <p>Primary session for managing task execution context, uniquely identified by a generated ID.</p> </div> </td> </tr> <tr class=doc-section-item> <td><code><span title=radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend.task_manager>task_manager</span></code></td> <td> <code><span title=radical.pilot.TaskManager>TaskManager</span></code> </td> <td> <div class=doc-md-description> <p>Manages task lifecycle including submission, tracking, and completion within the session.</p> </div> </td> </tr> <tr class=doc-section-item> <td><code><span title=radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend.pilot_manager>pilot_manager</span></code></td> <td> <code><span title=radical.pilot.PilotManager>PilotManager</span></code> </td> <td> <div class=doc-md-description> <p>Coordinates computing resources (pilots) that are dynamically allocated based on resource requirements.</p> </div> </td> </tr> <tr class=doc-section-item> <td><code><span title=radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend.resource_pilot>resource_pilot</span></code></td> <td> <code><span title=radical.pilot.Pilot>Pilot</span></code> </td> <td> <div class=doc-md-description> <p>Submitted computing resources configured according to the provided resource specifications.</p> </div> </td> </tr> <tr class=doc-section-item> <td><code><span title=radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend.tasks>tasks</span></code></td> <td> <code><span title=dict>dict</span></code> </td> <td> <div class=doc-md-description> <p>Dictionary storing task descriptions indexed by UID.</p> </div> </td> </tr> <tr class=doc-section-item> <td><code><span title=radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend.raptor_mode>raptor_mode</span></code></td> <td> <code><span title=bool>bool</span></code> </td> <td> <div class=doc-md-description> <p>Flag indicating whether Raptor mode is enabled.</p> </div> </td> </tr> <tr class=doc-section-item> <td><code><span title=radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend.masters>masters</span></code></td> <td> <code><span title=list>list</span></code> </td> <td> <div class=doc-md-description> <p>List of master tasks when Raptor mode is enabled.</p> </div> </td> </tr> <tr class=doc-section-item> <td><code><span title=radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend.workers>workers</span></code></td> <td> <code><span title=list>list</span></code> </td> <td> <div class=doc-md-description> <p>List of worker tasks when Raptor mode is enabled.</p> </div> </td> </tr> <tr class=doc-section-item> <td><code><span title=radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend.master_selector>master_selector</span></code></td> <td> <code><span title=callable>callable</span></code> </td> <td> <div class=doc-md-description> <p>Generator for load balancing across masters.</p> </div> </td> </tr> <tr class=doc-section-item> <td><code><span title=radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend._callback_func>_callback_func</span></code></td> <td> <code><span title=typing.Callable>Callable</span></code> </td> <td> <div class=doc-md-description> <p>Registered callback function for task events.</p> </div> </td> </tr> </tbody> </table> <p><span class=doc-section-title>Parameters:</span></p> <table> <thead> <tr> <th>Name</th> <th>Type</th> <th>Description</th> <th>Default</th> </tr> </thead> <tbody> <tr class=doc-section-item> <td> <code>resources</code> </td> <td> <code><span title=dict>dict</span></code> </td> <td> <div class=doc-md-description> <p>Resource requirements for the pilot including CPU, GPU, and memory specifications.</p> </div> </td> <td> <em>required</em> </td> </tr> <tr class=doc-section-item> <td> <code>raptor_config</code> </td> <td> <code><span title=typing.Optional>Optional</span>[<span title=dict>dict</span>]</code> </td> <td> <div class=doc-md-description> <p>Configuration for enabling Raptor mode. Contains master and worker task specifications.</p> </div> </td> <td> <code>None</code> </td> </tr> </tbody> </table> <p><span class=doc-section-title>Raises:</span></p> <table> <thead> <tr> <th>Type</th> <th>Description</th> </tr> </thead> <tbody> <tr class=doc-section-item> <td> <code><span title=Exception>Exception</span></code> </td> <td> <div class=doc-md-description> <p>If session creation, pilot submission, or task manager setup fails.</p> </div> </td> </tr> <tr class=doc-section-item> <td> <code><span title=SystemExit>SystemExit</span></code> </td> <td> <div class=doc-md-description> <p>If KeyboardInterrupt or SystemExit occurs during initialization.</p> </div> </td> </tr> </tbody> </table> <details class=example open> <summary>Example</summary> <p>:: resources = { "resource": "local.localhost", "runtime": 30, "exit_on_error": True, "cores": 4 } backend = await RadicalExecutionBackend(resources)</p> <div class=codehilite><table class=codehilitetable><tbody><tr><td class=linenos><div class=linenodiv><pre><span class=normal> 1</span>
+<span class=normal> 2</span>
+<span class=normal> 3</span>
+<span class=normal> 4</span>
+<span class=normal> 5</span>
+<span class=normal> 6</span>
+<span class=normal> 7</span>
+<span class=normal> 8</span>
+<span class=normal> 9</span>
+<span class=normal>10</span>
+<span class=normal>11</span>
+<span class=normal>12</span>
+<span class=normal>13</span>
+<span class=normal>14</span></pre></div></td><td class=code><div><pre><span></span><code><span class=gh>#</span> With Raptor mode
+raptor_config = {
+    "masters": [{
+        "executable": "/path/to/master",
+        "arguments": ["--config", "master.conf"],
+        "ranks": 1,
+        "workers": [{
+            "executable": "/path/to/worker",
+            "arguments": ["--mode", "compute"],
+            "ranks": 4
+        }]
+    }]
+}
+backend = await RadicalExecutionBackend(resources, raptor_config)
+</code></pre></div></td></tr></tbody></table></div> </details> <p>Initialize the RadicalExecutionBackend with resources.</p> <p>Creates a new Radical Pilot session, initializes task and pilot managers, submits pilots based on resource configuration, and optionally enables Raptor mode for high-throughput computing.</p> <p><span class=doc-section-title>Parameters:</span></p> <table> <thead> <tr> <th>Name</th> <th>Type</th> <th>Description</th> <th>Default</th> </tr> </thead> <tbody> <tr class=doc-section-item> <td> <code>resources</code> </td> <td> <code><span title=Dict>Dict</span></code> </td> <td> <div class=doc-md-description> <p>Resource configuration for the Radical Pilot session. Must contain valid pilot description parameters such as: - resource: Target resource (e.g., "local.localhost") - runtime: Maximum runtime in minutes - cores: Number of CPU cores - gpus: Number of GPUs (optional)</p> </div> </td> <td> <em>required</em> </td> </tr> <tr class=doc-section-item> <td> <code>raptor_config</code> </td> <td> <code><span title=typing.Optional>Optional</span>[<span title=Dict>Dict</span>]</code> </td> <td> <div class=doc-md-description> <p>Configuration for Raptor mode containing: - masters: List of master task configurations - Each master can have associated workers Defaults to None (Raptor mode disabled).</p> </div> </td> <td> <code>None</code> </td> </tr> </tbody> </table> <p><span class=doc-section-title>Raises:</span></p> <table> <thead> <tr> <th>Type</th> <th>Description</th> </tr> </thead> <tbody> <tr class=doc-section-item> <td> <code><span title=Exception>Exception</span></code> </td> <td> <div class=doc-md-description> <p>If RadicalPilot backend fails to initialize properly.</p> </div> </td> </tr> <tr class=doc-section-item> <td> <code><span title=SystemExit>SystemExit</span></code> </td> <td> <div class=doc-md-description> <p>If keyboard interrupt or system exit occurs during setup, with session path information for debugging.</p> </div> </td> </tr> </tbody> </table> <details class=note open> <summary>Note</summary> <ul> <li>Automatically registers backend states with the global StateMapper</li> <li>logs status messages for successful initialization or failures</li> <li>Session UID is generated using radical.utils for uniqueness</li> </ul> </details> <details class=quote> <summary>Source code in <code>doc_env/lib/python3.14/site-packages/radical/asyncflow/backends/execution/radical_pilot.py</code></summary> <div class=highlight><table class=highlighttable><tbody><tr><td class=linenos><div class=linenodiv><pre><span></span><span class=normal>112</span>
+<span class=normal>113</span>
+<span class=normal>114</span>
+<span class=normal>115</span>
+<span class=normal>116</span>
+<span class=normal>117</span>
+<span class=normal>118</span>
+<span class=normal>119</span>
+<span class=normal>120</span>
+<span class=normal>121</span>
+<span class=normal>122</span>
+<span class=normal>123</span>
+<span class=normal>124</span>
+<span class=normal>125</span>
+<span class=normal>126</span>
+<span class=normal>127</span>
+<span class=normal>128</span>
+<span class=normal>129</span>
+<span class=normal>130</span>
+<span class=normal>131</span>
+<span class=normal>132</span>
+<span class=normal>133</span>
+<span class=normal>134</span>
+<span class=normal>135</span>
+<span class=normal>136</span>
+<span class=normal>137</span>
+<span class=normal>138</span>
+<span class=normal>139</span>
+<span class=normal>140</span>
+<span class=normal>141</span>
+<span class=normal>142</span>
+<span class=normal>143</span>
+<span class=normal>144</span>
+<span class=normal>145</span>
+<span class=normal>146</span>
+<span class=normal>147</span>
+<span class=normal>148</span>
+<span class=normal>149</span>
+<span class=normal>150</span>
+<span class=normal>151</span>
+<span class=normal>152</span>
+<span class=normal>153</span>
+<span class=normal>154</span>
+<span class=normal>155</span>
+<span class=normal>156</span></pre></div></td><td class=code><div><pre><span></span><code><span class=nd>@typeguard</span><span class=o>.</span><span class=n>typechecked</span>
+<span class=k>def</span><span class=w> </span><span class=fm>__init__</span><span class=p>(</span><span class=bp>self</span><span class=p>,</span> <span class=n>resources</span><span class=p>:</span> <span class=nb>dict</span><span class=p>,</span> <span class=n>raptor_config</span><span class=p>:</span> <span class=n>Optional</span><span class=p>[</span><span class=nb>dict</span><span class=p>]</span> <span class=o>=</span> <span class=kc>None</span><span class=p>)</span> <span class=o>-&gt;</span> <span class=kc>None</span><span class=p>:</span>
+<span class=w>    </span><span class=sd>"""Initialize the RadicalExecutionBackend with resources.</span>
+
+<span class=sd>    Creates a new Radical Pilot session, initializes task and pilot managers,</span>
+<span class=sd>    submits pilots based on resource configuration, and optionally enables</span>
+<span class=sd>    Raptor mode for high-throughput computing.</span>
+
+<span class=sd>    Args:</span>
+<span class=sd>        resources (Dict): Resource configuration for the Radical Pilot session.</span>
+<span class=sd>            Must contain valid pilot description parameters such as:</span>
+<span class=sd>            - resource: Target resource (e.g., "local.localhost")</span>
+<span class=sd>            - runtime: Maximum runtime in minutes</span>
+<span class=sd>            - cores: Number of CPU cores</span>
+<span class=sd>            - gpus: Number of GPUs (optional)</span>
+<span class=sd>        raptor_config (Optional[Dict]): Configuration for Raptor mode containing:</span>
+<span class=sd>            - masters: List of master task configurations</span>
+<span class=sd>            - Each master can have associated workers</span>
+<span class=sd>            Defaults to None (Raptor mode disabled).</span>
+
+<span class=sd>    Raises:</span>
+<span class=sd>        Exception: If RadicalPilot backend fails to initialize properly.</span>
+<span class=sd>        SystemExit: If keyboard interrupt or system exit occurs during setup,</span>
+<span class=sd>            with session path information for debugging.</span>
+
+<span class=sd>    Note:</span>
+<span class=sd>        - Automatically registers backend states with the global StateMapper</span>
+<span class=sd>        - logs status messages for successful initialization or failures</span>
+<span class=sd>        - Session UID is generated using radical.utils for uniqueness</span>
+<span class=sd>    """</span>
+
+    <span class=k>if</span> <span class=n>rp</span> <span class=ow>is</span> <span class=kc>None</span> <span class=ow>or</span> <span class=n>ru</span> <span class=ow>is</span> <span class=kc>None</span><span class=p>:</span>
+        <span class=k>raise</span> <span class=ne>ImportError</span><span class=p>(</span>
+            <span class=s2>"Radical.Pilot and Radical.utils are required for "</span>
+            <span class=s2>"RadicalExecutionBackend."</span>
+        <span class=p>)</span>
+
+    <span class=bp>self</span><span class=o>.</span><span class=n>resources</span> <span class=o>=</span> <span class=n>resources</span>
+    <span class=bp>self</span><span class=o>.</span><span class=n>raptor_config</span> <span class=o>=</span> <span class=n>raptor_config</span> <span class=ow>or</span> <span class=p>{}</span>
+    <span class=bp>self</span><span class=o>.</span><span class=n>_initialized</span> <span class=o>=</span> <span class=kc>False</span>
+
+    <span class=c1># This will allow us to have better control</span>
+    <span class=c1># on the error coming from the pilot object</span>
+    <span class=k>if</span> <span class=s2>"exit_on_error"</span> <span class=ow>not</span> <span class=ow>in</span> <span class=bp>self</span><span class=o>.</span><span class=n>resources</span><span class=p>:</span>
+        <span class=bp>self</span><span class=o>.</span><span class=n>resources</span><span class=p>[</span><span class=s2>"exit_on_error"</span><span class=p>]</span> <span class=o>=</span> <span class=kc>False</span>
+</code></pre></div></td></tr></tbody></table></div> </details> <div class="doc doc-children"> <div class="doc doc-object doc-function"> <h3 id=radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend.__await__ class="doc doc-heading"> <code class="doc-symbol doc-symbol-heading doc-symbol-method"></code> <span class="doc doc-object-name doc-function-name">__await__</span> <a href=#radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend.__await__ class=headerlink title="Permanent link">¶</a></h3> <div class="doc-signature highlight"><pre><span></span><code><span class=nf>__await__</span><span class=p>()</span>
+</code></pre></div> <div class="doc doc-contents "> <p>Make RadicalExecutionBackend awaitable.</p> <details class=quote> <summary>Source code in <code>doc_env/lib/python3.14/site-packages/radical/asyncflow/backends/execution/radical_pilot.py</code></summary> <div class=highlight><table class=highlighttable><tbody><tr><td class=linenos><div class=linenodiv><pre><span></span><span class=normal>158</span>
+<span class=normal>159</span>
+<span class=normal>160</span></pre></div></td><td class=code><div><pre><span></span><code><span class=k>def</span><span class=w> </span><span class=fm>__await__</span><span class=p>(</span><span class=bp>self</span><span class=p>):</span>
+<span class=w>    </span><span class=sd>"""Make RadicalExecutionBackend awaitable."""</span>
+    <span class=k>return</span> <span class=bp>self</span><span class=o>.</span><span class=n>_async_init</span><span class=p>()</span><span class=o>.</span><span class=fm>__await__</span><span class=p>()</span>
+</code></pre></div></td></tr></tbody></table></div> </details> </div> </div> <div class="doc doc-object doc-function"> <h3 id=radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend.get_task_states_map class="doc doc-heading"> <code class="doc-symbol doc-symbol-heading doc-symbol-method"></code> <span class="doc doc-object-name doc-function-name">get_task_states_map</span> <a href=#radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend.get_task_states_map class=headerlink title="Permanent link">¶</a></h3> <div class="doc-signature highlight"><pre><span></span><code><span class=nf>get_task_states_map</span><span class=p>()</span> <span class=o>-&gt;</span> <span class=n><a class="autorefs autorefs-internal" title="<code>radical.asyncflow.constants.StateMapper</code>" href=../../../constants/#radical.asyncflow.constants.StateMapper>StateMapper</a></span>
+</code></pre></div> <div class="doc doc-contents "> <p>Get the state mapper for this backend.</p> <p><span class=doc-section-title>Returns:</span></p> <table> <thead> <tr> <th>Name</th> <th>Type</th> <th>Description</th> </tr> </thead> <tbody> <tr class=doc-section-item> <td><code>StateMapper</code></td> <td> <code><a class="autorefs autorefs-internal" title="<code>radical.asyncflow.constants.StateMapper</code>" href=../../../constants/#radical.asyncflow.constants.StateMapper>StateMapper</a></code> </td> <td> <div class=doc-md-description> <p>StateMapper instance configured for RadicalPilot backend with appropriate state mappings (DONE, FAILED, CANCELED, AGENT_EXECUTING).</p> </div> </td> </tr> </tbody> </table> <details class=quote> <summary>Source code in <code>doc_env/lib/python3.14/site-packages/radical/asyncflow/backends/execution/radical_pilot.py</code></summary> <div class=highlight><table class=highlighttable><tbody><tr><td class=linenos><div class=linenodiv><pre><span></span><span class=normal>210</span>
+<span class=normal>211</span>
+<span class=normal>212</span>
+<span class=normal>213</span>
+<span class=normal>214</span>
+<span class=normal>215</span>
+<span class=normal>216</span>
+<span class=normal>217</span>
+<span class=normal>218</span></pre></div></td><td class=code><div><pre><span></span><code><span class=k>def</span><span class=w> </span><span class=nf>get_task_states_map</span><span class=p>(</span><span class=bp>self</span><span class=p>)</span> <span class=o>-&gt;</span> <span class=n>StateMapper</span><span class=p>:</span>
+<span class=w>    </span><span class=sd>"""Get the state mapper for this backend.</span>
+
+<span class=sd>    Returns:</span>
+<span class=sd>        StateMapper: StateMapper instance configured for RadicalPilot backend</span>
+<span class=sd>            with appropriate state mappings (DONE, FAILED,</span>
+<span class=sd>            CANCELED, AGENT_EXECUTING).</span>
+<span class=sd>    """</span>
+    <span class=k>return</span> <span class=n>StateMapper</span><span class=p>(</span><span class=n>backend</span><span class=o>=</span><span class=bp>self</span><span class=p>)</span>
+</code></pre></div></td></tr></tbody></table></div> </details> </div> </div> <div class="doc doc-object doc-function"> <h3 id=radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend.setup_raptor_mode class="doc doc-heading"> <code class="doc-symbol doc-symbol-heading doc-symbol-method"></code> <span class="doc doc-object-name doc-function-name">setup_raptor_mode</span> <a href=#radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend.setup_raptor_mode class=headerlink title="Permanent link">¶</a></h3> <div class="doc-signature highlight"><pre><span></span><code><span class=nf>setup_raptor_mode</span><span class=p>(</span><span class=n>raptor_config</span><span class=p>:</span> <span class=n><span title=dict>dict</span></span><span class=p>)</span> <span class=o>-&gt;</span> <span class=kc>None</span>
+</code></pre></div> <div class="doc doc-contents "> <p>Set up Raptor mode by configuring and submitting master and worker tasks.</p> <p>Initializes Raptor mode by creating master tasks and their associated worker tasks based on the provided configuration. Masters coordinate work distribution while workers execute the actual computations.</p> <p><span class=doc-section-title>Parameters:</span></p> <table> <thead> <tr> <th>Name</th> <th>Type</th> <th>Description</th> <th>Default</th> </tr> </thead> <tbody> <tr class=doc-section-item> <td> <code>raptor_config</code> </td> <td> <code><span title=Dict>Dict</span></code> </td> <td> <div class=doc-md-description> <p>Configuration dictionary with the following structure: { 'masters': [ { 'executable': str, # Path to master executable 'arguments': list, # Arguments for master 'ranks': int, # Number of CPU processes 'workers': [ # Worker configurations { 'executable': str, # Worker executable path 'arguments': list, # Worker arguments 'ranks': int, # Worker CPU processes 'worker_type': str # Optional worker class }, ... ] }, ... ] }</p> </div> </td> <td> <em>required</em> </td> </tr> </tbody> </table> <p><span class=doc-section-title>Raises:</span></p> <table> <thead> <tr> <th>Type</th> <th>Description</th> </tr> </thead> <tbody> <tr class=doc-section-item> <td> <code><span title=Exception>Exception</span></code> </td> <td> <div class=doc-md-description> <p>If task description creation or submission fails.</p> </div> </td> </tr> </tbody> </table> <details class=note open> <summary>Note</summary> <ul> <li>Creates unique UIDs for masters and workers using session namespace</li> <li>Sets up master selector for load balancing across masters</li> <li>Workers default to 'DefaultWorker' class if not specified</li> <li>All master and worker tasks are stored in respective class attributes</li> </ul> </details> <details class=quote> <summary>Source code in <code>doc_env/lib/python3.14/site-packages/radical/asyncflow/backends/execution/radical_pilot.py</code></summary> <div class=highlight><table class=highlighttable><tbody><tr><td class=linenos><div class=linenodiv><pre><span></span><span class=normal>220</span>
+<span class=normal>221</span>
+<span class=normal>222</span>
+<span class=normal>223</span>
+<span class=normal>224</span>
+<span class=normal>225</span>
+<span class=normal>226</span>
+<span class=normal>227</span>
+<span class=normal>228</span>
+<span class=normal>229</span>
+<span class=normal>230</span>
+<span class=normal>231</span>
+<span class=normal>232</span>
+<span class=normal>233</span>
+<span class=normal>234</span>
+<span class=normal>235</span>
+<span class=normal>236</span>
+<span class=normal>237</span>
+<span class=normal>238</span>
+<span class=normal>239</span>
+<span class=normal>240</span>
+<span class=normal>241</span>
+<span class=normal>242</span>
+<span class=normal>243</span>
+<span class=normal>244</span>
+<span class=normal>245</span>
+<span class=normal>246</span>
+<span class=normal>247</span>
+<span class=normal>248</span>
+<span class=normal>249</span>
+<span class=normal>250</span>
+<span class=normal>251</span>
+<span class=normal>252</span>
+<span class=normal>253</span>
+<span class=normal>254</span>
+<span class=normal>255</span>
+<span class=normal>256</span>
+<span class=normal>257</span>
+<span class=normal>258</span>
+<span class=normal>259</span>
+<span class=normal>260</span>
+<span class=normal>261</span>
+<span class=normal>262</span>
+<span class=normal>263</span>
+<span class=normal>264</span>
+<span class=normal>265</span>
+<span class=normal>266</span>
+<span class=normal>267</span>
+<span class=normal>268</span>
+<span class=normal>269</span>
+<span class=normal>270</span>
+<span class=normal>271</span>
+<span class=normal>272</span>
+<span class=normal>273</span>
+<span class=normal>274</span>
+<span class=normal>275</span>
+<span class=normal>276</span>
+<span class=normal>277</span>
+<span class=normal>278</span>
+<span class=normal>279</span>
+<span class=normal>280</span>
+<span class=normal>281</span>
+<span class=normal>282</span>
+<span class=normal>283</span>
+<span class=normal>284</span>
+<span class=normal>285</span>
+<span class=normal>286</span>
+<span class=normal>287</span>
+<span class=normal>288</span>
+<span class=normal>289</span>
+<span class=normal>290</span>
+<span class=normal>291</span>
+<span class=normal>292</span>
+<span class=normal>293</span></pre></div></td><td class=code><div><pre><span></span><code><span class=k>def</span><span class=w> </span><span class=nf>setup_raptor_mode</span><span class=p>(</span><span class=bp>self</span><span class=p>,</span> <span class=n>raptor_config</span><span class=p>:</span> <span class=nb>dict</span><span class=p>)</span> <span class=o>-&gt;</span> <span class=kc>None</span><span class=p>:</span>
+<span class=w>    </span><span class=sd>"""Set up Raptor mode by configuring and submitting master and worker tasks.</span>
+
+<span class=sd>    Initializes Raptor mode by creating master tasks and their associated</span>
+<span class=sd>    worker tasks based on the provided configuration. Masters coordinate</span>
+<span class=sd>    work distribution while workers execute the actual computations.</span>
+
+<span class=sd>    Args:</span>
+<span class=sd>        raptor_config (Dict): Configuration dictionary with the following structure:</span>
+<span class=sd>            {</span>
+<span class=sd>                'masters': [</span>
+<span class=sd>                    {</span>
+<span class=sd>                        'executable': str,  # Path to master executable</span>
+<span class=sd>                        'arguments': list,  # Arguments for master</span>
+<span class=sd>                        'ranks': int,       # Number of CPU processes</span>
+<span class=sd>                        'workers': [        # Worker configurations</span>
+<span class=sd>                            {</span>
+<span class=sd>                                'executable': str,    # Worker executable path</span>
+<span class=sd>                                'arguments': list,    # Worker arguments</span>
+<span class=sd>                                'ranks': int,         # Worker CPU processes</span>
+<span class=sd>                                'worker_type': str    # Optional worker class</span>
+<span class=sd>                            },</span>
+<span class=sd>                            ...</span>
+<span class=sd>                        ]</span>
+<span class=sd>                    },</span>
+<span class=sd>                    ...</span>
+<span class=sd>                ]</span>
+<span class=sd>            }</span>
+
+<span class=sd>    Raises:</span>
+<span class=sd>        Exception: If task description creation or submission fails.</span>
+
+<span class=sd>    Note:</span>
+<span class=sd>        - Creates unique UIDs for masters and workers using session namespace</span>
+<span class=sd>        - Sets up master selector for load balancing across masters</span>
+<span class=sd>        - Workers default to 'DefaultWorker' class if not specified</span>
+<span class=sd>        - All master and worker tasks are stored in respective class attributes</span>
+<span class=sd>    """</span>
+
+    <span class=bp>self</span><span class=o>.</span><span class=n>masters</span> <span class=o>=</span> <span class=p>[]</span>
+    <span class=bp>self</span><span class=o>.</span><span class=n>workers</span> <span class=o>=</span> <span class=p>[]</span>
+    <span class=bp>self</span><span class=o>.</span><span class=n>master_selector</span> <span class=o>=</span> <span class=bp>self</span><span class=o>.</span><span class=n>select_master</span><span class=p>()</span>
+
+    <span class=n>cfg</span> <span class=o>=</span> <span class=n>copy</span><span class=o>.</span><span class=n>deepcopy</span><span class=p>(</span><span class=n>raptor_config</span><span class=p>)</span>
+    <span class=n>masters</span> <span class=o>=</span> <span class=n>cfg</span><span class=p>[</span><span class=s2>"masters"</span><span class=p>]</span>
+
+    <span class=k>for</span> <span class=n>master_description</span> <span class=ow>in</span> <span class=n>masters</span><span class=p>:</span>
+        <span class=n>workers</span> <span class=o>=</span> <span class=n>master_description</span><span class=o>.</span><span class=n>pop</span><span class=p>(</span><span class=s2>"workers"</span><span class=p>)</span>
+        <span class=n>md</span> <span class=o>=</span> <span class=n>rp</span><span class=o>.</span><span class=n>TaskDescription</span><span class=p>(</span><span class=n>master_description</span><span class=p>)</span>
+        <span class=n>md</span><span class=o>.</span><span class=n>uid</span> <span class=o>=</span> <span class=n>ru</span><span class=o>.</span><span class=n>generate_id</span><span class=p>(</span>
+            <span class=s2>"flow.master.</span><span class=si>%(item_counter)06d</span><span class=s2>"</span><span class=p>,</span> <span class=n>ru</span><span class=o>.</span><span class=n>ID_CUSTOM</span><span class=p>,</span> <span class=n>ns</span><span class=o>=</span><span class=bp>self</span><span class=o>.</span><span class=n>session</span><span class=o>.</span><span class=n>uid</span>
+        <span class=p>)</span>
+        <span class=n>md</span><span class=o>.</span><span class=n>mode</span> <span class=o>=</span> <span class=n>rp</span><span class=o>.</span><span class=n>RAPTOR_MASTER</span>
+        <span class=n>master</span> <span class=o>=</span> <span class=bp>self</span><span class=o>.</span><span class=n>resource_pilot</span><span class=o>.</span><span class=n>submit_raptors</span><span class=p>(</span><span class=n>md</span><span class=p>)[</span><span class=mi>0</span><span class=p>]</span>
+        <span class=bp>self</span><span class=o>.</span><span class=n>masters</span><span class=o>.</span><span class=n>append</span><span class=p>(</span><span class=n>master</span><span class=p>)</span>
+
+        <span class=k>for</span> <span class=n>worker_description</span> <span class=ow>in</span> <span class=n>workers</span><span class=p>:</span>
+            <span class=n>raptor_class</span> <span class=o>=</span> <span class=n>worker_description</span><span class=o>.</span><span class=n>pop</span><span class=p>(</span><span class=s2>"worker_type"</span><span class=p>,</span> <span class=s2>"DefaultWorker"</span><span class=p>)</span>
+            <span class=n>worker</span> <span class=o>=</span> <span class=n>master</span><span class=o>.</span><span class=n>submit_workers</span><span class=p>(</span>
+                <span class=n>rp</span><span class=o>.</span><span class=n>TaskDescription</span><span class=p>(</span>
+                    <span class=p>{</span>
+                        <span class=o>**</span><span class=n>worker_description</span><span class=p>,</span>
+                        <span class=s2>"raptor_id"</span><span class=p>:</span> <span class=n>md</span><span class=o>.</span><span class=n>uid</span><span class=p>,</span>
+                        <span class=s2>"mode"</span><span class=p>:</span> <span class=n>rp</span><span class=o>.</span><span class=n>RAPTOR_WORKER</span><span class=p>,</span>
+                        <span class=s2>"raptor_class"</span><span class=p>:</span> <span class=n>raptor_class</span><span class=p>,</span>
+                        <span class=s2>"uid"</span><span class=p>:</span> <span class=n>ru</span><span class=o>.</span><span class=n>generate_id</span><span class=p>(</span>
+                            <span class=s2>"flow.worker.</span><span class=si>%(item_counter)06d</span><span class=s2>"</span><span class=p>,</span>
+                            <span class=n>ru</span><span class=o>.</span><span class=n>ID_CUSTOM</span><span class=p>,</span>
+                            <span class=n>ns</span><span class=o>=</span><span class=bp>self</span><span class=o>.</span><span class=n>session</span><span class=o>.</span><span class=n>uid</span><span class=p>,</span>
+                        <span class=p>),</span>
+                    <span class=p>}</span>
+                <span class=p>)</span>
+            <span class=p>)</span>
+            <span class=bp>self</span><span class=o>.</span><span class=n>workers</span><span class=o>.</span><span class=n>append</span><span class=p>(</span><span class=n>worker</span><span class=p>)</span>
+</code></pre></div></td></tr></tbody></table></div> </details> </div> </div> <div class="doc doc-object doc-function"> <h3 id=radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend.select_master class="doc doc-heading"> <code class="doc-symbol doc-symbol-heading doc-symbol-method"></code> <span class="doc doc-object-name doc-function-name">select_master</span> <a href=#radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend.select_master class=headerlink title="Permanent link">¶</a></h3> <div class="doc-signature highlight"><pre><span></span><code><span class=nf>select_master</span><span class=p>()</span>
+</code></pre></div> <div class="doc doc-contents "> <p>Create a generator for load balancing task submission across masters.</p> <p>Provides a round-robin generator that cycles through available master UIDs to distribute tasks evenly across all masters in Raptor mode.</p> <p><span class=doc-section-title>Returns:</span></p> <table> <thead> <tr> <th>Type</th> <th>Description</th> </tr> </thead> <tbody> <tr class=doc-section-item> <td> </td> <td> <div class=doc-md-description> <p>Generator[str]: Generator yielding master UIDs in round-robin fashion.</p> </div> </td> </tr> </tbody> </table> <p><span class=doc-section-title>Raises:</span></p> <table> <thead> <tr> <th>Type</th> <th>Description</th> </tr> </thead> <tbody> <tr class=doc-section-item> <td> <code><span title=RuntimeError>RuntimeError</span></code> </td> <td> <div class=doc-md-description> <p>If Raptor mode is not enabled or no masters are available.</p> </div> </td> </tr> </tbody> </table> <details class=example open> <summary>Example</summary> <p>:: selector = backend.select_master() master_uid = next(selector) # Get next master for task assignment</p> </details> <details class=quote> <summary>Source code in <code>doc_env/lib/python3.14/site-packages/radical/asyncflow/backends/execution/radical_pilot.py</code></summary> <div class=highlight><table class=highlighttable><tbody><tr><td class=linenos><div class=linenodiv><pre><span></span><span class=normal>295</span>
+<span class=normal>296</span>
+<span class=normal>297</span>
+<span class=normal>298</span>
+<span class=normal>299</span>
+<span class=normal>300</span>
+<span class=normal>301</span>
+<span class=normal>302</span>
+<span class=normal>303</span>
+<span class=normal>304</span>
+<span class=normal>305</span>
+<span class=normal>306</span>
+<span class=normal>307</span>
+<span class=normal>308</span>
+<span class=normal>309</span>
+<span class=normal>310</span>
+<span class=normal>311</span>
+<span class=normal>312</span>
+<span class=normal>313</span>
+<span class=normal>314</span>
+<span class=normal>315</span>
+<span class=normal>316</span>
+<span class=normal>317</span>
+<span class=normal>318</span>
+<span class=normal>319</span>
+<span class=normal>320</span></pre></div></td><td class=code><div><pre><span></span><code><span class=k>def</span><span class=w> </span><span class=nf>select_master</span><span class=p>(</span><span class=bp>self</span><span class=p>):</span>
+<span class=w>    </span><span class=sd>"""Create a generator for load balancing task submission across masters.</span>
+
+<span class=sd>    Provides a round-robin generator that cycles through available master</span>
+<span class=sd>    UIDs to distribute tasks evenly across all masters in Raptor mode.</span>
+
+<span class=sd>    Returns:</span>
+<span class=sd>        Generator[str]: Generator yielding master UIDs in round-robin fashion.</span>
+
+<span class=sd>    Raises:</span>
+<span class=sd>        RuntimeError: If Raptor mode is not enabled or no masters are available.</span>
+
+<span class=sd>    Example:</span>
+<span class=sd>        ::</span>
+<span class=sd>            selector = backend.select_master()</span>
+<span class=sd>            master_uid = next(selector)  # Get next master for task assignment</span>
+<span class=sd>    """</span>
+    <span class=k>if</span> <span class=ow>not</span> <span class=bp>self</span><span class=o>.</span><span class=n>raptor_mode</span> <span class=ow>or</span> <span class=ow>not</span> <span class=bp>self</span><span class=o>.</span><span class=n>masters</span><span class=p>:</span>
+        <span class=k>raise</span> <span class=ne>RuntimeError</span><span class=p>(</span><span class=s2>"Raptor mode disabled or no masters available"</span><span class=p>)</span>
+
+    <span class=n>current_master</span> <span class=o>=</span> <span class=mi>0</span>
+    <span class=n>masters_uids</span> <span class=o>=</span> <span class=p>[</span><span class=n>m</span><span class=o>.</span><span class=n>uid</span> <span class=k>for</span> <span class=n>m</span> <span class=ow>in</span> <span class=bp>self</span><span class=o>.</span><span class=n>masters</span><span class=p>]</span>
+
+    <span class=k>while</span> <span class=kc>True</span><span class=p>:</span>
+        <span class=k>yield</span> <span class=n>masters_uids</span><span class=p>[</span><span class=n>current_master</span><span class=p>]</span>
+        <span class=n>current_master</span> <span class=o>=</span> <span class=p>(</span><span class=n>current_master</span> <span class=o>+</span> <span class=mi>1</span><span class=p>)</span> <span class=o>%</span> <span class=nb>len</span><span class=p>(</span><span class=bp>self</span><span class=o>.</span><span class=n>masters</span><span class=p>)</span>
+</code></pre></div></td></tr></tbody></table></div> </details> </div> </div> <div class="doc doc-object doc-function"> <h3 id=radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend.handle_pilot_state_callback class="doc doc-heading"> <code class="doc-symbol doc-symbol-heading doc-symbol-method"></code> <span class="doc doc-object-name doc-function-name">handle_pilot_state_callback</span> <a href=#radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend.handle_pilot_state_callback class=headerlink title="Permanent link">¶</a></h3> <div class="doc-signature highlight"><pre><span></span><code><span class=nf>handle_pilot_state_callback</span><span class=p>(</span><span class=n>pilot</span><span class=p>,</span> <span class=n>state</span><span class=p>)</span> <span class=o>-&gt;</span> <span class=kc>None</span>
+</code></pre></div> <div class="doc doc-contents "> <p>Handle pilot state changes and ensure task callbacks are fired.</p> <details class=quote> <summary>Source code in <code>doc_env/lib/python3.14/site-packages/radical/asyncflow/backends/execution/radical_pilot.py</code></summary> <div class=highlight><table class=highlighttable><tbody><tr><td class=linenos><div class=linenodiv><pre><span></span><span class=normal>322</span>
+<span class=normal>323</span>
+<span class=normal>324</span>
+<span class=normal>325</span>
+<span class=normal>326</span>
+<span class=normal>327</span>
+<span class=normal>328</span>
+<span class=normal>329</span>
+<span class=normal>330</span>
+<span class=normal>331</span>
+<span class=normal>332</span>
+<span class=normal>333</span>
+<span class=normal>334</span>
+<span class=normal>335</span>
+<span class=normal>336</span>
+<span class=normal>337</span>
+<span class=normal>338</span>
+<span class=normal>339</span>
+<span class=normal>340</span>
+<span class=normal>341</span>
+<span class=normal>342</span>
+<span class=normal>343</span>
+<span class=normal>344</span>
+<span class=normal>345</span>
+<span class=normal>346</span>
+<span class=normal>347</span></pre></div></td><td class=code><div><pre><span></span><code><span class=k>def</span><span class=w> </span><span class=nf>handle_pilot_state_callback</span><span class=p>(</span><span class=bp>self</span><span class=p>,</span> <span class=n>pilot</span><span class=p>,</span> <span class=n>state</span><span class=p>)</span> <span class=o>-&gt;</span> <span class=kc>None</span><span class=p>:</span>
+<span class=w>    </span><span class=sd>"""Handle pilot state changes and ensure task callbacks are fired."""</span>
+    <span class=c1># For some reason radical.pilot reports</span>
+    <span class=c1># twice that the pilot has failed</span>
+    <span class=k>if</span> <span class=n>state</span> <span class=o>==</span> <span class=n>rp</span><span class=o>.</span><span class=n>FAILED</span><span class=p>:</span>
+        <span class=k>if</span> <span class=nb>hasattr</span><span class=p>(</span><span class=bp>self</span><span class=p>,</span> <span class=s2>"_pilot_failed"</span><span class=p>):</span>
+            <span class=k>return</span>
+
+        <span class=n>logger</span><span class=o>.</span><span class=n>error</span><span class=p>(</span><span class=sa>f</span><span class=s2>"</span><span class=si>{</span><span class=n>pilot</span><span class=o>.</span><span class=n>uid</span><span class=si>}</span><span class=s2> has failed: </span><span class=si>{</span><span class=n>pilot</span><span class=si>}</span><span class=s2>"</span><span class=p>)</span>
+        <span class=bp>self</span><span class=o>.</span><span class=n>_pilot_failed</span> <span class=o>=</span> <span class=kc>True</span>
+
+        <span class=k>try</span><span class=p>:</span>
+            <span class=c1># Get actual task objects from task manager</span>
+            <span class=n>tasks_ids</span> <span class=o>=</span> <span class=nb>list</span><span class=p>(</span><span class=bp>self</span><span class=o>.</span><span class=n>tasks</span><span class=o>.</span><span class=n>keys</span><span class=p>())</span>
+            <span class=n>rp_tasks</span> <span class=o>=</span> <span class=bp>self</span><span class=o>.</span><span class=n>task_manager</span><span class=o>.</span><span class=n>get_tasks</span><span class=p>(</span><span class=n>tasks_ids</span><span class=p>)</span>
+
+            <span class=k>if</span> <span class=ow>not</span> <span class=n>rp_tasks</span><span class=p>:</span>
+                <span class=k>return</span>
+
+            <span class=c1># Fire callbacks for all non-DONE tasks</span>
+            <span class=c1># This ensures WorkflowEngine is notified</span>
+            <span class=k>for</span> <span class=n>task</span> <span class=ow>in</span> <span class=n>rp_tasks</span><span class=p>:</span>
+                <span class=k>if</span> <span class=n>task</span><span class=o>.</span><span class=n>state</span> <span class=o>!=</span> <span class=n>rp</span><span class=o>.</span><span class=n>DONE</span><span class=p>:</span>
+                    <span class=bp>self</span><span class=o>.</span><span class=n>_callback_func</span><span class=p>(</span><span class=n>task</span><span class=p>,</span> <span class=n>rp</span><span class=o>.</span><span class=n>FAILED</span><span class=p>)</span>
+        <span class=k>except</span> <span class=ne>Exception</span> <span class=k>as</span> <span class=n>e</span><span class=p>:</span>
+            <span class=n>logger</span><span class=o>.</span><span class=n>exception</span><span class=p>(</span><span class=sa>f</span><span class=s2>"Error handling pilot failure: </span><span class=si>{</span><span class=n>e</span><span class=si>}</span><span class=s2>"</span><span class=p>)</span>
+</code></pre></div></td></tr></tbody></table></div> </details> </div> </div> <div class="doc doc-object doc-function"> <h3 id=radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend.register_callback class="doc doc-heading"> <code class="doc-symbol doc-symbol-heading doc-symbol-method"></code> <span class="doc doc-object-name doc-function-name">register_callback</span> <a href=#radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend.register_callback class=headerlink title="Permanent link">¶</a></h3> <div class="doc-signature highlight"><pre><span></span><code><span class=nf>register_callback</span><span class=p>(</span><span class=n>func</span><span class=p>:</span> <span class=n><span title=typing.Callable>Callable</span></span><span class=p>)</span> <span class=o>-&gt;</span> <span class=kc>None</span>
+</code></pre></div> <div class="doc doc-contents "> <p>Register a callback function for task state changes.</p> <p>Sets up a callback mechanism that handles task state transitions, with special handling for service tasks that require additional readiness confirmation.</p> <p><span class=doc-section-title>Parameters:</span></p> <table> <thead> <tr> <th>Name</th> <th>Type</th> <th>Description</th> <th>Default</th> </tr> </thead> <tbody> <tr class=doc-section-item> <td> <code>func</code> </td> <td> <code><span title=typing.Callable>Callable</span></code> </td> <td> <div class=doc-md-description> <p>Callback function that will be invoked on task state changes. Should accept parameters: (task, state, service_callback=None).</p> </div> </td> <td> <em>required</em> </td> </tr> </tbody> </table> <details class=note open> <summary>Note</summary> <ul> <li>Service tasks in AGENT_EXECUTING state get special service_ready_callback</li> <li>All other tasks use the standard callback mechanism</li> <li>The callback is registered with the underlying task manager</li> </ul> </details> <details class=quote> <summary>Source code in <code>doc_env/lib/python3.14/site-packages/radical/asyncflow/backends/execution/radical_pilot.py</code></summary> <div class=highlight><table class=highlighttable><tbody><tr><td class=linenos><div class=linenodiv><pre><span></span><span class=normal>349</span>
+<span class=normal>350</span>
+<span class=normal>351</span>
+<span class=normal>352</span>
+<span class=normal>353</span>
+<span class=normal>354</span>
+<span class=normal>355</span>
+<span class=normal>356</span>
+<span class=normal>357</span>
+<span class=normal>358</span>
+<span class=normal>359</span>
+<span class=normal>360</span>
+<span class=normal>361</span>
+<span class=normal>362</span>
+<span class=normal>363</span>
+<span class=normal>364</span>
+<span class=normal>365</span>
+<span class=normal>366</span>
+<span class=normal>367</span>
+<span class=normal>368</span>
+<span class=normal>369</span>
+<span class=normal>370</span>
+<span class=normal>371</span>
+<span class=normal>372</span>
+<span class=normal>373</span>
+<span class=normal>374</span>
+<span class=normal>375</span>
+<span class=normal>376</span>
+<span class=normal>377</span>
+<span class=normal>378</span>
+<span class=normal>379</span>
+<span class=normal>380</span>
+<span class=normal>381</span>
+<span class=normal>382</span>
+<span class=normal>383</span>
+<span class=normal>384</span></pre></div></td><td class=code><div><pre><span></span><code><span class=k>def</span><span class=w> </span><span class=nf>register_callback</span><span class=p>(</span><span class=bp>self</span><span class=p>,</span> <span class=n>func</span><span class=p>:</span> <span class=n>Callable</span><span class=p>)</span> <span class=o>-&gt;</span> <span class=kc>None</span><span class=p>:</span>
+<span class=w>    </span><span class=sd>"""Register a callback function for task state changes.</span>
+
+<span class=sd>    Sets up a callback mechanism that handles task state transitions,</span>
+<span class=sd>    with special handling for service tasks that require additional</span>
+<span class=sd>    readiness confirmation.</span>
+
+<span class=sd>    Args:</span>
+<span class=sd>        func (Callable): Callback function that will be invoked on task</span>
+<span class=sd>                         state changes. Should accept parameters:</span>
+<span class=sd>                         (task, state, service_callback=None).</span>
+
+<span class=sd>    Note:</span>
+<span class=sd>        - Service tasks in AGENT_EXECUTING state get special service_ready_callback</span>
+<span class=sd>        - All other tasks use the standard callback mechanism</span>
+<span class=sd>        - The callback is registered with the underlying task manager</span>
+<span class=sd>    """</span>
+    <span class=bp>self</span><span class=o>.</span><span class=n>_callback_func</span> <span class=o>=</span> <span class=n>func</span>
+
+    <span class=k>def</span><span class=w> </span><span class=nf>backend_callback</span><span class=p>(</span><span class=n>task</span><span class=p>,</span> <span class=n>state</span><span class=p>)</span> <span class=o>-&gt;</span> <span class=kc>None</span><span class=p>:</span>
+        <span class=n>service_callback</span> <span class=o>=</span> <span class=kc>None</span>
+
+        <span class=k>if</span> <span class=n>task</span><span class=o>.</span><span class=n>mode</span> <span class=o>==</span> <span class=n>rp</span><span class=o>.</span><span class=n>TASK_SERVICE</span> <span class=ow>and</span> <span class=n>state</span> <span class=o>==</span> <span class=n>rp</span><span class=o>.</span><span class=n>AGENT_EXECUTING</span><span class=p>:</span>
+            <span class=n>service_callback</span> <span class=o>=</span> <span class=n>service_ready_callback</span>
+
+        <span class=k>elif</span> <span class=n>task</span><span class=o>.</span><span class=n>mode</span> <span class=o>==</span> <span class=n>rp</span><span class=o>.</span><span class=n>TASK_EXECUTABLE</span> <span class=ow>and</span> <span class=n>state</span> <span class=o>==</span> <span class=n>rp</span><span class=o>.</span><span class=n>FAILED</span><span class=p>:</span>
+            <span class=n>task</span> <span class=o>=</span> <span class=n>task</span><span class=o>.</span><span class=n>as_dict</span><span class=p>()</span>
+            <span class=n>stderr</span> <span class=o>=</span> <span class=n>task</span><span class=o>.</span><span class=n>get</span><span class=p>(</span><span class=s2>"stderr"</span><span class=p>)</span>
+            <span class=n>exception</span> <span class=o>=</span> <span class=n>task</span><span class=o>.</span><span class=n>get</span><span class=p>(</span><span class=s2>"exception"</span><span class=p>)</span>
+            <span class=k>if</span> <span class=n>stderr</span> <span class=ow>or</span> <span class=n>exception</span><span class=p>:</span>
+                <span class=n>task</span><span class=p>[</span><span class=s2>"stderr"</span><span class=p>]</span> <span class=o>=</span> <span class=s2>", "</span><span class=o>.</span><span class=n>join</span><span class=p>(</span><span class=nb>filter</span><span class=p>(</span><span class=kc>None</span><span class=p>,</span> <span class=p>[</span><span class=n>stderr</span><span class=p>,</span> <span class=n>exception</span><span class=p>]))</span>
+                <span class=n>task</span><span class=p>[</span><span class=s2>"exception"</span><span class=p>]</span> <span class=o>=</span> <span class=s2>""</span>
+
+        <span class=n>func</span><span class=p>(</span><span class=n>task</span><span class=p>,</span> <span class=n>state</span><span class=p>,</span> <span class=n>service_callback</span><span class=o>=</span><span class=n>service_callback</span><span class=p>)</span>
+
+    <span class=bp>self</span><span class=o>.</span><span class=n>task_manager</span><span class=o>.</span><span class=n>register_callback</span><span class=p>(</span><span class=n>backend_callback</span><span class=p>)</span>
+</code></pre></div></td></tr></tbody></table></div> </details> </div> </div> <div class="doc doc-object doc-function"> <h3 id=radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend.build_task class="doc doc-heading"> <code class="doc-symbol doc-symbol-heading doc-symbol-method"></code> <span class="doc doc-object-name doc-function-name">build_task</span> <a href=#radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend.build_task class=headerlink title="Permanent link">¶</a></h3> <div class="doc-signature highlight"><pre><span></span><code><span class=nf>build_task</span><span class=p>(</span><span class=n>uid</span><span class=p>:</span> <span class=n><span title=str>str</span></span><span class=p>,</span> <span class=n>task_desc</span><span class=p>:</span> <span class=n><span title=dict>dict</span></span><span class=p>,</span> <span class=n>task_backend_specific_kwargs</span><span class=p>:</span> <span class=n><span title=dict>dict</span></span><span class=p>)</span> <span class=o>-&gt;</span> <span class=n><span title=typing.Optional>Optional</span></span><span class=p>[</span><span class=n><span title=radical.pilot.TaskDescription>TaskDescription</span></span><span class=p>]</span>
+</code></pre></div> <div class="doc doc-contents "> <p>Build a RadicalPilot task description from workflow task parameters.</p> <p>Converts a workflow task description into a RadicalPilot TaskDescription, handling different task modes (executable, function, service) and applying appropriate configurations.</p> <p><span class=doc-section-title>Parameters:</span></p> <table> <thead> <tr> <th>Name</th> <th>Type</th> <th>Description</th> <th>Default</th> </tr> </thead> <tbody> <tr class=doc-section-item> <td> <code>uid</code> </td> <td> <code><span title=str>str</span></code> </td> <td> <div class=doc-md-description> <p>Unique identifier for the task.</p> </div> </td> <td> <em>required</em> </td> </tr> <tr class=doc-section-item> <td> <code>task_desc</code> </td> <td> <code><span title=Dict>Dict</span></code> </td> <td> <div class=doc-md-description> <p>Task description containing: - executable: Path to executable (for executable tasks) - function: Python function (for function tasks) - args: Function arguments - kwargs: Function keyword arguments - is_service: Boolean indicating service task</p> </div> </td> <td> <em>required</em> </td> </tr> <tr class=doc-section-item> <td> <code>task_backend_specific_kwargs</code> </td> <td> <code><span title=Dict>Dict</span></code> </td> <td> <div class=doc-md-description> <p>RadicalPilot-specific parameters for the task description.</p> </div> </td> <td> <em>required</em> </td> </tr> </tbody> </table> <p><span class=doc-section-title>Returns:</span></p> <table> <thead> <tr> <th>Type</th> <th>Description</th> </tr> </thead> <tbody> <tr class=doc-section-item> <td> <code><span title=typing.Optional>Optional</span>[<span title=radical.pilot.TaskDescription>TaskDescription</span>]</code> </td> <td> <div class=doc-md-description> <p>rp.TaskDescription: Configured RadicalPilot task description, or None if task creation failed.</p> </div> </td> </tr> </tbody> </table> <details class=note open> <summary>Note</summary> <ul> <li>Function tasks require Raptor mode to be enabled</li> <li>Service tasks cannot be Python functions</li> <li>Failed tasks trigger callback with FAILED state</li> <li>Raptor tasks are assigned to masters via load balancing</li> </ul> </details> <details class=example open> <summary>Example</summary> <p>:: task_desc = { 'executable': '/bin/echo', 'args': ['Hello World'], 'is_service': False } rp_task = backend.build_task('task_001', task_desc, {})</p> </details> <details class=quote> <summary>Source code in <code>doc_env/lib/python3.14/site-packages/radical/asyncflow/backends/execution/radical_pilot.py</code></summary> <div class=highlight><table class=highlighttable><tbody><tr><td class=linenos><div class=linenodiv><pre><span></span><span class=normal>386</span>
+<span class=normal>387</span>
+<span class=normal>388</span>
+<span class=normal>389</span>
+<span class=normal>390</span>
+<span class=normal>391</span>
+<span class=normal>392</span>
+<span class=normal>393</span>
+<span class=normal>394</span>
+<span class=normal>395</span>
+<span class=normal>396</span>
+<span class=normal>397</span>
+<span class=normal>398</span>
+<span class=normal>399</span>
+<span class=normal>400</span>
+<span class=normal>401</span>
+<span class=normal>402</span>
+<span class=normal>403</span>
+<span class=normal>404</span>
+<span class=normal>405</span>
+<span class=normal>406</span>
+<span class=normal>407</span>
+<span class=normal>408</span>
+<span class=normal>409</span>
+<span class=normal>410</span>
+<span class=normal>411</span>
+<span class=normal>412</span>
+<span class=normal>413</span>
+<span class=normal>414</span>
+<span class=normal>415</span>
+<span class=normal>416</span>
+<span class=normal>417</span>
+<span class=normal>418</span>
+<span class=normal>419</span>
+<span class=normal>420</span>
+<span class=normal>421</span>
+<span class=normal>422</span>
+<span class=normal>423</span>
+<span class=normal>424</span>
+<span class=normal>425</span>
+<span class=normal>426</span>
+<span class=normal>427</span>
+<span class=normal>428</span>
+<span class=normal>429</span>
+<span class=normal>430</span>
+<span class=normal>431</span>
+<span class=normal>432</span>
+<span class=normal>433</span>
+<span class=normal>434</span>
+<span class=normal>435</span>
+<span class=normal>436</span>
+<span class=normal>437</span>
+<span class=normal>438</span>
+<span class=normal>439</span>
+<span class=normal>440</span>
+<span class=normal>441</span>
+<span class=normal>442</span>
+<span class=normal>443</span>
+<span class=normal>444</span>
+<span class=normal>445</span>
+<span class=normal>446</span>
+<span class=normal>447</span>
+<span class=normal>448</span>
+<span class=normal>449</span>
+<span class=normal>450</span>
+<span class=normal>451</span>
+<span class=normal>452</span>
+<span class=normal>453</span>
+<span class=normal>454</span>
+<span class=normal>455</span>
+<span class=normal>456</span>
+<span class=normal>457</span>
+<span class=normal>458</span>
+<span class=normal>459</span>
+<span class=normal>460</span>
+<span class=normal>461</span>
+<span class=normal>462</span></pre></div></td><td class=code><div><pre><span></span><code><span class=k>def</span><span class=w> </span><span class=nf>build_task</span><span class=p>(</span>
+    <span class=bp>self</span><span class=p>,</span> <span class=n>uid</span><span class=p>:</span> <span class=nb>str</span><span class=p>,</span> <span class=n>task_desc</span><span class=p>:</span> <span class=nb>dict</span><span class=p>,</span> <span class=n>task_backend_specific_kwargs</span><span class=p>:</span> <span class=nb>dict</span>
+<span class=p>)</span> <span class=o>-&gt;</span> <span class=s2>"Optional[rp.TaskDescription]"</span><span class=p>:</span>
+<span class=w>    </span><span class=sd>"""Build a RadicalPilot task description from workflow task parameters.</span>
+
+<span class=sd>    Converts a workflow task description into a RadicalPilot TaskDescription,</span>
+<span class=sd>    handling different task modes (executable, function, service) and applying</span>
+<span class=sd>    appropriate configurations.</span>
+
+<span class=sd>    Args:</span>
+<span class=sd>        uid (str): Unique identifier for the task.</span>
+<span class=sd>        task_desc (Dict): Task description containing:</span>
+<span class=sd>            - executable: Path to executable (for executable tasks)</span>
+<span class=sd>            - function: Python function (for function tasks)</span>
+<span class=sd>            - args: Function arguments</span>
+<span class=sd>            - kwargs: Function keyword arguments</span>
+<span class=sd>            - is_service: Boolean indicating service task</span>
+<span class=sd>        task_backend_specific_kwargs (Dict): RadicalPilot-specific parameters</span>
+<span class=sd>            for the task description.</span>
+
+<span class=sd>    Returns:</span>
+<span class=sd>        rp.TaskDescription: Configured RadicalPilot task description, or None</span>
+<span class=sd>            if task creation failed.</span>
+
+<span class=sd>    Note:</span>
+<span class=sd>        - Function tasks require Raptor mode to be enabled</span>
+<span class=sd>        - Service tasks cannot be Python functions</span>
+<span class=sd>        - Failed tasks trigger callback with FAILED state</span>
+<span class=sd>        - Raptor tasks are assigned to masters via load balancing</span>
+
+<span class=sd>    Example:</span>
+<span class=sd>        ::</span>
+<span class=sd>            task_desc = {</span>
+<span class=sd>                'executable': '/bin/echo',</span>
+<span class=sd>                'args': ['Hello World'],</span>
+<span class=sd>                'is_service': False</span>
+<span class=sd>            }</span>
+<span class=sd>            rp_task = backend.build_task('task_001', task_desc, {})</span>
+<span class=sd>    """</span>
+
+    <span class=n>is_service</span> <span class=o>=</span> <span class=n>task_desc</span><span class=o>.</span><span class=n>get</span><span class=p>(</span><span class=s2>"is_service"</span><span class=p>,</span> <span class=kc>False</span><span class=p>)</span>
+    <span class=n>rp_task</span> <span class=o>=</span> <span class=n>rp</span><span class=o>.</span><span class=n>TaskDescription</span><span class=p>(</span><span class=n>from_dict</span><span class=o>=</span><span class=n>task_backend_specific_kwargs</span><span class=p>)</span>
+    <span class=n>rp_task</span><span class=o>.</span><span class=n>uid</span> <span class=o>=</span> <span class=n>uid</span>
+
+    <span class=k>if</span> <span class=n>task_desc</span><span class=p>[</span><span class=s2>"executable"</span><span class=p>]:</span>
+        <span class=n>rp_task</span><span class=o>.</span><span class=n>mode</span> <span class=o>=</span> <span class=n>rp</span><span class=o>.</span><span class=n>TASK_SERVICE</span> <span class=k>if</span> <span class=n>is_service</span> <span class=k>else</span> <span class=n>rp</span><span class=o>.</span><span class=n>TASK_EXECUTABLE</span>
+        <span class=n>rp_task</span><span class=o>.</span><span class=n>executable</span> <span class=o>=</span> <span class=n>task_desc</span><span class=p>[</span><span class=s2>"executable"</span><span class=p>]</span>
+    <span class=k>elif</span> <span class=n>task_desc</span><span class=p>[</span><span class=s2>"function"</span><span class=p>]:</span>
+        <span class=k>if</span> <span class=n>is_service</span><span class=p>:</span>
+            <span class=n>error_msg</span> <span class=o>=</span> <span class=p>(</span>
+                <span class=s2>"RadicalExecutionBackend does not support function service tasks"</span>
+            <span class=p>)</span>
+            <span class=n>rp_task</span><span class=p>[</span><span class=s2>"exception"</span><span class=p>]</span> <span class=o>=</span> <span class=ne>ValueError</span><span class=p>(</span><span class=n>error_msg</span><span class=p>)</span>
+            <span class=bp>self</span><span class=o>.</span><span class=n>_callback_func</span><span class=p>(</span><span class=n>rp_task</span><span class=p>,</span> <span class=n>rp</span><span class=o>.</span><span class=n>FAILED</span><span class=p>)</span>
+            <span class=k>return</span> <span class=kc>None</span>
+
+        <span class=n>rp_task</span><span class=o>.</span><span class=n>mode</span> <span class=o>=</span> <span class=n>rp</span><span class=o>.</span><span class=n>TASK_FUNCTION</span>
+        <span class=n>rp_task</span><span class=o>.</span><span class=n>function</span> <span class=o>=</span> <span class=n>rp</span><span class=o>.</span><span class=n>PythonTask</span><span class=p>(</span>
+            <span class=n>task_desc</span><span class=p>[</span><span class=s2>"function"</span><span class=p>],</span> <span class=n>task_desc</span><span class=p>[</span><span class=s2>"args"</span><span class=p>],</span> <span class=n>task_desc</span><span class=p>[</span><span class=s2>"kwargs"</span><span class=p>]</span>
+        <span class=p>)</span>
+
+    <span class=k>if</span> <span class=n>rp_task</span><span class=o>.</span><span class=n>mode</span> <span class=ow>in</span> <span class=p>[</span>
+        <span class=n>rp</span><span class=o>.</span><span class=n>TASK_FUNCTION</span><span class=p>,</span>
+        <span class=n>rp</span><span class=o>.</span><span class=n>TASK_EVAL</span><span class=p>,</span>
+        <span class=n>rp</span><span class=o>.</span><span class=n>TASK_PROC</span><span class=p>,</span>
+        <span class=n>rp</span><span class=o>.</span><span class=n>TASK_METHOD</span><span class=p>,</span>
+    <span class=p>]:</span>
+        <span class=k>if</span> <span class=ow>not</span> <span class=bp>self</span><span class=o>.</span><span class=n>raptor_mode</span><span class=p>:</span>
+            <span class=n>error_msg</span> <span class=o>=</span> <span class=sa>f</span><span class=s2>"Raptor mode not enabled, cannot register </span><span class=si>{</span><span class=n>rp_task</span><span class=o>.</span><span class=n>mode</span><span class=si>}</span><span class=s2>"</span>
+            <span class=n>rp_task</span><span class=p>[</span><span class=s2>"exception"</span><span class=p>]</span> <span class=o>=</span> <span class=ne>RuntimeError</span><span class=p>(</span><span class=n>error_msg</span><span class=p>)</span>
+            <span class=bp>self</span><span class=o>.</span><span class=n>_callback_func</span><span class=p>(</span><span class=n>rp_task</span><span class=p>,</span> <span class=n>rp</span><span class=o>.</span><span class=n>FAILED</span><span class=p>)</span>
+            <span class=k>return</span> <span class=kc>None</span>
+
+        <span class=n>rp_task</span><span class=o>.</span><span class=n>raptor_id</span> <span class=o>=</span> <span class=nb>next</span><span class=p>(</span><span class=bp>self</span><span class=o>.</span><span class=n>master_selector</span><span class=p>)</span>
+
+    <span class=bp>self</span><span class=o>.</span><span class=n>tasks</span><span class=p>[</span><span class=n>uid</span><span class=p>]</span> <span class=o>=</span> <span class=n>rp_task</span>
+    <span class=k>return</span> <span class=n>rp_task</span>
+</code></pre></div></td></tr></tbody></table></div> </details> </div> </div> <div class="doc doc-object doc-function"> <h3 id=radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend.link_explicit_data_deps class="doc doc-heading"> <code class="doc-symbol doc-symbol-heading doc-symbol-method"></code> <span class="doc doc-object-name doc-function-name">link_explicit_data_deps</span> <a href=#radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend.link_explicit_data_deps class=headerlink title="Permanent link">¶</a></h3> <div class="doc-signature highlight"><pre><span></span><code><span class=nf>link_explicit_data_deps</span><span class=p>(</span><span class=n>src_task</span><span class=p>:</span> <span class=n><span title=typing.Optional>Optional</span></span><span class=p>[</span><span class=n><span title=dict>dict</span></span><span class=p>]</span> <span class=o>=</span> <span class=kc>None</span><span class=p>,</span> <span class=n>dst_task</span><span class=p>:</span> <span class=n><span title=typing.Optional>Optional</span></span><span class=p>[</span><span class=n><span title=dict>dict</span></span><span class=p>]</span> <span class=o>=</span> <span class=kc>None</span><span class=p>,</span> <span class=n>file_name</span><span class=p>:</span> <span class=n><span title=typing.Optional>Optional</span></span><span class=p>[</span><span class=n><span title=str>str</span></span><span class=p>]</span> <span class=o>=</span> <span class=kc>None</span><span class=p>,</span> <span class=n>file_path</span><span class=p>:</span> <span class=n><span title=typing.Optional>Optional</span></span><span class=p>[</span><span class=n><span title=str>str</span></span><span class=p>]</span> <span class=o>=</span> <span class=kc>None</span><span class=p>)</span> <span class=o>-&gt;</span> <span class=n><span title=dict>dict</span></span>
+</code></pre></div> <div class="doc doc-contents "> <p>Link explicit data dependencies between tasks or from external sources.</p> <p>Creates data staging entries to establish explicit dependencies where files are transferred or linked from source to destination tasks. Supports both task-to-task dependencies and external file staging.</p> <p><span class=doc-section-title>Parameters:</span></p> <table> <thead> <tr> <th>Name</th> <th>Type</th> <th>Description</th> <th>Default</th> </tr> </thead> <tbody> <tr class=doc-section-item> <td> <code>src_task</code> </td> <td> <code><span title=typing.Optional>Optional</span>[<span title=Dict>Dict</span>]</code> </td> <td> <div class=doc-md-description> <p>Source task dictionary containing the file. None when staging from external path.</p> </div> </td> <td> <code>None</code> </td> </tr> <tr class=doc-section-item> <td> <code>dst_task</code> </td> <td> <code><span title=Dict>Dict</span></code> </td> <td> <div class=doc-md-description> <p>Destination task dictionary that will receive the file. Must contain 'task_backend_specific_kwargs' key.</p> </div> </td> <td> <code>None</code> </td> </tr> <tr class=doc-section-item> <td> <code>file_name</code> </td> <td> <code><span title=typing.Optional>Optional</span>[<span title=str>str</span>]</code> </td> <td> <div class=doc-md-description> <p>Name of the file to stage. Defaults to: - src_task UID if staging from task - basename of file_path if staging from external path</p> </div> </td> <td> <code>None</code> </td> </tr> <tr class=doc-section-item> <td> <code>file_path</code> </td> <td> <code><span title=typing.Optional>Optional</span>[<span title=str>str</span>]</code> </td> <td> <div class=doc-md-description> <p>External file path to stage (alternative to task-sourced files).</p> </div> </td> <td> <code>None</code> </td> </tr> </tbody> </table> <p><span class=doc-section-title>Returns:</span></p> <table> <thead> <tr> <th>Name</th> <th>Type</th> <th>Description</th> </tr> </thead> <tbody> <tr class=doc-section-item> <td><code>Dict</code></td> <td> <code><span title=dict>dict</span></code> </td> <td> <div class=doc-md-description> <p>The data dependency dictionary that was added to input staging.</p> </div> </td> </tr> </tbody> </table> <p><span class=doc-section-title>Raises:</span></p> <table> <thead> <tr> <th>Type</th> <th>Description</th> </tr> </thead> <tbody> <tr class=doc-section-item> <td> <code><span title=ValueError>ValueError</span></code> </td> <td> <div class=doc-md-description> <p>If neither file_name nor file_path is provided, or if src_task is missing when file_path is not specified.</p> </div> </td> </tr> </tbody> </table> <details class=note open> <summary>Note</summary> <ul> <li>External files use TRANSFER action</li> <li>Task-to-task dependencies use LINK action</li> <li>Files are staged to task:/// namespace in destination</li> <li>Input staging list is created if it doesn't exist</li> </ul> </details> <details class=example open> <summary>Example</summary> <p>:: # Link output from task1 to task2 backend.link_explicit_data_deps( src_task={'uid': 'task1'}, dst_task={'task_backend_specific_kwargs': {}}, file_name='output.dat' )</p> <div class=codehilite><table class=codehilitetable><tbody><tr><td class=linenos><div class=linenodiv><pre><span class=normal>1</span>
+<span class=normal>2</span>
+<span class=normal>3</span>
+<span class=normal>4</span>
+<span class=normal>5</span></pre></div></td><td class=code><div><pre><span></span><code><span class=gh>#</span> Stage external file
+backend.link_explicit_data_deps(
+    dst_task={'task_backend_specific_kwargs': {}},
+    file_path='/path/to/input.txt'
+)
+</code></pre></div></td></tr></tbody></table></div> </details> <details class=quote> <summary>Source code in <code>doc_env/lib/python3.14/site-packages/radical/asyncflow/backends/execution/radical_pilot.py</code></summary> <div class=highlight><table class=highlighttable><tbody><tr><td class=linenos><div class=linenodiv><pre><span></span><span class=normal>464</span>
+<span class=normal>465</span>
+<span class=normal>466</span>
+<span class=normal>467</span>
+<span class=normal>468</span>
+<span class=normal>469</span>
+<span class=normal>470</span>
+<span class=normal>471</span>
+<span class=normal>472</span>
+<span class=normal>473</span>
+<span class=normal>474</span>
+<span class=normal>475</span>
+<span class=normal>476</span>
+<span class=normal>477</span>
+<span class=normal>478</span>
+<span class=normal>479</span>
+<span class=normal>480</span>
+<span class=normal>481</span>
+<span class=normal>482</span>
+<span class=normal>483</span>
+<span class=normal>484</span>
+<span class=normal>485</span>
+<span class=normal>486</span>
+<span class=normal>487</span>
+<span class=normal>488</span>
+<span class=normal>489</span>
+<span class=normal>490</span>
+<span class=normal>491</span>
+<span class=normal>492</span>
+<span class=normal>493</span>
+<span class=normal>494</span>
+<span class=normal>495</span>
+<span class=normal>496</span>
+<span class=normal>497</span>
+<span class=normal>498</span>
+<span class=normal>499</span>
+<span class=normal>500</span>
+<span class=normal>501</span>
+<span class=normal>502</span>
+<span class=normal>503</span>
+<span class=normal>504</span>
+<span class=normal>505</span>
+<span class=normal>506</span>
+<span class=normal>507</span>
+<span class=normal>508</span>
+<span class=normal>509</span>
+<span class=normal>510</span>
+<span class=normal>511</span>
+<span class=normal>512</span>
+<span class=normal>513</span>
+<span class=normal>514</span>
+<span class=normal>515</span>
+<span class=normal>516</span>
+<span class=normal>517</span>
+<span class=normal>518</span>
+<span class=normal>519</span>
+<span class=normal>520</span>
+<span class=normal>521</span>
+<span class=normal>522</span>
+<span class=normal>523</span>
+<span class=normal>524</span>
+<span class=normal>525</span>
+<span class=normal>526</span>
+<span class=normal>527</span>
+<span class=normal>528</span>
+<span class=normal>529</span>
+<span class=normal>530</span>
+<span class=normal>531</span>
+<span class=normal>532</span>
+<span class=normal>533</span>
+<span class=normal>534</span>
+<span class=normal>535</span>
+<span class=normal>536</span>
+<span class=normal>537</span>
+<span class=normal>538</span>
+<span class=normal>539</span>
+<span class=normal>540</span>
+<span class=normal>541</span>
+<span class=normal>542</span>
+<span class=normal>543</span>
+<span class=normal>544</span>
+<span class=normal>545</span>
+<span class=normal>546</span>
+<span class=normal>547</span>
+<span class=normal>548</span>
+<span class=normal>549</span></pre></div></td><td class=code><div><pre><span></span><code><span class=k>def</span><span class=w> </span><span class=nf>link_explicit_data_deps</span><span class=p>(</span>
+    <span class=bp>self</span><span class=p>,</span>
+    <span class=n>src_task</span><span class=p>:</span> <span class=n>Optional</span><span class=p>[</span><span class=nb>dict</span><span class=p>]</span> <span class=o>=</span> <span class=kc>None</span><span class=p>,</span>
+    <span class=n>dst_task</span><span class=p>:</span> <span class=n>Optional</span><span class=p>[</span><span class=nb>dict</span><span class=p>]</span> <span class=o>=</span> <span class=kc>None</span><span class=p>,</span>
+    <span class=n>file_name</span><span class=p>:</span> <span class=n>Optional</span><span class=p>[</span><span class=nb>str</span><span class=p>]</span> <span class=o>=</span> <span class=kc>None</span><span class=p>,</span>
+    <span class=n>file_path</span><span class=p>:</span> <span class=n>Optional</span><span class=p>[</span><span class=nb>str</span><span class=p>]</span> <span class=o>=</span> <span class=kc>None</span><span class=p>,</span>
+<span class=p>)</span> <span class=o>-&gt;</span> <span class=nb>dict</span><span class=p>:</span>
+<span class=w>    </span><span class=sd>"""Link explicit data dependencies between tasks or from external sources.</span>
+
+<span class=sd>    Creates data staging entries to establish explicit dependencies where</span>
+<span class=sd>    files are transferred or linked from source to destination tasks.</span>
+<span class=sd>    Supports both task-to-task dependencies and external file staging.</span>
+
+<span class=sd>    Args:</span>
+<span class=sd>        src_task (Optional[Dict]): Source task dictionary containing the file.</span>
+<span class=sd>            None when staging from external path.</span>
+<span class=sd>        dst_task (Dict): Destination task dictionary that will receive the file.</span>
+<span class=sd>            Must contain 'task_backend_specific_kwargs' key.</span>
+<span class=sd>        file_name (Optional[str]): Name of the file to stage. Defaults to:</span>
+<span class=sd>            - src_task UID if staging from task</span>
+<span class=sd>            - basename of file_path if staging from external path</span>
+<span class=sd>        file_path (Optional[str]): External file path to stage (alternative</span>
+<span class=sd>            to task-sourced files).</span>
+
+<span class=sd>    Returns:</span>
+<span class=sd>        Dict: The data dependency dictionary that was added to input staging.</span>
+
+<span class=sd>    Raises:</span>
+<span class=sd>        ValueError: If neither file_name nor file_path is provided, or if</span>
+<span class=sd>            src_task is missing when file_path is not specified.</span>
+
+<span class=sd>    Note:</span>
+<span class=sd>        - External files use TRANSFER action</span>
+<span class=sd>        - Task-to-task dependencies use LINK action</span>
+<span class=sd>        - Files are staged to task:/// namespace in destination</span>
+<span class=sd>        - Input staging list is created if it doesn't exist</span>
+
+<span class=sd>    Example:</span>
+<span class=sd>        ::</span>
+<span class=sd>            # Link output from task1 to task2</span>
+<span class=sd>            backend.link_explicit_data_deps(</span>
+<span class=sd>                src_task={'uid': 'task1'},</span>
+<span class=sd>                dst_task={'task_backend_specific_kwargs': {}},</span>
+<span class=sd>                file_name='output.dat'</span>
+<span class=sd>            )</span>
+
+<span class=sd>            # Stage external file</span>
+<span class=sd>            backend.link_explicit_data_deps(</span>
+<span class=sd>                dst_task={'task_backend_specific_kwargs': {}},</span>
+<span class=sd>                file_path='/path/to/input.txt'</span>
+<span class=sd>            )</span>
+<span class=sd>    """</span>
+    <span class=k>if</span> <span class=ow>not</span> <span class=n>file_name</span> <span class=ow>and</span> <span class=ow>not</span> <span class=n>file_path</span><span class=p>:</span>
+        <span class=k>raise</span> <span class=ne>ValueError</span><span class=p>(</span><span class=s2>"Either file_name or file_path must be provided"</span><span class=p>)</span>
+
+    <span class=n>dst_kwargs</span> <span class=o>=</span> <span class=n>dst_task</span><span class=p>[</span><span class=s2>"task_backend_specific_kwargs"</span><span class=p>]</span>
+
+    <span class=k>if</span> <span class=ow>not</span> <span class=n>file_name</span><span class=p>:</span>
+        <span class=k>if</span> <span class=n>file_path</span><span class=p>:</span>
+            <span class=n>file_name</span> <span class=o>=</span> <span class=n>file_path</span><span class=o>.</span><span class=n>split</span><span class=p>(</span><span class=s2>"/"</span><span class=p>)[</span><span class=o>-</span><span class=mi>1</span><span class=p>]</span>
+        <span class=k>elif</span> <span class=n>src_task</span><span class=p>:</span>
+            <span class=n>file_name</span> <span class=o>=</span> <span class=n>src_task</span><span class=p>[</span><span class=s2>"uid"</span><span class=p>]</span>
+        <span class=k>else</span><span class=p>:</span>
+            <span class=k>raise</span> <span class=ne>ValueError</span><span class=p>(</span><span class=s2>"Must provide file_name, file_path, or src_task"</span><span class=p>)</span>
+
+    <span class=k>if</span> <span class=n>file_path</span><span class=p>:</span>
+        <span class=n>data_dep</span> <span class=o>=</span> <span class=p>{</span>
+            <span class=s2>"source"</span><span class=p>:</span> <span class=n>file_path</span><span class=p>,</span>
+            <span class=s2>"target"</span><span class=p>:</span> <span class=sa>f</span><span class=s2>"task:///</span><span class=si>{</span><span class=n>file_name</span><span class=si>}</span><span class=s2>"</span><span class=p>,</span>
+            <span class=s2>"action"</span><span class=p>:</span> <span class=n>rp</span><span class=o>.</span><span class=n>TRANSFER</span><span class=p>,</span>
+        <span class=p>}</span>
+    <span class=k>else</span><span class=p>:</span>
+        <span class=k>if</span> <span class=ow>not</span> <span class=n>src_task</span><span class=p>:</span>
+            <span class=k>raise</span> <span class=ne>ValueError</span><span class=p>(</span><span class=s2>"src_task required when file_path not specified"</span><span class=p>)</span>
+        <span class=n>data_dep</span> <span class=o>=</span> <span class=p>{</span>
+            <span class=s2>"source"</span><span class=p>:</span> <span class=sa>f</span><span class=s2>"pilot:///</span><span class=si>{</span><span class=n>src_task</span><span class=p>[</span><span class=s1>'uid'</span><span class=p>]</span><span class=si>}</span><span class=s2>/</span><span class=si>{</span><span class=n>file_name</span><span class=si>}</span><span class=s2>"</span><span class=p>,</span>
+            <span class=s2>"target"</span><span class=p>:</span> <span class=sa>f</span><span class=s2>"task:///</span><span class=si>{</span><span class=n>file_name</span><span class=si>}</span><span class=s2>"</span><span class=p>,</span>
+            <span class=s2>"action"</span><span class=p>:</span> <span class=n>rp</span><span class=o>.</span><span class=n>LINK</span><span class=p>,</span>
+        <span class=p>}</span>
+
+    <span class=k>if</span> <span class=s2>"input_staging"</span> <span class=ow>not</span> <span class=ow>in</span> <span class=n>dst_kwargs</span><span class=p>:</span>
+        <span class=n>dst_kwargs</span><span class=p>[</span><span class=s2>"input_staging"</span><span class=p>]</span> <span class=o>=</span> <span class=p>[</span><span class=n>data_dep</span><span class=p>]</span>
+    <span class=k>else</span><span class=p>:</span>
+        <span class=n>dst_kwargs</span><span class=p>[</span><span class=s2>"input_staging"</span><span class=p>]</span><span class=o>.</span><span class=n>append</span><span class=p>(</span><span class=n>data_dep</span><span class=p>)</span>
+
+    <span class=k>return</span> <span class=n>data_dep</span>
+</code></pre></div></td></tr></tbody></table></div> </details> </div> </div> <div class="doc doc-object doc-function"> <h3 id=radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend.link_implicit_data_deps class="doc doc-heading"> <code class="doc-symbol doc-symbol-heading doc-symbol-method"></code> <span class="doc doc-object-name doc-function-name">link_implicit_data_deps</span> <a href=#radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend.link_implicit_data_deps class=headerlink title="Permanent link">¶</a></h3> <div class="doc-signature highlight"><pre><span></span><code><span class=nf>link_implicit_data_deps</span><span class=p>(</span><span class=n>src_task</span><span class=p>:</span> <span class=n><span title=dict>dict</span></span><span class=p>,</span> <span class=n>dst_task</span><span class=p>:</span> <span class=n><span title=dict>dict</span></span><span class=p>)</span> <span class=o>-&gt;</span> <span class=kc>None</span>
+</code></pre></div> <div class="doc doc-contents "> <p>Add implicit data dependencies through symbolic links in task sandboxes.</p> <p>Creates pre-execution commands that establish symbolic links from the source task's sandbox to the destination task's sandbox, simulating implicit data dependencies without explicit file specifications.</p> <p><span class=doc-section-title>Parameters:</span></p> <table> <thead> <tr> <th>Name</th> <th>Type</th> <th>Description</th> <th>Default</th> </tr> </thead> <tbody> <tr class=doc-section-item> <td> <code>src_task</code> </td> <td> <code><span title=Dict>Dict</span></code> </td> <td> <div class=doc-md-description> <p>Source task dictionary containing 'uid' key.</p> </div> </td> <td> <em>required</em> </td> </tr> <tr class=doc-section-item> <td> <code>dst_task</code> </td> <td> <code><span title=Dict>Dict</span></code> </td> <td> <div class=doc-md-description> <p>Destination task dictionary with</p> </div> </td> <td> <em>required</em> </td> </tr> </tbody> </table> <details class=note open> <summary>Note</summary> <ul> <li>Links all files from source sandbox except the task UID file itself</li> <li>Uses environment variables for source task identification</li> <li>Commands are added to the destination task's pre_exec list</li> <li>Symbolic links are created in the destination task's sandbox</li> </ul> </details> <details class=implementation-details open> <summary>Implementation Details</summary> <ol> <li>Sets SRC_TASK_ID environment variable</li> <li>Sets SRC_TASK_SANDBOX path variable</li> <li>Creates symbolic links for all files except the task ID file</li> </ol> </details> <details class=example open> <summary>Example</summary> <p>:: src_task = {'uid': 'producer_task'} dst_task = {'task_backend_specific_kwargs': {}} backend.link_implicit_data_deps(src_task, dst_task)</p> </details> <details class=quote> <summary>Source code in <code>doc_env/lib/python3.14/site-packages/radical/asyncflow/backends/execution/radical_pilot.py</code></summary> <div class=highlight><table class=highlighttable><tbody><tr><td class=linenos><div class=linenodiv><pre><span></span><span class=normal>551</span>
+<span class=normal>552</span>
+<span class=normal>553</span>
+<span class=normal>554</span>
+<span class=normal>555</span>
+<span class=normal>556</span>
+<span class=normal>557</span>
+<span class=normal>558</span>
+<span class=normal>559</span>
+<span class=normal>560</span>
+<span class=normal>561</span>
+<span class=normal>562</span>
+<span class=normal>563</span>
+<span class=normal>564</span>
+<span class=normal>565</span>
+<span class=normal>566</span>
+<span class=normal>567</span>
+<span class=normal>568</span>
+<span class=normal>569</span>
+<span class=normal>570</span>
+<span class=normal>571</span>
+<span class=normal>572</span>
+<span class=normal>573</span>
+<span class=normal>574</span>
+<span class=normal>575</span>
+<span class=normal>576</span>
+<span class=normal>577</span>
+<span class=normal>578</span>
+<span class=normal>579</span>
+<span class=normal>580</span>
+<span class=normal>581</span>
+<span class=normal>582</span>
+<span class=normal>583</span>
+<span class=normal>584</span>
+<span class=normal>585</span>
+<span class=normal>586</span>
+<span class=normal>587</span>
+<span class=normal>588</span>
+<span class=normal>589</span>
+<span class=normal>590</span>
+<span class=normal>591</span>
+<span class=normal>592</span>
+<span class=normal>593</span>
+<span class=normal>594</span>
+<span class=normal>595</span>
+<span class=normal>596</span>
+<span class=normal>597</span></pre></div></td><td class=code><div><pre><span></span><code><span class=k>def</span><span class=w> </span><span class=nf>link_implicit_data_deps</span><span class=p>(</span><span class=bp>self</span><span class=p>,</span> <span class=n>src_task</span><span class=p>:</span> <span class=nb>dict</span><span class=p>,</span> <span class=n>dst_task</span><span class=p>:</span> <span class=nb>dict</span><span class=p>)</span> <span class=o>-&gt;</span> <span class=kc>None</span><span class=p>:</span>
+<span class=w>    </span><span class=sd>"""Add implicit data dependencies through symbolic links in task sandboxes.</span>
+
+<span class=sd>    Creates pre-execution commands that establish symbolic links from the</span>
+<span class=sd>    source task's sandbox to the destination task's sandbox, simulating</span>
+<span class=sd>    implicit data dependencies without explicit file specifications.</span>
+
+<span class=sd>    Args:</span>
+<span class=sd>        src_task (Dict): Source task dictionary containing 'uid' key.</span>
+<span class=sd>        dst_task (Dict): Destination task dictionary with</span>
+<span class=sd>        'task_backend_specific_kwargs'.</span>
+
+<span class=sd>    Note:</span>
+<span class=sd>        - Links all files from source sandbox except the task UID file itself</span>
+<span class=sd>        - Uses environment variables for source task identification</span>
+<span class=sd>        - Commands are added to the destination task's pre_exec list</span>
+<span class=sd>        - Symbolic links are created in the destination task's sandbox</span>
+
+<span class=sd>    Implementation Details:</span>
+<span class=sd>        1. Sets SRC_TASK_ID environment variable</span>
+<span class=sd>        2. Sets SRC_TASK_SANDBOX path variable</span>
+<span class=sd>        3. Creates symbolic links for all files except the task ID file</span>
+
+<span class=sd>    Example:</span>
+<span class=sd>        ::</span>
+<span class=sd>            src_task = {'uid': 'producer_task'}</span>
+<span class=sd>            dst_task = {'task_backend_specific_kwargs': {}}</span>
+<span class=sd>            backend.link_implicit_data_deps(src_task, dst_task)</span>
+<span class=sd>    """</span>
+
+    <span class=n>dst_kwargs</span> <span class=o>=</span> <span class=n>dst_task</span><span class=p>[</span><span class=s2>"task_backend_specific_kwargs"</span><span class=p>]</span>
+    <span class=n>src_uid</span> <span class=o>=</span> <span class=n>src_task</span><span class=p>[</span><span class=s2>"uid"</span><span class=p>]</span>
+
+    <span class=n>cmd1</span> <span class=o>=</span> <span class=sa>f</span><span class=s2>"export SRC_TASK_ID=</span><span class=si>{</span><span class=n>src_uid</span><span class=si>}</span><span class=s2>"</span>
+    <span class=n>cmd2</span> <span class=o>=</span> <span class=s1>'export SRC_TASK_SANDBOX="$RP_PILOT_SANDBOX/$SRC_TASK_ID"'</span>
+    <span class=n>cmd3</span> <span class=o>=</span> <span class=s2>"""files=$(cd "$SRC_TASK_SANDBOX" &amp;&amp; ls | grep -ve "^$SRC_TASK_ID")</span>
+<span class=s2>            for f in $files</span>
+<span class=s2>            do</span>
+<span class=s2>                ln -sf "$SRC_TASK_SANDBOX/$f" "$RP_TASK_SANDBOX"</span>
+<span class=s2>            done"""</span>
+
+    <span class=n>commands</span> <span class=o>=</span> <span class=p>[</span><span class=n>cmd1</span><span class=p>,</span> <span class=n>cmd2</span><span class=p>,</span> <span class=n>cmd3</span><span class=p>]</span>
+
+    <span class=k>if</span> <span class=n>dst_kwargs</span><span class=o>.</span><span class=n>get</span><span class=p>(</span><span class=s2>"pre_exec"</span><span class=p>):</span>
+        <span class=n>dst_kwargs</span><span class=p>[</span><span class=s2>"pre_exec"</span><span class=p>]</span><span class=o>.</span><span class=n>extend</span><span class=p>(</span><span class=n>commands</span><span class=p>)</span>
+    <span class=k>else</span><span class=p>:</span>
+        <span class=n>dst_kwargs</span><span class=p>[</span><span class=s2>"pre_exec"</span><span class=p>]</span> <span class=o>=</span> <span class=n>commands</span>
+</code></pre></div></td></tr></tbody></table></div> </details> </div> </div> <div class="doc doc-object doc-function"> <h3 id=radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend.submit_tasks class="doc doc-heading"> <code class="doc-symbol doc-symbol-heading doc-symbol-method"></code> <span class="doc doc-object-name doc-function-name">submit_tasks</span> <span class="doc doc-labels"> <small class="doc doc-label doc-label-async"><code>async</code></small> </span> <a href=#radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend.submit_tasks class=headerlink title="Permanent link">¶</a></h3> <div class="doc-signature highlight"><pre><span></span><code><span class=nf>submit_tasks</span><span class=p>(</span><span class=n>tasks</span><span class=p>:</span> <span class=n><span title=list>list</span></span><span class=p>)</span> <span class=o>-&gt;</span> <span class=kc>None</span>
+</code></pre></div> <div class="doc doc-contents "> <p>Submit a list of tasks for execution.</p> <p>Processes a list of workflow tasks, builds RadicalPilot task descriptions, and submits them to the task manager for execution. Handles task building failures gracefully by skipping invalid tasks.</p> <p><span class=doc-section-title>Parameters:</span></p> <table> <thead> <tr> <th>Name</th> <th>Type</th> <th>Description</th> <th>Default</th> </tr> </thead> <tbody> <tr class=doc-section-item> <td> <code>tasks</code> </td> <td> <code><span title=list>list</span></code> </td> <td> <div class=doc-md-description> <p>List of task dictionaries, each containing: - uid: Unique task identifier - task_backend_specific_kwargs: RadicalPilot-specific parameters - Other task description fields</p> </div> </td> <td> <em>required</em> </td> </tr> </tbody> </table> <p><span class=doc-section-title>Returns:</span></p> <table> <thead> <tr> <th>Type</th> <th>Description</th> </tr> </thead> <tbody> <tr class=doc-section-item> <td> <code>None</code> </td> <td> <div class=doc-md-description> <p>The result of task_manager.submit_tasks() with successfully built tasks.</p> </div> </td> </tr> </tbody> </table> <details class=note open> <summary>Note</summary> <ul> <li>Failed task builds are skipped (build_task returns None)</li> <li>Only successfully built tasks are submitted to the task manager</li> <li>Task building includes validation and error handling</li> </ul> </details> <details class=quote> <summary>Source code in <code>doc_env/lib/python3.14/site-packages/radical/asyncflow/backends/execution/radical_pilot.py</code></summary> <div class=highlight><table class=highlighttable><tbody><tr><td class=linenos><div class=linenodiv><pre><span></span><span class=normal>599</span>
+<span class=normal>600</span>
+<span class=normal>601</span>
+<span class=normal>602</span>
+<span class=normal>603</span>
+<span class=normal>604</span>
+<span class=normal>605</span>
+<span class=normal>606</span>
+<span class=normal>607</span>
+<span class=normal>608</span>
+<span class=normal>609</span>
+<span class=normal>610</span>
+<span class=normal>611</span>
+<span class=normal>612</span>
+<span class=normal>613</span>
+<span class=normal>614</span>
+<span class=normal>615</span>
+<span class=normal>616</span>
+<span class=normal>617</span>
+<span class=normal>618</span>
+<span class=normal>619</span>
+<span class=normal>620</span>
+<span class=normal>621</span>
+<span class=normal>622</span>
+<span class=normal>623</span>
+<span class=normal>624</span>
+<span class=normal>625</span>
+<span class=normal>626</span>
+<span class=normal>627</span>
+<span class=normal>628</span>
+<span class=normal>629</span>
+<span class=normal>630</span></pre></div></td><td class=code><div><pre><span></span><code><span class=k>async</span> <span class=k>def</span><span class=w> </span><span class=nf>submit_tasks</span><span class=p>(</span><span class=bp>self</span><span class=p>,</span> <span class=n>tasks</span><span class=p>:</span> <span class=nb>list</span><span class=p>)</span> <span class=o>-&gt;</span> <span class=kc>None</span><span class=p>:</span>
+<span class=w>    </span><span class=sd>"""Submit a list of tasks for execution.</span>
+
+<span class=sd>    Processes a list of workflow tasks, builds RadicalPilot task descriptions,</span>
+<span class=sd>    and submits them to the task manager for execution. Handles task building</span>
+<span class=sd>    failures gracefully by skipping invalid tasks.</span>
+
+<span class=sd>    Args:</span>
+<span class=sd>        tasks (list): List of task dictionaries, each containing:</span>
+<span class=sd>            - uid: Unique task identifier</span>
+<span class=sd>            - task_backend_specific_kwargs: RadicalPilot-specific parameters</span>
+<span class=sd>            - Other task description fields</span>
+
+<span class=sd>    Returns:</span>
+<span class=sd>        The result of task_manager.submit_tasks() with successfully built tasks.</span>
+
+<span class=sd>    Note:</span>
+<span class=sd>        - Failed task builds are skipped (build_task returns None)</span>
+<span class=sd>        - Only successfully built tasks are submitted to the task manager</span>
+<span class=sd>        - Task building includes validation and error handling</span>
+<span class=sd>    """</span>
+
+    <span class=n>_tasks</span> <span class=o>=</span> <span class=p>[]</span>
+    <span class=k>for</span> <span class=n>task</span> <span class=ow>in</span> <span class=n>tasks</span><span class=p>:</span>
+        <span class=n>task_to_submit</span> <span class=o>=</span> <span class=bp>self</span><span class=o>.</span><span class=n>build_task</span><span class=p>(</span>
+            <span class=n>task</span><span class=p>[</span><span class=s2>"uid"</span><span class=p>],</span> <span class=n>task</span><span class=p>,</span> <span class=n>task</span><span class=p>[</span><span class=s2>"task_backend_specific_kwargs"</span><span class=p>]</span>
+        <span class=p>)</span>
+        <span class=k>if</span> <span class=ow>not</span> <span class=n>task_to_submit</span><span class=p>:</span>
+            <span class=k>continue</span>
+        <span class=n>_tasks</span><span class=o>.</span><span class=n>append</span><span class=p>(</span><span class=n>task_to_submit</span><span class=p>)</span>
+
+    <span class=k>return</span> <span class=bp>self</span><span class=o>.</span><span class=n>task_manager</span><span class=o>.</span><span class=n>submit_tasks</span><span class=p>(</span><span class=n>_tasks</span><span class=p>)</span>
+</code></pre></div></td></tr></tbody></table></div> </details> </div> </div> <div class="doc doc-object doc-function"> <h3 id=radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend.cancel_task class="doc doc-heading"> <code class="doc-symbol doc-symbol-heading doc-symbol-method"></code> <span class="doc doc-object-name doc-function-name">cancel_task</span> <span class="doc doc-labels"> <small class="doc doc-label doc-label-async"><code>async</code></small> </span> <a href=#radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend.cancel_task class=headerlink title="Permanent link">¶</a></h3> <div class="doc-signature highlight"><pre><span></span><code><span class=nf>cancel_task</span><span class=p>(</span><span class=n>uid</span><span class=p>:</span> <span class=n><span title=str>str</span></span><span class=p>)</span> <span class=o>-&gt;</span> <span class=n><span title=bool>bool</span></span>
+</code></pre></div> <div class="doc doc-contents "> <p>Cancel a task.</p> <p><span class=doc-section-title>Parameters:</span></p> <table> <thead> <tr> <th>Name</th> <th>Type</th> <th>Description</th> <th>Default</th> </tr> </thead> <tbody> <tr class=doc-section-item> <td> <code>uid</code> </td> <td> <code><span title=str>str</span></code> </td> <td> <div class=doc-md-description> <p>Task UID to cancel.</p> </div> </td> <td> <em>required</em> </td> </tr> </tbody> </table> <p><span class=doc-section-title>Returns:</span></p> <table> <thead> <tr> <th>Type</th> <th>Description</th> </tr> </thead> <tbody> <tr class=doc-section-item> <td> <code><span title=bool>bool</span></code> </td> <td> <div class=doc-md-description> <p>True if task found and cancellation attempted, False otherwise.</p> </div> </td> </tr> </tbody> </table> <details class=quote> <summary>Source code in <code>doc_env/lib/python3.14/site-packages/radical/asyncflow/backends/execution/radical_pilot.py</code></summary> <div class=highlight><table class=highlighttable><tbody><tr><td class=linenos><div class=linenodiv><pre><span></span><span class=normal>632</span>
+<span class=normal>633</span>
+<span class=normal>634</span>
+<span class=normal>635</span>
+<span class=normal>636</span>
+<span class=normal>637</span>
+<span class=normal>638</span>
+<span class=normal>639</span>
+<span class=normal>640</span>
+<span class=normal>641</span>
+<span class=normal>642</span>
+<span class=normal>643</span>
+<span class=normal>644</span></pre></div></td><td class=code><div><pre><span></span><code><span class=k>async</span> <span class=k>def</span><span class=w> </span><span class=nf>cancel_task</span><span class=p>(</span><span class=bp>self</span><span class=p>,</span> <span class=n>uid</span><span class=p>:</span> <span class=nb>str</span><span class=p>)</span> <span class=o>-&gt;</span> <span class=nb>bool</span><span class=p>:</span>
+<span class=w>    </span><span class=sd>"""Cancel a task.</span>
+
+<span class=sd>    Args:</span>
+<span class=sd>        uid: Task UID to cancel.</span>
+
+<span class=sd>    Returns:</span>
+<span class=sd>        True if task found and cancellation attempted, False otherwise.</span>
+<span class=sd>    """</span>
+    <span class=k>if</span> <span class=n>uid</span> <span class=ow>in</span> <span class=bp>self</span><span class=o>.</span><span class=n>tasks</span><span class=p>:</span>
+        <span class=bp>self</span><span class=o>.</span><span class=n>task_manager</span><span class=o>.</span><span class=n>cancel_tasks</span><span class=p>(</span><span class=n>uid</span><span class=p>)</span>
+        <span class=k>return</span> <span class=kc>True</span>
+    <span class=k>return</span> <span class=kc>False</span>
+</code></pre></div></td></tr></tbody></table></div> </details> </div> </div> <div class="doc doc-object doc-function"> <h3 id=radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend.get_nodelist class="doc doc-heading"> <code class="doc-symbol doc-symbol-heading doc-symbol-method"></code> <span class="doc doc-object-name doc-function-name">get_nodelist</span> <a href=#radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend.get_nodelist class=headerlink title="Permanent link">¶</a></h3> <div class="doc-signature highlight"><pre><span></span><code><span class=nf>get_nodelist</span><span class=p>()</span> <span class=o>-&gt;</span> <span class=n><span title=typing.Optional>Optional</span></span><span class=p>[</span><span class=n><span title=radical.pilot.NodeList>NodeList</span></span><span class=p>]</span>
+</code></pre></div> <div class="doc doc-contents "> <p>Get information about allocated compute nodes.</p> <p>Retrieves the nodelist from the active resource pilot, providing details about the compute nodes allocated for task execution.</p> <p><span class=doc-section-title>Returns:</span></p> <table> <thead> <tr> <th>Type</th> <th>Description</th> </tr> </thead> <tbody> <tr class=doc-section-item> <td> <code><span title=typing.Optional>Optional</span>[<span title=radical.pilot.NodeList>NodeList</span>]</code> </td> <td> <div class=doc-md-description> <p>rp.NodeList: NodeList object containing information about allocated nodes. Each node in nodelist.nodes is of type rp.NodeResource. Returns None if the pilot is not in PMGR_ACTIVE state.</p> </div> </td> </tr> </tbody> </table> <details class=note open> <summary>Note</summary> <ul> <li>Only returns nodelist when pilot is in active state</li> <li>Nodelist provides detailed resource information for each node</li> <li>Useful for resource-aware task scheduling and monitoring</li> </ul> </details> <details class=quote> <summary>Source code in <code>doc_env/lib/python3.14/site-packages/radical/asyncflow/backends/execution/radical_pilot.py</code></summary> <div class=highlight><table class=highlighttable><tbody><tr><td class=linenos><div class=linenodiv><pre><span></span><span class=normal>646</span>
+<span class=normal>647</span>
+<span class=normal>648</span>
+<span class=normal>649</span>
+<span class=normal>650</span>
+<span class=normal>651</span>
+<span class=normal>652</span>
+<span class=normal>653</span>
+<span class=normal>654</span>
+<span class=normal>655</span>
+<span class=normal>656</span>
+<span class=normal>657</span>
+<span class=normal>658</span>
+<span class=normal>659</span>
+<span class=normal>660</span>
+<span class=normal>661</span>
+<span class=normal>662</span>
+<span class=normal>663</span>
+<span class=normal>664</span>
+<span class=normal>665</span>
+<span class=normal>666</span></pre></div></td><td class=code><div><pre><span></span><code><span class=k>def</span><span class=w> </span><span class=nf>get_nodelist</span><span class=p>(</span><span class=bp>self</span><span class=p>)</span> <span class=o>-&gt;</span> <span class=s2>"Optional[rp.NodeList]"</span><span class=p>:</span>
+<span class=w>    </span><span class=sd>"""Get information about allocated compute nodes.</span>
+
+<span class=sd>    Retrieves the nodelist from the active resource pilot, providing</span>
+<span class=sd>    details about the compute nodes allocated for task execution.</span>
+
+<span class=sd>    Returns:</span>
+<span class=sd>        rp.NodeList: NodeList object containing information about allocated</span>
+<span class=sd>            nodes. Each node in nodelist.nodes is of type rp.NodeResource.</span>
+<span class=sd>            Returns None if the pilot is not in PMGR_ACTIVE state.</span>
+
+<span class=sd>    Note:</span>
+<span class=sd>        - Only returns nodelist when pilot is in active state</span>
+<span class=sd>        - Nodelist provides detailed resource information for each node</span>
+<span class=sd>        - Useful for resource-aware task scheduling and monitoring</span>
+<span class=sd>    """</span>
+
+    <span class=n>nodelist</span> <span class=o>=</span> <span class=kc>None</span>
+    <span class=k>if</span> <span class=bp>self</span><span class=o>.</span><span class=n>resource_pilot</span><span class=o>.</span><span class=n>state</span> <span class=o>==</span> <span class=n>rp</span><span class=o>.</span><span class=n>PMGR_ACTIVE</span><span class=p>:</span>
+        <span class=n>nodelist</span> <span class=o>=</span> <span class=bp>self</span><span class=o>.</span><span class=n>resource_pilot</span><span class=o>.</span><span class=n>nodelist</span>
+    <span class=k>return</span> <span class=n>nodelist</span>
+</code></pre></div></td></tr></tbody></table></div> </details> </div> </div> <div class="doc doc-object doc-function"> <h3 id=radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend.state class="doc doc-heading"> <code class="doc-symbol doc-symbol-heading doc-symbol-method"></code> <span class="doc doc-object-name doc-function-name">state</span> <a href=#radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend.state class=headerlink title="Permanent link">¶</a></h3> <div class="doc-signature highlight"><pre><span></span><code><span class=nf>state</span><span class=p>()</span>
+</code></pre></div> <div class="doc doc-contents "> <p>Retrieve resource pilot state.</p> <details class=quote> <summary>Source code in <code>doc_env/lib/python3.14/site-packages/radical/asyncflow/backends/execution/radical_pilot.py</code></summary> <div class=highlight><table class=highlighttable><tbody><tr><td class=linenos><div class=linenodiv><pre><span></span><span class=normal>668</span>
+<span class=normal>669</span>
+<span class=normal>670</span></pre></div></td><td class=code><div><pre><span></span><code><span class=k>def</span><span class=w> </span><span class=nf>state</span><span class=p>(</span><span class=bp>self</span><span class=p>):</span>
+<span class=w>    </span><span class=sd>"""Retrieve resource pilot state."""</span>
+    <span class=k>raise</span> <span class=ne>NotImplementedError</span>
+</code></pre></div></td></tr></tbody></table></div> </details> </div> </div> <div class="doc doc-object doc-function"> <h3 id=radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend.task_state_cb class="doc doc-heading"> <code class="doc-symbol doc-symbol-heading doc-symbol-method"></code> <span class="doc doc-object-name doc-function-name">task_state_cb</span> <a href=#radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend.task_state_cb class=headerlink title="Permanent link">¶</a></h3> <div class="doc-signature highlight"><pre><span></span><code><span class=nf>task_state_cb</span><span class=p>(</span><span class=n>task</span><span class=p>,</span> <span class=n>state</span><span class=p>)</span> <span class=o>-&gt;</span> <span class=kc>None</span>
+</code></pre></div> <div class="doc doc-contents "> <p>Handle task state changes.</p> <details class=quote> <summary>Source code in <code>doc_env/lib/python3.14/site-packages/radical/asyncflow/backends/execution/radical_pilot.py</code></summary> <div class=highlight><table class=highlighttable><tbody><tr><td class=linenos><div class=linenodiv><pre><span></span><span class=normal>672</span>
+<span class=normal>673</span>
+<span class=normal>674</span></pre></div></td><td class=code><div><pre><span></span><code><span class=k>def</span><span class=w> </span><span class=nf>task_state_cb</span><span class=p>(</span><span class=bp>self</span><span class=p>,</span> <span class=n>task</span><span class=p>,</span> <span class=n>state</span><span class=p>)</span> <span class=o>-&gt;</span> <span class=kc>None</span><span class=p>:</span>
+<span class=w>    </span><span class=sd>"""Handle task state changes."""</span>
+    <span class=k>raise</span> <span class=ne>NotImplementedError</span>
+</code></pre></div></td></tr></tbody></table></div> </details> </div> </div> <div class="doc doc-object doc-function"> <h3 id=radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend.shutdown class="doc doc-heading"> <code class="doc-symbol doc-symbol-heading doc-symbol-method"></code> <span class="doc doc-object-name doc-function-name">shutdown</span> <span class="doc doc-labels"> <small class="doc doc-label doc-label-async"><code>async</code></small> </span> <a href=#radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend.shutdown class=headerlink title="Permanent link">¶</a></h3> <div class="doc-signature highlight"><pre><span></span><code><span class=nf>shutdown</span><span class=p>()</span> <span class=o>-&gt;</span> <span class=kc>None</span>
+</code></pre></div> <div class="doc doc-contents "> <p>Gracefully shutdown the backend and clean up resources.</p> <p>Closes the RadicalPilot session with data download, ensuring proper cleanup of all resources including pilots, tasks, and session data.</p> <details class=note open> <summary>Note</summary> <ul> <li>Downloads session data before closing</li> <li>Ensures graceful termination of all backend resources</li> <li>Prints confirmation message when shutdown is triggered</li> </ul> </details> <details class=quote> <summary>Source code in <code>doc_env/lib/python3.14/site-packages/radical/asyncflow/backends/execution/radical_pilot.py</code></summary> <div class=highlight><table class=highlighttable><tbody><tr><td class=linenos><div class=linenodiv><pre><span></span><span class=normal>676</span>
+<span class=normal>677</span>
+<span class=normal>678</span>
+<span class=normal>679</span>
+<span class=normal>680</span>
+<span class=normal>681</span>
+<span class=normal>682</span>
+<span class=normal>683</span>
+<span class=normal>684</span>
+<span class=normal>685</span>
+<span class=normal>686</span>
+<span class=normal>687</span>
+<span class=normal>688</span></pre></div></td><td class=code><div><pre><span></span><code><span class=k>async</span> <span class=k>def</span><span class=w> </span><span class=nf>shutdown</span><span class=p>(</span><span class=bp>self</span><span class=p>)</span> <span class=o>-&gt;</span> <span class=kc>None</span><span class=p>:</span>
+<span class=w>    </span><span class=sd>"""Gracefully shutdown the backend and clean up resources.</span>
+
+<span class=sd>    Closes the RadicalPilot session with data download, ensuring proper</span>
+<span class=sd>    cleanup of all resources including pilots, tasks, and session data.</span>
+
+<span class=sd>    Note:</span>
+<span class=sd>        - Downloads session data before closing</span>
+<span class=sd>        - Ensures graceful termination of all backend resources</span>
+<span class=sd>        - Prints confirmation message when shutdown is triggered</span>
+<span class=sd>    """</span>
+    <span class=bp>self</span><span class=o>.</span><span class=n>session</span><span class=o>.</span><span class=n>close</span><span class=p>(</span><span class=n>download</span><span class=o>=</span><span class=kc>True</span><span class=p>)</span>
+    <span class=n>logger</span><span class=o>.</span><span class=n>info</span><span class=p>(</span><span class=s2>"Radical Pilot backend shutdown complete"</span><span class=p>)</span>
+</code></pre></div></td></tr></tbody></table></div> </details> </div> </div> <div class="doc doc-object doc-function"> <h3 id=radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend.__aenter__ class="doc doc-heading"> <code class="doc-symbol doc-symbol-heading doc-symbol-method"></code> <span class="doc doc-object-name doc-function-name">__aenter__</span> <span class="doc doc-labels"> <small class="doc doc-label doc-label-async"><code>async</code></small> </span> <a href=#radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend.__aenter__ class=headerlink title="Permanent link">¶</a></h3> <div class="doc-signature highlight"><pre><span></span><code><span class=nf>__aenter__</span><span class=p>()</span>
+</code></pre></div> <div class="doc doc-contents "> <p>Async context manager entry.</p> <details class=quote> <summary>Source code in <code>doc_env/lib/python3.14/site-packages/radical/asyncflow/backends/execution/radical_pilot.py</code></summary> <div class=highlight><table class=highlighttable><tbody><tr><td class=linenos><div class=linenodiv><pre><span></span><span class=normal>690</span>
+<span class=normal>691</span>
+<span class=normal>692</span>
+<span class=normal>693</span>
+<span class=normal>694</span></pre></div></td><td class=code><div><pre><span></span><code><span class=k>async</span> <span class=k>def</span><span class=w> </span><span class=fm>__aenter__</span><span class=p>(</span><span class=bp>self</span><span class=p>):</span>
+<span class=w>    </span><span class=sd>"""Async context manager entry."""</span>
+    <span class=k>if</span> <span class=ow>not</span> <span class=bp>self</span><span class=o>.</span><span class=n>_initialized</span><span class=p>:</span>
+        <span class=k>await</span> <span class=bp>self</span><span class=o>.</span><span class=n>_async_init</span><span class=p>()</span>
+    <span class=k>return</span> <span class=bp>self</span>
+</code></pre></div></td></tr></tbody></table></div> </details> </div> </div> <div class="doc doc-object doc-function"> <h3 id=radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend.__aexit__ class="doc doc-heading"> <code class="doc-symbol doc-symbol-heading doc-symbol-method"></code> <span class="doc doc-object-name doc-function-name">__aexit__</span> <span class="doc doc-labels"> <small class="doc doc-label doc-label-async"><code>async</code></small> </span> <a href=#radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend.__aexit__ class=headerlink title="Permanent link">¶</a></h3> <div class="doc-signature highlight"><pre><span></span><code><span class=nf>__aexit__</span><span class=p>(</span><span class=n>exc_type</span><span class=p>,</span> <span class=n>exc_val</span><span class=p>,</span> <span class=n>exc_tb</span><span class=p>)</span> <span class=o>-&gt;</span> <span class=kc>None</span>
+</code></pre></div> <div class="doc doc-contents "> <p>Async context manager exit.</p> <details class=quote> <summary>Source code in <code>doc_env/lib/python3.14/site-packages/radical/asyncflow/backends/execution/radical_pilot.py</code></summary> <div class=highlight><table class=highlighttable><tbody><tr><td class=linenos><div class=linenodiv><pre><span></span><span class=normal>696</span>
+<span class=normal>697</span>
+<span class=normal>698</span></pre></div></td><td class=code><div><pre><span></span><code><span class=k>async</span> <span class=k>def</span><span class=w> </span><span class=fm>__aexit__</span><span class=p>(</span><span class=bp>self</span><span class=p>,</span> <span class=n>exc_type</span><span class=p>,</span> <span class=n>exc_val</span><span class=p>,</span> <span class=n>exc_tb</span><span class=p>)</span> <span class=o>-&gt;</span> <span class=kc>None</span><span class=p>:</span>
+<span class=w>    </span><span class=sd>"""Async context manager exit."""</span>
+    <span class=k>await</span> <span class=bp>self</span><span class=o>.</span><span class=n>shutdown</span><span class=p>()</span>
+</code></pre></div></td></tr></tbody></table></div> </details> </div> </div> <div class="doc doc-object doc-function"> <h3 id=radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend.create class="doc doc-heading"> <code class="doc-symbol doc-symbol-heading doc-symbol-method"></code> <span class="doc doc-object-name doc-function-name">create</span> <span class="doc doc-labels"> <small class="doc doc-label doc-label-async"><code>async</code></small> <small class="doc doc-label doc-label-classmethod"><code>classmethod</code></small> </span> <a href=#radical.asyncflow.backends.execution.radical_pilot.RadicalExecutionBackend.create class=headerlink title="Permanent link">¶</a></h3> <div class="doc-signature highlight"><pre><span></span><code><span class=nf>create</span><span class=p>(</span><span class=n>resources</span><span class=p>:</span> <span class=n><span title=dict>dict</span></span><span class=p>,</span> <span class=n>raptor_config</span><span class=p>:</span> <span class=n><span title=typing.Optional>Optional</span></span><span class=p>[</span><span class=n><span title=dict>dict</span></span><span class=p>]</span> <span class=o>=</span> <span class=kc>None</span><span class=p>)</span>
+</code></pre></div> <div class="doc doc-contents "> <p>Create initialized backend.</p> <p><span class=doc-section-title>Parameters:</span></p> <table> <thead> <tr> <th>Name</th> <th>Type</th> <th>Description</th> <th>Default</th> </tr> </thead> <tbody> <tr class=doc-section-item> <td> <code>resources</code> </td> <td> <code><span title=dict>dict</span></code> </td> <td> <div class=doc-md-description> <p>Radical Pilot configuration.</p> </div> </td> <td> <em>required</em> </td> </tr> <tr class=doc-section-item> <td> <code>raptor_config</code> </td> <td> <code><span title=typing.Optional>Optional</span>[<span title=dict>dict</span>]</code> </td> <td> <div class=doc-md-description> <p>Optional Raptor mode configuration.</p> </div> </td> <td> <code>None</code> </td> </tr> </tbody> </table> <p><span class=doc-section-title>Returns:</span></p> <table> <thead> <tr> <th>Type</th> <th>Description</th> </tr> </thead> <tbody> <tr class=doc-section-item> <td> </td> <td> <div class=doc-md-description> <p>Initialized RadicalExecutionBackend instance.</p> </div> </td> </tr> </tbody> </table> <details class=quote> <summary>Source code in <code>doc_env/lib/python3.14/site-packages/radical/asyncflow/backends/execution/radical_pilot.py</code></summary> <div class=highlight><table class=highlighttable><tbody><tr><td class=linenos><div class=linenodiv><pre><span></span><span class=normal>700</span>
+<span class=normal>701</span>
+<span class=normal>702</span>
+<span class=normal>703</span>
+<span class=normal>704</span>
+<span class=normal>705</span>
+<span class=normal>706</span>
+<span class=normal>707</span>
+<span class=normal>708</span>
+<span class=normal>709</span>
+<span class=normal>710</span>
+<span class=normal>711</span>
+<span class=normal>712</span></pre></div></td><td class=code><div><pre><span></span><code><span class=nd>@classmethod</span>
+<span class=k>async</span> <span class=k>def</span><span class=w> </span><span class=nf>create</span><span class=p>(</span><span class=bp>cls</span><span class=p>,</span> <span class=n>resources</span><span class=p>:</span> <span class=nb>dict</span><span class=p>,</span> <span class=n>raptor_config</span><span class=p>:</span> <span class=n>Optional</span><span class=p>[</span><span class=nb>dict</span><span class=p>]</span> <span class=o>=</span> <span class=kc>None</span><span class=p>):</span>
+<span class=w>    </span><span class=sd>"""Create initialized backend.</span>
+
+<span class=sd>    Args:</span>
+<span class=sd>        resources: Radical Pilot configuration.</span>
+<span class=sd>        raptor_config: Optional Raptor mode configuration.</span>
+
+<span class=sd>    Returns:</span>
+<span class=sd>        Initialized RadicalExecutionBackend instance.</span>
+<span class=sd>    """</span>
+    <span class=n>backend</span> <span class=o>=</span> <span class=bp>cls</span><span class=p>(</span><span class=n>resources</span><span class=p>,</span> <span class=n>raptor_config</span><span class=p>)</span>
+    <span class=k>return</span> <span class=k>await</span> <span class=n>backend</span>
+</code></pre></div></td></tr></tbody></table></div> </details> </div> </div> </div> </div> </div> <div class="doc doc-object doc-function"> <h2 id=radical.asyncflow.backends.execution.radical_pilot.service_ready_callback class="doc doc-heading"> <code class="doc-symbol doc-symbol-heading doc-symbol-function"></code> <span class="doc doc-object-name doc-function-name">service_ready_callback</span> <a href=#radical.asyncflow.backends.execution.radical_pilot.service_ready_callback class=headerlink title="Permanent link">¶</a></h2> <div class="doc-signature highlight"><pre><span></span><code><span class=nf>service_ready_callback</span><span class=p>(</span><span class=n>future</span><span class=p>:</span> <span class=n><span title=asyncio.Future>Future</span></span><span class=p>,</span> <span class=n>task</span><span class=p>,</span> <span class=n>state</span><span class=p>)</span> <span class=o>-&gt;</span> <span class=kc>None</span>
+</code></pre></div> <div class="doc doc-contents "> <p>Callback for handling service task readiness.</p> <p>Runs wait_info() in a daemon thread to avoid blocking execution flow.</p> <p><span class=doc-section-title>Parameters:</span></p> <table> <thead> <tr> <th>Name</th> <th>Type</th> <th>Description</th> <th>Default</th> </tr> </thead> <tbody> <tr class=doc-section-item> <td> <code>future</code> </td> <td> <code><span title=asyncio.Future>Future</span></code> </td> <td> <div class=doc-md-description> <p>Future object to set result or exception.</p> </div> </td> <td> <em>required</em> </td> </tr> <tr class=doc-section-item> <td> <code>task</code> </td> <td> </td> <td> <div class=doc-md-description> <p>Task with wait_info() method.</p> </div> </td> <td> <em>required</em> </td> </tr> <tr class=doc-section-item> <td> <code>state</code> </td> <td> </td> <td> <div class=doc-md-description> <p>Current task state (unused).</p> </div> </td> <td> <em>required</em> </td> </tr> </tbody> </table> <details class=quote> <summary>Source code in <code>doc_env/lib/python3.14/site-packages/radical/asyncflow/backends/execution/radical_pilot.py</code></summary> <div class=highlight><table class=highlighttable><tbody><tr><td class=linenos><div class=linenodiv><pre><span></span><span class=normal>26</span>
+<span class=normal>27</span>
+<span class=normal>28</span>
+<span class=normal>29</span>
+<span class=normal>30</span>
+<span class=normal>31</span>
+<span class=normal>32</span>
+<span class=normal>33</span>
+<span class=normal>34</span>
+<span class=normal>35</span>
+<span class=normal>36</span>
+<span class=normal>37</span>
+<span class=normal>38</span>
+<span class=normal>39</span>
+<span class=normal>40</span>
+<span class=normal>41</span>
+<span class=normal>42</span>
+<span class=normal>43</span>
+<span class=normal>44</span></pre></div></td><td class=code><div><pre><span></span><code><span class=k>def</span><span class=w> </span><span class=nf>service_ready_callback</span><span class=p>(</span><span class=n>future</span><span class=p>:</span> <span class=n>asyncio</span><span class=o>.</span><span class=n>Future</span><span class=p>,</span> <span class=n>task</span><span class=p>,</span> <span class=n>state</span><span class=p>)</span> <span class=o>-&gt;</span> <span class=kc>None</span><span class=p>:</span>
+<span class=w>    </span><span class=sd>"""Callback for handling service task readiness.</span>
+
+<span class=sd>    Runs wait_info() in a daemon thread to avoid blocking execution flow.</span>
+
+<span class=sd>    Args:</span>
+<span class=sd>        future: Future object to set result or exception.</span>
+<span class=sd>        task: Task with wait_info() method.</span>
+<span class=sd>        state: Current task state (unused).</span>
+<span class=sd>    """</span>
+
+    <span class=k>def</span><span class=w> </span><span class=nf>wait_and_set</span><span class=p>()</span> <span class=o>-&gt;</span> <span class=kc>None</span><span class=p>:</span>
+        <span class=k>try</span><span class=p>:</span>
+            <span class=n>info</span> <span class=o>=</span> <span class=n>task</span><span class=o>.</span><span class=n>wait_info</span><span class=p>()</span>  <span class=c1># synchronous call</span>
+            <span class=n>future</span><span class=o>.</span><span class=n>set_result</span><span class=p>(</span><span class=n>info</span><span class=p>)</span>
+        <span class=k>except</span> <span class=ne>Exception</span> <span class=k>as</span> <span class=n>e</span><span class=p>:</span>
+            <span class=n>future</span><span class=o>.</span><span class=n>set_exception</span><span class=p>(</span><span class=n>e</span><span class=p>)</span>
+
+    <span class=n>threading</span><span class=o>.</span><span class=n>Thread</span><span class=p>(</span><span class=n>target</span><span class=o>=</span><span class=n>wait_and_set</span><span class=p>,</span> <span class=n>daemon</span><span class=o>=</span><span class=kc>True</span><span class=p>)</span><span class=o>.</span><span class=n>start</span><span class=p>()</span>
+</code></pre></div></td></tr></tbody></table></div> </details> </div> </div> </div> </div> </div> </article> </div> <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var tab,labels=set.querySelector(".tabbed-labels");for(tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script> <script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script> </div> <button type=button class="md-top md-icon" data-md-component=top hidden> <svg xmlns=http://www.w3.org/2000/svg viewbox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8v12Z"></path></svg> Back to top </button> </main> <footer class=md-footer> <div class="md-footer-meta md-typeset"> <div class="md-footer-meta__inner md-grid"> <div class=md-copyright> Made with <a href=https://squidfunk.github.io/mkdocs-material/ target=_blank rel=noopener> Material for MkDocs </a> </div> </div> </div> </footer> </div> <div class=md-dialog data-md-component=dialog> <div class="md-dialog__inner md-typeset"></div> </div> <script id=__config type=application/json>{"base": "../../../../../..", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.top", "navigation.instant", "toc.integrate", "header.autohide", "search.highlight", "search.share", "search.suggest", "content.code.annotate", "content.tooltips", "content.tabs.link", "content.code.copy"], "search": "../../../../../../assets/javascripts/workers/search.b8dbb3d2.min.js", "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}}</script> <script src=../../../../../../assets/javascripts/bundle.8fd75fb4.min.js></script> <script src=https://unpkg.com/mermaid@10/dist/mermaid.min.js></script> <script id=init-glightbox>const lightbox = GLightbox({"touchNavigation": true, "loop": false, "zoomable": true, "draggable": true, "openEffect": "zoom", "closeEffect": "zoom", "slideEffect": "slide"});
+document$.subscribe(()=>{ lightbox.reload(); });
+</script></body></html>
