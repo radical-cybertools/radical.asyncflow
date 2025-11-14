@@ -179,7 +179,7 @@ class RadicalExecutionBackend(BaseExecutionBackend):
             self.resource_pilot = self.pilot_manager.submit_pilots(
                 rp.PilotDescription(self.resources)
             )
-            self.pilot_manager.register_callback(self.register_pilot_callback)
+            self.pilot_manager.register_callback(self.handle_pilot_state_callback)
 
             self.task_manager.add_pilots(self.resource_pilot)
             self._callback_func: Callable[[asyncio.Future], None] = lambda f: None
@@ -319,7 +319,7 @@ class RadicalExecutionBackend(BaseExecutionBackend):
             yield masters_uids[current_master]
             current_master = (current_master + 1) % len(self.masters)
 
-    def register_pilot_callback(self, pilot, state) -> None:
+    def handle_pilot_state_callback(self, pilot, state) -> None:
         """Handle pilot state changes and ensure task callbacks are fired."""
         # For some reason radical.pilot reports
         # twice that the pilot has failed
