@@ -41,10 +41,12 @@ async def main():
         return t3_result
 
     # Run workflows concurrently
-    await asyncio.gather(*[run_wf(i) for i in range(10)])
-
-    await flow.shutdown()
-
+    try:
+        await asyncio.gather(*[run_wf(i) for i in range(10)])
+    except Exception as e:
+        raise
+    finally:
+        await flow.shutdown()
 
 if __name__ == "__main__":
     asyncio.run(main())
