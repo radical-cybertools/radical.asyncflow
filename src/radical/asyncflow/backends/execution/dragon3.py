@@ -163,69 +163,48 @@ class DragonExecutionBackend(BaseExecutionBackend):
         )
 
     async def _create_batch_task(self, task: dict):
-        """Create a single Batch task (don't start it)."""
-        uid = task['uid']
-        task_type = task.get('task_type', 'function')
-
-        # Get target
-        if task_type == 'executable':
-            target = task.get('executable') or task.get('target')
-        else:
-            target = task.get('target') or task.get('function')
-
-        if not target:
-            raise ValueError(f"Task {uid} missing target")
-        
-        args = task.get('args', [])
-        kwargs = task.get('kwargs', {})
-        timeout = task.get('timeout')
-        name = task.get('name', uid)
-        
-        # Create Batch task
-        if task_type == 'function':
-            # Handle async functions
-            if asyncio.iscoroutinefunction(target):
-                def make_wrapper(async_func):
-                    def wrapper(*args, **kwargs):
-                        return asyncio.run(async_func(*args, **kwargs))
-                    return wrapper
-                target = make_wrapper(target)
+            """Create a single Batch task (don't start it)."""
+            uid = task['uid']
+            is_function = bool(task.get("function"))
+            target = task.get('function' if is_function else 'executable')
             
-            batch_task = self.batch.function(
-                target, *args, name=name, timeout=timeout or 3600, **kwargs
-            )
-        
-        elif task_type == 'executable':
-            batch_task = self.batch.process(
-                ProcessTemplate(target=target, args=args, **kwargs),
-                name=name,
-                timeout=timeout or 3600
-            )
+            if not target:
+                raise ValueError(f"Task {uid} missing target")
 
-        elif task_type == 'job':
-            num_ranks = task.get('num_ranks', 1)
-            templates = task.get('process_templates')
-            if not templates:
-                templates = [(num_ranks, ProcessTemplate(target=target, args=args, **kwargs))]
+            args = task.get('args', [])
+            kwargs = task.get('kwargs', {})
+            backend_kwargs = task.get("task_backend_specific_kwargs", {})
             
-            batch_task = self.batch.job(
-                process_templates=templates,
-                name=name,
-                timeout=timeout or 7200
-            )
-        else:
-            raise ValueError(f"Unknown task type: {task_type}")
-        
-        # Register
-        self._task_registry[uid] = {
-            'uid': uid,
-            'description': task.copy(),
-            'batch_task': batch_task,
-        }
-        
-        logger.debug(f"Created {task_type} task: {uid}")
-        
-        return batch_task
+            is_mpi = backend_kwargs.get('type') == 'mpi'
+            timeout = backend_kwargs.get('timeout', 1000000000.0)
+            name = task.get('name', uid)
+
+            # Wrap async functions
+            if is_function and asyncio.iscoroutinefunction(target):
+                original_target = target
+                target = lambda *a, **kw: asyncio.run(original_target(*a, **kw))
+
+            # Create appropriate batch task
+            if is_mpi:
+                templates = task.get('process_templates') or [
+                    (task.get('ranks', 2), ProcessTemplate(target=target, args=args, **kwargs))
+                ]
+                batch_task = self.batch.job(templates, name=name, timeout=timeout)
+            elif is_function:
+                batch_task = self.batch.function(target, *args, name=name, timeout=timeout, **kwargs)
+            else:
+                batch_task = self.batch.process(ProcessTemplate(target=target, args=args, **kwargs), 
+                                            name=name, timeout=timeout)
+
+            # Register and return
+            self._task_registry[uid] = {
+                'uid': uid,
+                'description': task.copy(),
+                'batch_task': batch_task,
+            }
+
+            logger.debug(f"Created {'function' if is_function else 'executable'} task: {uid} (MPI: {is_mpi})")
+            return batch_task
     
     def build_task(self, task: dict) -> None:
         pass
