@@ -150,6 +150,11 @@ class RadicalExecutionBackend(BaseExecutionBackend):
         self.raptor_config = raptor_config or {}
         self._initialized = False
 
+        # This will allow us to have better control
+        # on the error coming from the pilot object
+        if "exit_on_error" not in self.resources:
+            self.resources["exit_on_error"] = False
+
     def __await__(self):
         """Make RadicalExecutionBackend awaitable."""
         return self._async_init().__await__()
@@ -174,6 +179,8 @@ class RadicalExecutionBackend(BaseExecutionBackend):
             self.resource_pilot = self.pilot_manager.submit_pilots(
                 rp.PilotDescription(self.resources)
             )
+            self.pilot_manager.register_callback(self.handle_pilot_state_callback)
+
             self.task_manager.add_pilots(self.resource_pilot)
             self._callback_func: Callable[[asyncio.Future], None] = lambda f: None
 
@@ -190,14 +197,14 @@ class RadicalExecutionBackend(BaseExecutionBackend):
                 running_state=rp.AGENT_EXECUTING,
             )
 
-            logger.info("RadicalPilot execution backend started successfully\n")
+            logger.info("RadicalPilot execution backend started successfully")
 
-        except Exception:
-            logger.exception("RadicalPilot backend failed to start, terminating\n")
+        except Exception as e:
+            logger.exception(f"RadicalPilot execution backend failed: {e}, terminating")
             raise
 
         except (KeyboardInterrupt, SystemExit) as e:
-            msg = f"Radical backend failed, check {self.session.path}"
+            msg = f"Radical execution backend failed: {e}, check {self.session.path}"
             raise SystemExit(msg) from e
 
     def get_task_states_map(self) -> StateMapper:
@@ -311,6 +318,33 @@ class RadicalExecutionBackend(BaseExecutionBackend):
         while True:
             yield masters_uids[current_master]
             current_master = (current_master + 1) % len(self.masters)
+
+    def handle_pilot_state_callback(self, pilot, state) -> None:
+        """Handle pilot state changes and ensure task callbacks are fired."""
+        # For some reason radical.pilot reports
+        # twice that the pilot has failed
+        if state == rp.FAILED:
+            if hasattr(self, "_pilot_failed"):
+                return
+
+            logger.error(f"{pilot.uid} has failed: {pilot}")
+            self._pilot_failed = True
+
+            try:
+                # Get actual task objects from task manager
+                tasks_ids = list(self.tasks.keys())
+                rp_tasks = self.task_manager.get_tasks(tasks_ids)
+
+                if not rp_tasks:
+                    return
+
+                # Fire callbacks for all non-DONE tasks
+                # This ensures WorkflowEngine is notified
+                for task in rp_tasks:
+                    if task.state != rp.DONE:
+                        self._callback_func(task, rp.FAILED)
+            except Exception as e:
+                logger.exception(f"Error handling pilot failure: {e}")
 
     def register_callback(self, func: Callable) -> None:
         """Register a callback function for task state changes.

@@ -91,14 +91,13 @@ The `-e` flag installs it in *editable mode* — any local changes you make to t
 ---
 
 !!! tip
+  * Always activate your virtual environment before using AsyncFlow.
+  * To deactivate an environment:
 
-* Always activate your virtual environment before using AsyncFlow.
-* To deactivate an environment:
-
-  * `conda deactivate` (Conda)
-  * `deactivate` (`venv`)
-* You can list installed packages with `pip list`.
-* It is a good practice to upgrade `pip` and `setuptools`:
+    * `conda deactivate` (Conda)
+    * `deactivate` (`venv`)
+  * You can list installed packages with `pip list`.
+  * It is a good practice to upgrade `pip` and `setuptools`:
 
   ```bash
   pip install --upgrade pip setuptools

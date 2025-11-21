@@ -65,9 +65,9 @@ async def task3(t1_result, t2_result):
 ```
 
 !!! note  
-- `task3` depends on the outputs of `task1` and `task2`.
-- You express this dependency by calling `task3(task1(), task2())`.
-- `task1` and `task2` will be automatically resolved during runtime and their values will be assigned to `task3` accordingly.
+    - `task3` depends on the outputs of `task1` and `task2`.
+    - You express this dependency by calling `task3(task1(), task2())`.
+    - `task1` and `task2` will be automatically resolved during runtime and their values will be assigned to `task3` accordingly.
 
 ---
 
@@ -114,8 +114,7 @@ Here’s an example of the output you might see:
 ---
 
 !!! warning 
-
-Make sure to **await the shutdown** of the `WorkflowEngine` before your script exits. Otherwise, resources may leak.
+    Make sure to **await the shutdown** of the `WorkflowEngine` before your script exits. Otherwise, resources may leak.
 
 ---
 

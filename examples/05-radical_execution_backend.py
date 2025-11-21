@@ -12,7 +12,7 @@ async def main():
     init_default_logger(logging.INFO)
 
     # Create backend and workflow
-    backend = await RadicalExecutionBackend({"resource": "local.localhost"})
+    backend = await RadicalExecutionBackend({"nodes": 1, "resource": "local.localhost"})
     flow = await WorkflowEngine.create(backend=backend)
 
     task1_resources = {"ranks": 1, "gpus_per_rank": 1}
@@ -41,10 +41,12 @@ async def main():
         return t3_result
 
     # Run workflows concurrently
-    await asyncio.gather(*[run_wf(i) for i in range(10)])
-
-    await flow.shutdown()
-
+    try:
+        await asyncio.gather(*[run_wf(i) for i in range(10)])
+    except Exception as e:
+        raise
+    finally:
+        await flow.shutdown()
 
 if __name__ == "__main__":
     asyncio.run(main())
