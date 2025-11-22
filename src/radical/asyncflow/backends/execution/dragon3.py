@@ -163,93 +163,91 @@ class DragonExecutionBackend(BaseExecutionBackend):
         )
 
     async def build_task(self, task: dict):
-        # 1. Extract basics
+        """
+        Translate AsyncFlow task to Dragon Batch task.
+        
+        Translation Priority (in order):
+        1. If process_templates (list) provided → Job mode (ignore type='mpi', ignore ranks) [function/executable]
+        2. If process_template (single) provided → Process mode [function/executable]
+        3. If type='mpi' AND ranks provided (no templates) → Job mode (auto-build) [function/executable]
+        4. If is_function (no templates, no MPI) → Function mode (native) [function only]
+        5. If is_executable (no templates, no MPI) → Process mode (auto-build) [executable only]
+
+        Execution Modes:
+        - Function Native: batch.function() - direct Python function call
+        - Function Process: batch.process() - function wrapped in ProcessTemplate
+        - Function Job: batch.job() - function in MPI job with multiple ranks
+        - Executable Process: batch.process() - single executable process
+        - Executable Job: batch.job() - executable in MPI job with multiple ranks
+
+        """
+        # Fast path: extract everything upfront
         uid = task['uid']
         is_function = bool(task.get("function"))
         target = task.get('function' if is_function else 'executable')
-        
-        # 2. Get execution parameters
         backend_kwargs = task.get("task_backend_specific_kwargs", {})
-        
-        # 3. Get task-level args and kwargs (these take priority)
         name = task.get('name', uid)
         task_args = task.get('args', [])
         task_kwargs = task.get('kwargs', {})
-        
-        # Ranks for auto-build case only
-        nranks = backend_kwargs.get('ranks', 0)
         timeout = backend_kwargs.get('timeout', 1000000000.0)
-
-        # 4. Handle async functions
+        
+        # Handle async functions
         if is_function and asyncio.iscoroutinefunction(target):
             original_target = target
             target = lambda *a, **kw: asyncio.run(original_target(*a, **kw))
-
-        # 5. Check if user provided template configs
-        process_template_config = backend_kwargs.get('process_template')
+        
+        # Get template configs once
         process_templates_config = backend_kwargs.get('process_templates')
-
-        # Determine if this is MPI/job mode
-        is_mpi = backend_kwargs.get('type') == 'mpi' or process_templates_config is not None
-
-        # 6. Build ProcessTemplate(s)
-        process_template = None
-        process_templates = None
-
-        if process_template_config:
-            # Single template config - override args/kwargs
-            template_params = process_template_config.copy()
-            template_params['args'] = task_args
-            template_params['kwargs'] = task_kwargs
-            process_template = ProcessTemplate(target, **template_params)
+        process_template_config = backend_kwargs.get('process_template')
         
-        elif process_templates_config:
-            # User must provide list of (nranks, template_config_dict) tuples
-            process_templates = []
-            for nranks_user, template_config in process_templates_config:
-                template_params = template_config.copy()
-                template_params['args'] = task_args
-                template_params['kwargs'] = task_kwargs
-
-                logger.debug(f"Creating ProcessTemplate with target={target}, params={template_params}")
-                process_templates.append((nranks_user, ProcessTemplate(target, **template_params)))
-
-        else:
-            # No templates provided - auto-build
-            if is_mpi:
-                # Auto-build: use ranks from backend_kwargs (0 if not provided - Dragon will error)
-                process_templates = [
-                    (nranks, ProcessTemplate(target, args=task_args, kwargs=task_kwargs))
-                ]
-            elif not is_function:
-                # Auto-build single template for executable
-                process_template = ProcessTemplate(target, args=task_args, kwargs=task_kwargs)
-        
-        # 7. Route based on what's available
-        if is_mpi or process_templates:
-            # Mode 3: MPI job
+        # Single decision tree - no redundant checks
+        if process_templates_config:
+            # Priority 1: Job with user templates
+            process_templates = [
+                (nranks, ProcessTemplate(target, **{**tc, 'args': task_args, 'kwargs': task_kwargs}))
+                for nranks, tc in process_templates_config
+            ]
             batch_task = self.batch.job(process_templates, name=name, timeout=timeout)
             execution_mode = 'job'
         
-        elif process_template:
-            # Mode 2: Single process
-            batch_task = self.batch.process(process_template, name=name, timeout=timeout)
+        elif process_template_config:
+            # Priority 2: Process with user template
+            batch_task = self.batch.process(
+                ProcessTemplate(target, **{**process_template_config, 'args': task_args, 'kwargs': task_kwargs}),
+                name=name, timeout=timeout
+            )
             execution_mode = 'process'
         
-        else:
-            # Mode 1: Direct function call
+        elif backend_kwargs.get('type') == 'mpi':
+            # Priority 3: Job auto-build
+            batch_task = self.batch.job(
+                [(backend_kwargs.get('ranks', 1), ProcessTemplate(target, args=task_args, kwargs=task_kwargs))],
+                name=name, timeout=timeout
+            )
+            execution_mode = 'job'
+        
+        elif is_function:
+            # Priority 4: Function native
             batch_task = self.batch.function(target, *task_args, name=name, timeout=timeout, **task_kwargs)
             execution_mode = 'function'
         
-        # 8. Register and return
+        else:
+            # Priority 5: Executable process auto-build
+            batch_task = self.batch.process(
+                ProcessTemplate(target, args=task_args, kwargs=task_kwargs),
+                name=name, timeout=timeout
+            )
+            execution_mode = 'process'
+        
+        # Register and return
         self._task_registry[uid] = {
             'uid': uid,
             'description': task.copy(),
             'batch_task': batch_task,
         }
 
-        logger.debug(f"Created {execution_mode} task: {uid} (function: {is_function}, mpi: {is_mpi})")
-        
+        logger.debug(f"Created {execution_mode} task: {uid}")
+
         return batch_task
     
     def link_implicit_data_deps(self, src_task, dst_task):
