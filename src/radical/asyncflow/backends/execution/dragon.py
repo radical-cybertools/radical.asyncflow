@@ -3,6 +3,7 @@ import logging
 import os
 import time
 import sys
+import shlex
 import uuid
 import threading
 from typing import Any, Callable, Optional, Dict, List, Tuple
@@ -2778,6 +2779,7 @@ class DragonExecutionBackendV3(BaseExecutionBackend):
         self._callback = None
         self._task_registry: Dict[str, Any] = {}
         self._task_states = TaskStateMapperV3()
+        self._initialized = False
 
         # Thread pool for waiting on batches
         self._wait_executor = ThreadPoolExecutor(
@@ -2791,6 +2793,23 @@ class DragonExecutionBackendV3(BaseExecutionBackend):
             f"DragonExecutionBackendV3: {self.batch.num_workers} workers, "
             f"{self.batch.num_managers} managers"
         )
+
+    def __await__(self):
+        return self._async_init().__await__()
+
+    async def _async_init(self):
+        if not self._initialized:
+            try:
+                logger.debug("Starting Dragon backend V3 async initialization...")
+                self._initialized = True
+                logger.debug("Dragon backend V3 initialization completed, registering with StateMapper...")
+                StateMapper.register_backend_states_with_defaults(backend=self)
+                logger.debug("Dragon backend V3 fully initialized")
+            except Exception as e:
+                logger.exception(f"Dragon backend V3 initialization failed: {e}")
+                self._initialized = False
+                raise
+        return self
 
     def _wait_for_batch(self, compiled_tasks, task_uids: List[str]):
         """
@@ -2910,6 +2929,12 @@ class DragonExecutionBackendV3(BaseExecutionBackend):
         process_templates_config = backend_kwargs.get('process_templates')
         process_template_config = backend_kwargs.get('process_template')
 
+        if not is_function:
+            task_kwargs = None
+            parts = shlex.split(target)
+            target = parts[0]
+            task_args = tuple(parts[1:]) if len(parts) > 1 else ()
+
         # Single decision tree - no redundant checks
         if process_templates_config:
             # Priority 1: Job with user templates
@@ -3017,3 +3042,20 @@ class DragonExecutionBackendV3(BaseExecutionBackend):
 
     def create_ddict(self, *args, **kwargs):
         return self.batch.ddict(*args, **kwargs)
+
+    @classmethod
+    async def create(
+        cls,
+        num_workers: Optional[int] = None,
+        working_directory: Optional[str] = None,
+        disable_background_batching: bool = False,
+        disable_telemetry: bool = False,
+    ):
+        """Create and initialize a DragonExecutionBackendV3."""
+        backend = cls(
+            num_workers=num_workers,
+            working_directory=working_directory,
+            disable_background_batching=disable_background_batching,
+            disable_telemetry=disable_telemetry,
+        )
+        return await backend

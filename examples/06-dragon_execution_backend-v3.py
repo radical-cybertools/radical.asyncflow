@@ -27,7 +27,7 @@ async def main():
 
     # Create Dragon Batch backend (4 nodes with 128 workers each)
     nodes = 1
-    backend = DragonExecutionBackendV3(
+    backend = await DragonExecutionBackendV3(
         num_workers=nodes * mp.cpu_count(),
         disable_background_batching=False
     )
@@ -39,12 +39,12 @@ async def main():
     # Single-process executable task
     @flow.executable_task
     async def single_executable(*args, task_description={'process_template': {}}):
-        return "/bin/bash"
+        return "/bin/bash -c 'echo $HOSTNAME'"
 
     # Parallel-process executable task (2 processes)
     @flow.executable_task
     async def parallel_executable(*args, task_description={'process_templates': [(2, {}), (2, {})]}):
-        return "/bin/bash"
+        return "/bin/bash -c 'echo $HOSTNAME'"
 
     # Single-process function task
     @flow.function_task
