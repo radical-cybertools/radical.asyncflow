@@ -543,6 +543,7 @@ def _executable_wrapper_v1(result_queue: Queue, executable: str, args: list, tas
             [executable] + args,
             cwd=working_dir,
             capture_output=True,
+            shell=True,
             text=True,
             timeout=3600  # 1 hour timeout
         )
@@ -1019,6 +1020,7 @@ def _worker_loop_v2(worker_id: int, worker_name: str, input_queue: Queue, output
                         cwd=request.working_dir,
                         capture_output=True,
                         text=True,
+                        shell=True,
                         timeout=3600 # FIXME: should be user defined
                     )
 
@@ -3007,6 +3009,9 @@ class DragonExecutionBackendV3(BaseExecutionBackend):
         if uid not in self._task_registry:
             raise ValueError(f"Task {uid} not found")
 
+        # NOTE: dragon.batch does not expose nor support
+        # process/function/job cancellation, we just notify
+        # the asyncflow that the task is cancelled so not to block the flow
         self._callback(self._task_registry[uid]['description'], 'CANCELED')
         return True
 
