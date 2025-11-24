@@ -71,8 +71,8 @@ async def main():
     # Execute all task types concurrently
 
     results = await asyncio.gather(
-        single_executable('-c', 'echo', '$RANDOM'),
-        parallel_executable('-c', 'echo', '$RANDOM'),
+        single_executable(),
+        parallel_executable(),
         single_function(),
         parallel_function(),
         native_function()

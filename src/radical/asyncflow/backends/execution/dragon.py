@@ -2782,11 +2782,12 @@ class DragonExecutionBackendV3(BaseExecutionBackend):
         self._task_registry: Dict[str, Any] = {}
         self._task_states = TaskStateMapperV3()
         self._initialized = False
+        self._cancelled_tasks = []
 
         # Thread pool for waiting on batches
         self._wait_executor = ThreadPoolExecutor(
-            max_workers=32,  # Can handle many concurrent batches
-            thread_name_prefix="batch-wait"
+            max_workers=max(8, mp.cpu_count() // 8),
+            thread_name_prefix="dragon_batch_wait"
         )
 
         self._shutdown_event = threading.Event()
@@ -2828,29 +2829,47 @@ class DragonExecutionBackendV3(BaseExecutionBackend):
                 task_info = self._task_registry.get(uid)
                 if not task_info:
                     continue
+                
+                if uid in self._cancelled_tasks:
+                    continue
 
                 batch_task = task_info['batch_task']
                 task_desc = task_info['description']
 
                 try:
-                    # Get result - instant after wait()
-                    task_desc['stdout'] = batch_task.stdout.get()
-                    task_desc['return_value'] = batch_task.result.get()
+                    # Always try to get stdout first (success/failure)
+                    # May be None for failed Python functions
+                    stdout = batch_task.stdout.get()
+                    task_desc['stdout'] = stdout if stdout is not None else ""
+
+                    # This raises if task failed
+                    result = batch_task.result.get()
+                    task_desc['return_value'] = result
                     self._callback(task_desc, 'DONE')
+
                 except Exception as e:
-                    # Task failed
+                    # Task failed - result.get() raised
                     task_desc['exception'] = e
-                    task_desc['stderr'] = batch_task.stderr.get()
+
+                    # Try to get stderr, but may be None for failed tasks
+                    stderr = batch_task.stderr.get()
+                    if stderr is None:
+                        # Dragon includes full traceback in exception message
+                        # Extract it for better error reporting
+                        stderr = str(e)
+
+                    task_desc['stderr'] = stderr
                     self._callback(task_desc, 'FAILED')
 
         except Exception as e:
-            # Batch-level failure
+            # Batch-level failure (wait() failed or catastrophic error)
             logger.error(f"Batch wait failed: {e}", exc_info=True)
 
             for uid in task_uids:
                 task_info = self._task_registry.get(uid)
                 if task_info:
                     task_info['description']['exception'] = e
+                    task_info['description']['stderr'] = str(e)
                     self._callback(task_info['description'], 'FAILED')
 
     async def submit_tasks(self, tasks: list[dict]) -> None:
@@ -3013,6 +3032,8 @@ class DragonExecutionBackendV3(BaseExecutionBackend):
         # process/function/job cancellation, we just notify
         # the asyncflow that the task is cancelled so not to block the flow
         self._callback(self._task_registry[uid]['description'], 'CANCELED')
+        self._cancelled_tasks.append(uid)
+
         return True
 
     async def shutdown(self) -> None:
