@@ -2821,34 +2821,58 @@ class DragonExecutionBackendV3(BaseExecutionBackend):
         Simple: just wait(), then check results. No state tracking needed.
         """
         try:
-            # Wait for batch - efficient blocking
-            compiled_tasks.wait()
+            # Check for shutdown before starting wait
+            if self._shutdown_event.is_set():
+                logger.debug(f"Shutdown detected, aborting wait for tasks: {task_uids}")
+                return
+
+            logger.debug(f"Waiting for batch with tasks: {task_uids}")
+            # Wait for batch with timeout to allow periodic shutdown checks
+            while True:
+                try:
+                    compiled_tasks.wait(timeout=5)
+                    break
+                except TimeoutError:
+                    pass
+
+                # Check if shutdown was requested during wait
+                if self._shutdown_event.is_set():
+                    logger.debug(f"Shutdown detected during batch wait for tasks: {task_uids}")
+                    return
+
+            logger.debug(f"Batch wait completed for tasks: {task_uids}")
 
             # Get results for all tasks
             for uid in task_uids:
                 task_info = self._task_registry.get(uid)
                 if not task_info:
+                    logger.warning(f"Task {uid} not found in registry")
                     continue
-                
+
                 if uid in self._cancelled_tasks:
+                    logger.debug(f"Skipping cancelled task {uid}")
                     continue
 
                 batch_task = task_info['batch_task']
                 task_desc = task_info['description']
 
                 try:
+                    logger.debug(f"Getting stdout for task {uid}")
                     # Always try to get stdout first (success/failure)
                     # May be None for failed Python functions
                     stdout = batch_task.stdout.get()
                     task_desc['stdout'] = stdout if stdout is not None else ""
 
+                    logger.debug(f"Getting result for task {uid}")
                     # This raises if task failed
                     result = batch_task.result.get()
                     task_desc['return_value'] = result
+                    logger.debug(f"Task {uid} completed successfully")
                     self._callback(task_desc, 'DONE')
 
                 except Exception as e:
                     # Task failed - result.get() raised
+                    logger.exception(f"Task {uid} failed with exception: {e}")
                     task_desc['exception'] = e
 
                     # Try to get stderr, but may be None for failed tasks
@@ -3044,19 +3068,28 @@ class DragonExecutionBackendV3(BaseExecutionBackend):
         self._state = "shutting_down"
         self._shutdown_event.set()
 
-        # Shutdown wait executor
-        self._wait_executor.shutdown(wait=True)
-
-        # Close Batch
+        # Close Batch FIRST to unblock waiting threads
         if self.batch:
             try:
+                logger.debug("Closing batch...")
                 self.batch.close()
                 self.batch.join(timeout=10.0)
-            except:
+                logger.debug("Batch closed successfully")
+            except Exception as e:
+                logger.warning(f"Error closing batch gracefully: {e}")
                 try:
+                    logger.debug("Attempting to terminate batch...")
                     self.batch.terminate()
-                except:
-                    pass
+                except Exception as te:
+                    logger.warning(f"Error terminating batch: {te}")
+
+        # Give threads a moment to detect batch closure and exit cleanly
+        time.sleep(0.5)
+
+        # Now shutdown wait executor - threads should be unblocked
+        logger.debug("Shutting down wait executor...")
+        self._wait_executor.shutdown(wait=False)
+        logger.debug("Wait executor shutdown complete")
 
         self._task_registry.clear()
         self._state = "idle"
