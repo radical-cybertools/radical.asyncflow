@@ -9,6 +9,9 @@ from .backends.execution.radical_pilot import RadicalExecutionBackend
 from .backends.execution.dragon import (DragonExecutionBackendV1, 
                                         DragonExecutionBackendV2,
                                         DragonExecutionBackendV3)
+
+from .backends.inference.vllm import DragonVllmInferenceBackend
+
 from .data import InputFile, OutputFile
 from .workflow_manager import WorkflowEngine
 
