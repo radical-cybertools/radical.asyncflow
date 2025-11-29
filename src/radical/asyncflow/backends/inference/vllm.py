@@ -1,118 +1,68 @@
 """
-Dragon VLLM Inference Service
-Service that runs on HPC compute nodes and is directly accessible
+Dragon VLLM Inference Service with Request Batching
+Accumulates incoming requests and submits as batches to pipeline for efficiency
 """
 import copy
 import yaml
 import time
 import asyncio
 import multiprocessing as mp
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import socket
 import logging
 from aiohttp import web
-import threading
-import functools
+import uuid
+from dataclasses import dataclass, field
 
 try:
     import dragon
     from ml_inference.dragon_inference_utils import DragonInference
-except ImportError:  # pragma: no cover - environment without Dragon
+except ImportError:
     dragon = None
     DragonInference = None
 
 
 logger = logging.getLogger(__name__)
 
+# Global registry for queues (to avoid serialization)
+_QUEUE_REGISTRY = {}
+
+
+@dataclass
+class PendingRequest:
+    """Represents a pending inference request"""
+    prompts: List[str]
+    future: asyncio.Future
+    timestamp: float = field(default_factory=time.time)
+
 
 class DragonVllmInferenceBackend:
     """
-    DragonVllmInferenceBackend: VLLM inference service for HPC environments.
-
-    Can operate in two modes:
-    1. Service Mode (use_service=True): HTTP API enabled for remote access
-    2. Direct Mode (use_service=False): Direct pipeline access only
+    Server-side batching VLLM inference backend.
 
     Key Features:
-        - Async initialization with concurrent multi-service support
-        - HTTP API for remote inference requests (REST + curl compatible) [Service Mode]
-        - Direct Python API for in-process calls [Both Modes]
-        - Node partitioning via offset parameter for multi-service deployments
-        - Automatic GPU allocation and tensor parallelism support
-        - Built-in health monitoring and request tracking
+    - Accumulates individual requests into batches
+    - Submits batches to pipeline (efficient for VLLM)
+    - Async polling (non-blocking)
+    - Serialization-safe (lazy queue initialization)
 
-    Architecture:
-        - Uses Dragon multiprocessing for distributed execution
-        - aiohttp for non-blocking HTTP serving [Service Mode]
-        - Thread pool execution for pipeline initialization
-        - Queue-based communication with inference workers
+    Batching Strategy:
+    - Collects requests for max_batch_wait_ms milliseconds
+    - OR until batch reaches max_batch_size requests
+    - Then submits entire batch to pipeline
+    - Distributes responses back to individual waiting requests
 
-    Usage Example (Service Mode):
-        >>> service = DragonVllmInferenceBackend(
-        ...     config_file="config.yaml",
-        ...     model_name="/path/to/model",
-        ...     num_nodes=1,
-        ...     num_gpus=2,
-        ...     port=8000,
-        ...     use_service=True  # HTTP enabled
-        ... )
-        >>> await service.initialize()
-        >>> # Access via HTTP from AsyncFlow tasks
-
-    Usage Example (Direct Mode):
-        >>> engine = DragonVllmInferenceBackend(
-        ...     config_file="config.yaml",
-        ...     model_name="/path/to/model",
-        ...     num_nodes=1,
-        ...     num_gpus=2,
-        ...     use_service=False  # No HTTP
-        ... )
-        >>> await engine.initialize()
-        >>> results = await engine.generate(["What is AI?"])  # Direct call
-
-    HTTP Endpoints [Service Mode Only]:
-        GET  /health   - Service health check and status
-        POST /generate - Batch inference endpoint
-            Request:  {"prompts": [...], "timeout": 300}
-            Response: {"status": "success", "results": [...], "hostname": "..."}
-
-    Parameters:
-        config_file (str): Path to Dragon VLLM configuration YAML
-        model_name (str): Path to the model weights/checkpoint
-        offset (int): Node offset in allocation for partitioning (default: 0)
-        num_nodes (int): Number of nodes to use (default: 1)
-        num_gpus (int): Number of GPUs per node (default: 1)
-        tp_size (int): Tensor parallel size (default: 1)
-        port (int): HTTP server port (default: 8000) [Service Mode]
-        use_service (bool): Enable HTTP server (default: True)
-
-    Attributes:
-        is_initialized (bool): Whether service is ready for inference
-        hostname (str): Hostname where service is running
-        pipeline (DragonInference): Underlying VLLM inference pipeline
-        use_service (bool): Whether HTTP service is enabled
-        
-    Methods:
-        initialize(): Async initialization - blocks until ready
-        generate(prompts): Direct Python API for inference
-        shutdown(): Graceful shutdown of service and resources
-        get_endpoint(): Returns full HTTP endpoint URL [Service Mode]
-
-    Notes:
-        - Designed for HPC environments with Dragon runtime
-        - Supports concurrent initialization of multiple services
-        - Thread-safe for concurrent request handling
-        - Requires Dragon multiprocessing: mp.set_start_method("dragon")
-        - Service blocks on initialize() until pipeline is loaded and HTTP server is ready
+    This is MUCH more efficient than sending 1000 individual requests to pipeline!
     """
 
     def __init__(self, config_file: str, model_name: str, offset: int = 0,
                  num_nodes: int = 1, num_gpus: int = 1, tp_size: int = 1,
-                 port: int = 8000, use_service: bool = True):
+                 port: int = 8000, use_service: bool = True,
+                 max_batch_size: int = 1024, max_batch_wait_ms: int = 500):
 
         if dragon is None:
             raise ImportError("Dragon is required for DragonVllmInferenceBackend.")
-        
+
         if DragonInference is None:
             raise ImportError("DragonVllm is required for DragonVllmInferenceBackend.")
 
@@ -125,17 +75,28 @@ class DragonVllmInferenceBackend:
         self.offset = offset
         self.use_service = use_service
 
+        # Batching parameters
+        self.max_batch_size = max_batch_size
+        self.max_batch_wait_ms = max_batch_wait_ms
+
+        # Generate unique ID for this instance
+        self._instance_id = uuid.uuid4().hex
+
+        # These will be lazily initialized
         self.inference_pipeline = None
-        self.input_queue = None
-        self.response_queue = None
         self.is_initialized = False
         self.hostname = socket.gethostname()
-        
+
         # HTTP components (only used if use_service=True)
         self.app = None
         self.runner = None
         self.site = None
-        self._server_task = None
+
+        # Request batching
+        self._pending_requests: List[PendingRequest] = []
+        self._batch_lock = asyncio.Lock()
+        self._batch_processor_task = None
+        self._new_request_event = asyncio.Event()  # Signal when requests arrive
 
     def update_config(self, base_config):
         """Update config with custom parameters"""
@@ -150,6 +111,23 @@ class DragonVllmInferenceBackend:
         config['dynamic_inf_wrkr']['toggle_on'] = False
         return config
 
+    def _get_or_create_queues(self):
+        """Get queues from registry or create new ones"""
+        if self._instance_id not in _QUEUE_REGISTRY:
+            _QUEUE_REGISTRY[self._instance_id] = {
+                'input': mp.Queue(),
+                'response': mp.Queue()
+            }
+        return _QUEUE_REGISTRY[self._instance_id]
+
+    def _get_input_queue(self):
+        """Get input queue (lazy)"""
+        return self._get_or_create_queues()['input']
+
+    def _get_response_queue(self):
+        """Get response queue (lazy)"""
+        return self._get_or_create_queues()['response']
+
     async def initialize(self):
         """
         Initialize the VLLM pipeline and optionally HTTP server
@@ -161,6 +139,7 @@ class DragonVllmInferenceBackend:
 
         mode = "service" if self.use_service else "engine"
         logger.info(f"Initializing VLLM {mode} on {self.hostname}...")
+        logger.info(f"Batching: max_size={self.max_batch_size}, max_wait={self.max_batch_wait_ms}ms")
 
         # Load config
         with open(self.config_file, 'r') as f:
@@ -168,15 +147,14 @@ class DragonVllmInferenceBackend:
 
         config = self.update_config(base_config)
 
-        # Create queues
-        self.input_queue = mp.Queue()
-        self.response_queue = mp.Queue()
+        # Get queues from registry (lazy initialization)
+        input_queue = self._get_input_queue()
 
         # Initialize pipeline
         logger.info("Initializing VLLM pipeline...")
 
         def _init_pipeline():
-            self.inference_pipeline = DragonInference(config, self.num_nodes, self.offset, self.input_queue)
+            self.inference_pipeline = DragonInference(config, self.num_nodes, self.offset, input_queue)
             self.inference_pipeline.initialize()
 
         # Run in thread pool to avoid blocking
@@ -184,6 +162,9 @@ class DragonVllmInferenceBackend:
         await loop.run_in_executor(None, _init_pipeline)
 
         logger.info("VLLM pipeline initialized!")
+
+        # Start batch processor
+        self._batch_processor_task = asyncio.create_task(self._batch_processor())
 
         # Start HTTP server only if use_service=True
         if self.use_service:
@@ -197,7 +178,104 @@ class DragonVllmInferenceBackend:
 
         self.is_initialized = True
         return self
-    
+
+    async def _batch_processor(self):
+        """
+        Background task that processes batches of requests.
+
+        Strategy:
+        1. Wait for at least one request to arrive
+        2. Accumulate more requests for up to max_batch_wait_ms
+        3. OR process immediately if batch reaches max_batch_size
+        4. Submit combined batch to pipeline
+        5. Distribute responses back to individual futures
+        """
+        response_queue = self._get_response_queue()
+
+        while True:
+            try:
+                # Wait for at least one request to arrive
+                await self._new_request_event.wait()
+                self._new_request_event.clear()
+
+                # Now accumulate requests for a short time
+                accumulation_start = asyncio.get_event_loop().time()
+                accumulation_deadline = accumulation_start + (self.max_batch_wait_ms / 1000.0)
+
+                while asyncio.get_event_loop().time() < accumulation_deadline:
+                    async with self._batch_lock:
+                        # If we hit max batch size, stop accumulating
+                        if len(self._pending_requests) >= self.max_batch_size:
+                            break
+                    # Short sleep to allow more requests to arrive
+                    await asyncio.sleep(0.001)
+
+                # Collect pending requests
+                async with self._batch_lock:
+                    if not self._pending_requests:
+                        continue  # Race condition: all requests cancelled
+
+                    # Take up to max_batch_size requests
+                    batch = self._pending_requests[:self.max_batch_size]
+                    self._pending_requests = self._pending_requests[self.max_batch_size:]
+
+                    # If there are still more pending, signal to process next batch
+                    if self._pending_requests:
+                        self._new_request_event.set()
+
+                # Combine all prompts
+                all_prompts = []
+                request_sizes = []
+                for req in batch:
+                    all_prompts.extend(req.prompts)
+                    request_sizes.append(len(req.prompts))
+
+                if not all_prompts:
+                    continue
+
+                logger.info(f"Processing batch: {len(batch)} requests, {len(all_prompts)} total prompts")
+
+                # Submit to pipeline
+                self.inference_pipeline.query((all_prompts, response_queue))
+
+                # Collect responses
+                all_results = []
+                deadline = asyncio.get_event_loop().time() + 300  # 5min timeout
+
+                for i in range(len(all_prompts)):
+                    while True:
+                        if not response_queue.empty():
+                            response = response_queue.get_nowait()
+                            all_results.append(response)
+                            break
+
+                        if asyncio.get_event_loop().time() > deadline:
+                            error_msg = f"Timeout waiting for response {i}"
+                            logger.error(error_msg)
+                            all_results.append(f"ERROR: {error_msg}")
+                            break
+
+                        await asyncio.sleep(0.001)  # Async polling
+
+                # Distribute results back to individual requests
+                offset = 0
+                for req, size in zip(batch, request_sizes):
+                    req_results = all_results[offset:offset + size]
+                    if not req.future.done():
+                        req.future.set_result(req_results)
+                    offset += size
+
+                logger.info(f"Batch complete: {len(all_prompts)} prompts processed")
+
+            except Exception as e:
+                logger.error(f"Batch processor error: {e}", exc_info=True)
+                # Fail pending requests
+                async with self._batch_lock:
+                    for req in self._pending_requests:
+                        if not req.future.done():
+                            req.future.set_exception(e)
+                    self._pending_requests.clear()
+
     async def _start_http_server(self):
         """Start the HTTP server (only called if use_service=True)"""
         self.app = web.Application()
@@ -216,42 +294,31 @@ class DragonVllmInferenceBackend:
 
     async def generate(self, prompts: List[str], timeout: int = 300) -> List[str]:
         """
-        Generate responses for given prompts
-        Works in both service and engine mode
+        Generate responses for given prompts.
+        Queues request for batching instead of immediate submission.
         """
         if not self.is_initialized:
             raise RuntimeError("Not initialized. Call await initialize() first.")
 
-        logger.info(f"Processing {len(prompts)} prompts...")
-        start_time = time.time()
-        
-        # Send prompts to the pipeline
-        self.inference_pipeline.query((prompts, self.response_queue))
+        # Create future for this request
+        future = asyncio.Future()
+        request = PendingRequest(prompts=prompts, future=future)
 
-        loop = asyncio.get_event_loop()
-        results = []
+        # Add to pending queue
+        async with self._batch_lock:
+            self._pending_requests.append(request)
+            logger.debug(f"Queued request with {len(prompts)} prompts. Queue size: {len(self._pending_requests)}")
 
-        # Use executor to call blocking get() in separate thread
-        for i in range(len(prompts)):
-            get_func = functools.partial(self.response_queue.get, timeout=timeout)
-            response = await loop.run_in_executor(None, get_func)
+        # Signal batch processor that new request arrived
+        self._new_request_event.set()
 
-            # Extract text from response
-            if isinstance(response, dict) and 'text' in response:
-                text = response['text']
-            elif isinstance(response, tuple) and len(response) > 0:
-                text = str(response[0])
-            else:
-                text = str(response)
+        # Wait for result
+        try:
+            results = await asyncio.wait_for(future, timeout=timeout)
+            return results
+        except asyncio.TimeoutError:
+            raise TimeoutError(f"Request timed out after {timeout}s")
 
-            results.append(text)
-            logger.debug(f"Completed prompt {i+1}/{len(prompts)}")
-
-        end_time = time.time()
-        logger.info(f"Completed {len(prompts)} prompts in {end_time - start_time:.2f}s")
-        
-        return results
-    
     async def shutdown(self):
         """Shutdown the service/engine"""
         if not self.is_initialized:
@@ -259,7 +326,15 @@ class DragonVllmInferenceBackend:
 
         mode = "service" if self.use_service else "engine"
         logger.info(f"Shutting down {mode}...")
-        
+
+        # Cancel batch processor
+        if self._batch_processor_task:
+            self._batch_processor_task.cancel()
+            try:
+                await self._batch_processor_task
+            except asyncio.CancelledError:
+                pass
+
         # Stop HTTP server (only if use_service=True)
         if self.use_service:
             if self.site:
@@ -270,23 +345,34 @@ class DragonVllmInferenceBackend:
         # Shutdown pipeline
         if self.inference_pipeline:
             self.inference_pipeline.destroy()
-        if self.input_queue:
-            self.input_queue.close()
-        if self.response_queue:
-            self.response_queue.close()
+
+        # Clean up queues from registry
+        if self._instance_id in _QUEUE_REGISTRY:
+            queues = _QUEUE_REGISTRY[self._instance_id]
+            queues['input'].close()
+            queues['response'].close()
+            del _QUEUE_REGISTRY[self._instance_id]
 
         self.is_initialized = False
         logger.info(f"{mode.capitalize()} shutdown complete")
-    
+
     # HTTP Handlers (only used if use_service=True)
     async def _handle_health(self, request):
         """Health check endpoint"""
+        async with self._batch_lock:
+            queue_size = len(self._pending_requests)
+
         return web.json_response({
             "status": "healthy",
             "hostname": self.hostname,
             "initialized": self.is_initialized,
             "endpoint": f"http://{self.hostname}:{self.port}",
-            "mode": "service"
+            "mode": "service",
+            "batch_config": {
+                "max_batch_size": self.max_batch_size,
+                "max_batch_wait_ms": self.max_batch_wait_ms,
+                "pending_requests": queue_size
+            }
         })
 
     async def _handle_generate(self, request):
@@ -314,7 +400,7 @@ class DragonVllmInferenceBackend:
                 "total_time": end_time - start_time,
                 "avg_time_per_prompt": (end_time - start_time) / len(prompts)
             })
-            
+
         except Exception as e:
             logger.error(f"Generation error: {e}", exc_info=True)
             return web.json_response({
@@ -341,3 +427,25 @@ class DragonVllmInferenceBackend:
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Async context manager exit"""
         await self.shutdown()
+
+    # Serialization support
+    def __getstate__(self):
+        """Control pickling - exclude non-serializable objects"""
+        state = self.__dict__.copy()
+        # Remove non-serializable items
+        state['inference_pipeline'] = None
+        state['app'] = None
+        state['runner'] = None
+        state['site'] = None
+        state['_batch_processor_task'] = None
+        state['_pending_requests'] = []
+        state['_batch_lock'] = None
+        state['_new_request_event'] = None
+        return state
+
+    def __setstate__(self, state):
+        """Control unpickling - restore state"""
+        self.__dict__.update(state)
+        # These will be lazily re-initialized if needed
+        self._batch_lock = asyncio.Lock()
+        self._new_request_event = asyncio.Event()

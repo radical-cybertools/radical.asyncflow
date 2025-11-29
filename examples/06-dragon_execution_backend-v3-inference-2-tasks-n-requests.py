@@ -2,6 +2,7 @@
 Dragon V3 Workflow with Multiple VLLM Services (Node-Partitioned)
 Each service uses different nodes via offset
 """
+import json
 import asyncio
 import logging
 import multiprocessing as mp
@@ -42,7 +43,7 @@ async def main():
     logger.info("Dragon V3: Multi-Service VLLM Workflow (Node-Partitioned)")
     logger.info("=" * 60)
 
-    # Create 2 services, each using 1 node and 2 GPUs from different offset
+    # Create 2 inference pipelines, each using 1 node and 2 GPUs from different offset
     num_services = 2
     nodes_per_service = 1
     services = []
@@ -51,12 +52,12 @@ async def main():
 
     for i in range(num_services):
         port = 8000 + i
-        offset = i * nodes_per_service  # Each service starts at different node
+        offset = i * nodes_per_service  # Each pipeline starts at different node
 
         logger.info(f"Service {i+1}: port={port}, offset={offset}, num_nodes={nodes_per_service}")
 
         service = DragonVllmInferenceBackend(
-            config_file="config.yaml",
+            config_file="/anvil/scratch/x-aymen/aici-dragon-inference/config.yaml",
             model_name="/anvil/scratch/x-aymen/_dragon_vllm_env/hf_cache/Qwen2.5-0.5B-Instruct",
             num_nodes=nodes_per_service,
             num_gpus=2,
@@ -91,7 +92,7 @@ async def main():
         """Task that runs inference using HTTP requests (async)"""
         import time
         start = time.time()
-        print(f"START {endpoint} at {start}")
+        logger.info(f"START {endpoint} at {start}")
         import aiohttp
 
         async with aiohttp.ClientSession() as session:
@@ -103,10 +104,10 @@ async def main():
                 data = await resp.json()
 
         end = time.time()
-        print(f"END {endpoint} at {end}, duration={end-start:.2f}s")
+        logger.info(f"END {endpoint} at {end}, duration={end-start:.2f}s")
 
         if data['status'] == 'success':
-            print(f'Batch of {len(prompts)} inference requests is completed on {endpoint}')
+            logger.info(f'Batch of {len(prompts)} inference requests is completed on {endpoint}')
             return data['results']
         else:
             raise Exception(f"Service error: {data.get('message', 'Unknown error')}")
@@ -129,8 +130,6 @@ async def main():
     logger.info("Inference Results")
     logger.info("=" * 60)
 
-    import json
-
     with open("infer.log", "w") as f:
         json.dump(results, f, indent=2)
 
@@ -146,7 +145,7 @@ async def main():
     # ]
 
     # Parse all result payloads
-    parsed = [[ast.literal_eval(r) for r in batch] for batch in results]
+    parsed = results
 
     # Number of services = number of top-level batches
     num_services = len(parsed)
