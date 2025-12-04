@@ -10,12 +10,12 @@ import multiprocessing as mp
 from typing import List
 import itertools
 
+from radical.asyncflow import DragonTelemetryCollector
 from radical.asyncflow import DragonVllmInferenceBackend
 from radical.asyncflow import DragonExecutionBackendV3, WorkflowEngine
 from radical.asyncflow.logging import init_default_logger
 
 
-from node_collector import NodeTelemetryCollector
 logger = logging.getLogger(__name__)
 
 
@@ -79,7 +79,7 @@ async def main():
     service_endpoints = [service.get_endpoint() for service in services]
 
 
-    collector = NodeTelemetryCollector(
+    collector = DragonTelemetryCollector(
         collection_rate=1.0,              # Collect every second
         checkpoint_interval=30.0,         # Checkpoint every 30 seconds
         checkpoint_dir=os.path.join(os.getcwd(), 'telemetry-results'),  # Save checkpoints here
