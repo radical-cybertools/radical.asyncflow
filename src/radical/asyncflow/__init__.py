@@ -8,7 +8,8 @@ from .backends.execution.noop import NoopExecutionBackend
 from .backends.execution.radical_pilot import RadicalExecutionBackend
 from .backends.execution.dragon import (DragonExecutionBackendV1, 
                                         DragonExecutionBackendV2,
-                                        DragonExecutionBackendV3)
+                                        DragonExecutionBackendV3,
+                                        DragonTelemetryCollector)
 
 from .backends.inference.vllm import DragonVllmInferenceBackend
 
@@ -21,6 +22,7 @@ __all__ = [
     "DragonExecutionBackendV1",
     "DragonExecutionBackendV2",
     "DragonExecutionBackendV3",
+    "DragonTelemetryCollector",
     "ConcurrentExecutionBackend",
     "DaskExecutionBackend",
     "NoopExecutionBackend",
