@@ -6,6 +6,7 @@ import inspect
 import logging
 import os
 import signal
+import threading
 from collections import defaultdict, deque
 from functools import wraps
 from itertools import count
@@ -113,6 +114,12 @@ class WorkflowEngine:
         """
         Register signal handlers for graceful shutdown on SIGHUP, SIGTERM, and SIGINT.
         """
+
+        # signal handlers are only allowed in the main thread
+        if threading.current_thread() is not threading.main_thread():
+            logger.warn(f"Signal handlers can only be set in the main thread")
+            return
+
         signals = (signal.SIGHUP, signal.SIGTERM, signal.SIGINT)
         for sig in signals:
             try:
