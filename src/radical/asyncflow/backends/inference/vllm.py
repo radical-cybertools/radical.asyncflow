@@ -284,6 +284,10 @@ class DragonVllmInferenceBackend:
         self.app.router.add_get('/health', self._handle_health)
         self.app.router.add_post('/generate', self._handle_generate)
 
+        # Ad OpenAI Client endpoints
+        self.app.router.add_post('/v1/chat/completions', self._handle_chat_completions)
+        self.app.router.add_get('/v1/models', self._handle_models)
+
         # Start server
         self.runner = web.AppRunner(self.app)
         await self.runner.setup()
@@ -291,6 +295,12 @@ class DragonVllmInferenceBackend:
         await self.site.start()
 
         logger.info(f"HTTP server started on {self.hostname}:{self.port}")
+
+        logger.info(f"Available endpoints:")
+        logger.info(f"  GET  /health")
+        logger.info(f"  POST /generate")
+        logger.info(f"  POST /v1/chat/completions (OpenAI compatible)")
+        logger.info(f"  GET  /v1/models (OpenAI compatible)")
 
     async def generate(self, prompts: List[str], timeout: int = 300) -> List[str]:
         """
@@ -355,6 +365,93 @@ class DragonVllmInferenceBackend:
 
         self.is_initialized = False
         logger.info(f"{mode.capitalize()} shutdown complete")
+
+    async def _handle_chat_completions(self, request):
+        """
+        OpenAI-compatible chat completions endpoint.
+        Converts OpenAI format to VLLM /generate format.
+        """
+        try:
+            data = await request.json()
+            
+            # Extract OpenAI-style parameters
+            messages = data.get('messages', [])
+            max_tokens = data.get('max_tokens', 1000)
+            temperature = data.get('temperature', 0.7)
+            model = data.get('model', self.model_name)
+            
+            # Convert messages to single prompt
+            prompt_parts = []
+            for msg in messages:
+                role = msg.get('role', 'user')
+                content = msg.get('content', '')
+                
+                if role == 'system':
+                    prompt_parts.append(f"System: {content}")
+                elif role == 'user':
+                    prompt_parts.append(f"User: {content}")
+                elif role == 'assistant':
+                    prompt_parts.append(f"Assistant: {content}")
+            
+            # Combine into single prompt
+            prompt = "\n\n".join(prompt_parts) + "\n\nAssistant:"
+            
+            # Call internal generate method
+            start_time = time.time()
+            results = await self.generate([prompt], timeout=300)
+            end_time = time.time()
+            
+            response_text = results[0] if results else ""
+            
+            # Return in OpenAI format
+            return web.json_response({
+                "id": f"chatcmpl-{uuid.uuid4().hex[:8]}",
+                "object": "chat.completion",
+                "created": int(time.time()),
+                "model": model,
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {
+                            "role": "assistant",
+                            "content": response_text
+                        },
+                        "finish_reason": "stop"
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": len(prompt.split()),
+                    "completion_tokens": len(response_text.split()),
+                    "total_tokens": len(prompt.split()) + len(response_text.split())
+                }
+            })
+            
+        except Exception as e:
+            logger.error(f"Chat completions error: {e}", exc_info=True)
+            return web.json_response({
+                "error": {
+                    "message": str(e),
+                    "type": "internal_error",
+                    "code": "internal_error"
+                }
+            }, status=500)
+
+    async def _handle_models(self, request):
+        """OpenAI-compatible models list endpoint"""
+        return web.json_response({
+            "object": "list",
+            "data": [
+                {
+                    "id": self.model_name,
+                    "object": "model",
+                    "created": int(time.time()),
+                    "owned_by": "organization-owner",
+                    "permission": [],
+                    "root": self.model_name,
+                    "parent": None
+                }
+            ]
+        })
 
     # HTTP Handlers (only used if use_service=True)
     async def _handle_health(self, request):
