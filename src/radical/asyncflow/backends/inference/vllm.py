@@ -403,6 +403,17 @@ class DragonVllmInferenceBackend:
             
             response_text = results[0] if results else ""
             
+            # FIX: Normalize response_text to handle dict or string
+            def normalize_response(text):
+                """Handle both string and dict responses from vLLM."""
+                if isinstance(text, dict):
+                    # Try common dict keys
+                    return text.get("text", text.get("content", text.get("generated_text", str(text))))
+                return str(text) if text else ""
+            
+            # Normalize the response
+            response_text_normalized = normalize_response(response_text)
+            
             # Return in OpenAI format
             return web.json_response({
                 "id": f"chatcmpl-{uuid.uuid4().hex[:8]}",
@@ -414,18 +425,18 @@ class DragonVllmInferenceBackend:
                         "index": 0,
                         "message": {
                             "role": "assistant",
-                            "content": response_text
+                            "content": response_text_normalized  # Use normalized version
                         },
                         "finish_reason": "stop"
                     }
                 ],
                 "usage": {
                     "prompt_tokens": len(prompt.split()),
-                    "completion_tokens": len(response_text.split()),
-                    "total_tokens": len(prompt.split()) + len(response_text.split())
+                    "completion_tokens": len(response_text_normalized.split()),  # Use normalized version
+                    "total_tokens": len(prompt.split()) + len(response_text_normalized.split())  # Use normalized version
                 }
             })
-            
+
         except Exception as e:
             logger.error(f"Chat completions error: {e}", exc_info=True)
             return web.json_response({
