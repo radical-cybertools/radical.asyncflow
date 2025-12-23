@@ -2103,6 +2103,7 @@ class DragonExecutionBackendV2(BaseExecutionBackend):
         self._callback_func: Callable = None
         self._resources = resources or {}
         self._initialized = False
+        self._canceled_tasks = set()
 
         # Parse worker configuration
         self._worker_configs = self._parse_worker_config(self._resources)
@@ -2531,7 +2532,6 @@ class DragonExecutionBackendV2(BaseExecutionBackend):
         while not self._shutdown_event.is_set():
             try:
                 completed_tasks = []
-
                 # Consume responses from worker pool (batch processing)
                 for _ in range(1000):
                     response = self._worker_pool.try_get_response()
@@ -2541,41 +2541,57 @@ class DragonExecutionBackendV2(BaseExecutionBackend):
                             completed_tasks.append(completed_uid)
                     else:
                         break
-
+                
                 for uid in completed_tasks:
-                    if uid in self._running_tasks:
-                        task_info = self._running_tasks[uid]
-                        task = self.tasks.get(uid)
+                    # Check if task was canceled
+                    if uid in self._canceled_tasks:
+                        logger.debug(f"Ignoring response for canceled task {uid}")
+                        # Now clean it up from result collector
+                        self._result_collector.cleanup_task(uid)
+                        self._canceled_tasks.discard(uid)
+                        continue
 
-                        if task:
-                            result = await self._result_collector.get_task_result(uid)
-                            if result:
-                                task.update(result)
-
-                            await self._worker_pool.release_resources(
-                                task_info.worker_name,
-                                task_info.ranks,
-                                task_info.gpu_allocations
-                            )
-
-                            if task.get("canceled", False):
-                                self._callback_func(task, "CANCELED")
-                            elif task.get("exception") or task.get("exit_code", 0) != 0:
-                                self._callback_func(task, "FAILED")
-                            else:
-                                self._callback_func(task, "DONE")
-
+                    # Check if task is still being tracked
+                    task_info = self._running_tasks.get(uid)
+                    if not task_info:
+                        # Already processed or never tracked
+                        continue
+                    
+                    if task_info.canceled:
+                        # Redundant check, but safe
+                        logger.debug(f"Skipping already-canceled task {uid}")
+                        self._result_collector.cleanup_task(uid)
                         self._running_tasks.pop(uid, None)
+                        continue
+                    
+                    # Normal task completion processing
+                    task = self.tasks.get(uid)
+                    if task:
+                        result = await self._result_collector.get_task_result(uid)
+                        if result:
+                            task.update(result)
+                        
+                        await self._worker_pool.release_resources(
+                            task_info.worker_name,
+                            task_info.ranks,
+                            task_info.gpu_allocations
+                        )
+                        
+                        # Send appropriate callback
+                        if task.get("exception") or task.get("exit_code", 0) != 0:
+                            self._callback_func(task, "FAILED")
+                        else:
+                            self._callback_func(task, "DONE")
+                    
+                    self._running_tasks.pop(uid, None)
 
                 await asyncio.sleep(0.001)
-
             except Exception as e:
                 logger.exception(f"Error in task monitoring: {e}")
                 await asyncio.sleep(1)
 
     async def cancel_task(self, uid: str) -> bool:
         """Cancel a running task.
-
         Note: With worker pool architecture, cancellation is best-effort.
         Workers that already picked up the task will complete it.
         """
@@ -2583,17 +2599,28 @@ class DragonExecutionBackendV2(BaseExecutionBackend):
         if not task_info:
             return False
 
+        # Mark as canceled FIRST
         task_info.canceled = True
-        self._result_collector.cleanup_task(uid)
+        self._canceled_tasks.add(uid)  # Track it
+        
+        # Update task dict with canceled flag
+        if uid in self.tasks:
+            self.tasks[uid]["canceled"] = True
 
+        # Send immediate CANCELED callback
+        task = self.tasks.get(uid)
+        if task:
+            self._callback_func(task, "CANCELED")
+
+        # Release resources
         await self._worker_pool.release_resources(
             task_info.worker_name,
             task_info.ranks,
             task_info.gpu_allocations
         )
 
-        if uid in self.tasks:
-            self.tasks[uid]["canceled"] = True
+        # Remove from running tasks
+        self._running_tasks.pop(uid, None)
 
         return True
 
