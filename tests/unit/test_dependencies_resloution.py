@@ -1,12 +1,12 @@
 import asyncio
 import time
-from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 import pytest_asyncio
 
-from radical.asyncflow import ConcurrentExecutionBackend, WorkflowEngine
+from radical.asyncflow import WorkflowEngine
 
+from rhapsody.backends.execution import ConcurrentExecutionBackend
 
 class TestFutureResolution:
     """Test suite for Future argument resolution in WorkflowEngine."""
@@ -14,7 +14,7 @@ class TestFutureResolution:
     @pytest_asyncio.fixture
     async def flow(self):
         """Create a WorkflowEngine instance for testing."""
-        backend = await ConcurrentExecutionBackend(ThreadPoolExecutor())
+        backend = await ConcurrentExecutionBackend()
         flow = await WorkflowEngine.create(backend=backend)
         yield flow
         await flow.shutdown()
@@ -237,7 +237,7 @@ class TestFutureResolution:
 async def test_real_workflow_scenario():
     """Integration test simulating a real workflow scenario."""
 
-    backend = await ConcurrentExecutionBackend(ThreadPoolExecutor())
+    backend = await ConcurrentExecutionBackend()
     flow = await WorkflowEngine.create(backend=backend)
 
     try:

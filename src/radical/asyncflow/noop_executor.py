@@ -1,10 +1,33 @@
+import os
 from typing import Callable
 
-from ...constants import StateMapper
-from .base import BaseExecutionBackend, Session
+class NoopSession:
+    """Manages execution session state and working directory.
+
+    This class maintains session-specific information including the current
+    working directory path for task execution.
+    """
+
+    def __init__(self):
+        """Initialize a new session with the current working directory.
+
+        Sets the session path to the current working directory at the time
+        of initialization.
+        """
+        self.path = os.getcwd()
+
+class NoopStateMapper:
+    """Simple state mapper for noop backend."""
+
+    DONE = "DONE"
+    RUNNING = "RUNNING"
+    CANCELED = "CANCELED"
+    FAILED = "FAILED"
+
+    terminal_states = {DONE, CANCELED, FAILED}
 
 
-class NoopExecutionBackend(BaseExecutionBackend):
+class NoopExecutionBackend:
     """A no-operation execution backend for testing and development purposes.
 
     This backend simulates task execution without actually running any tasks.
@@ -15,13 +38,11 @@ class NoopExecutionBackend(BaseExecutionBackend):
     def __init__(self):
         """Initialize the no-op execution backend.
 
-        Sets up dummy task storage, session, and default callback function.
-        Registers backend states and confirms successful initialization.
+        Sets up dummy task storage, and default callback function.
         """
         self.tasks = {}
-        self.session = Session()
+        self.session = NoopSession()
         self._callback_func: Callable = lambda task, state: None  # default no-op
-        StateMapper.register_backend_states_with_defaults(backend=self)
 
     def state(self):
         """Get the current state of the no-op execution backend.
@@ -47,9 +68,9 @@ class NoopExecutionBackend(BaseExecutionBackend):
         """Retrieve a mapping of task IDs to their current states.
 
         Returns:
-            StateMapper: Object containing the mapping of task states for this backend.
+            NoopStateMapper: Object containing the mapping of task states for this backend.
         """
-        return StateMapper(backend=self)
+        return NoopStateMapper()
 
     def register_callback(self, func: Callable):
         """Register a callback for task state changes.

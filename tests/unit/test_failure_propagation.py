@@ -1,16 +1,17 @@
 import asyncio
-from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 import pytest_asyncio
 
-from radical.asyncflow import ConcurrentExecutionBackend, WorkflowEngine
+from radical.asyncflow import WorkflowEngine
 from radical.asyncflow.errors import DependencyFailureError
+
+from rhapsody.backends.execution import ConcurrentExecutionBackend
 
 
 @pytest_asyncio.fixture
 async def flow():
-    backend = await ConcurrentExecutionBackend(ThreadPoolExecutor())
+    backend = await ConcurrentExecutionBackend()
     flow = await WorkflowEngine.create(backend=backend)
     yield flow
     await asyncio.sleep(0)  # allow any pending tasks to finish

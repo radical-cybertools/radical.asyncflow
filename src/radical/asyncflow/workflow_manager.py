@@ -14,8 +14,7 @@ from typing import Any, Callable, Optional, Union
 
 import typeguard
 
-from .backends.execution.base import BaseExecutionBackend
-from .backends.execution.noop import NoopExecutionBackend
+from .noop_executor import NoopExecutionBackend
 from .data import InputFile, OutputFile
 from .errors import DependencyFailureError
 from .utils import get_next_uid
@@ -51,7 +50,7 @@ class WorkflowEngine:
     @typeguard.typechecked
     def __init__(
         self,
-        backend: BaseExecutionBackend,
+        backend,
         dry_run: bool = False,
         implicit_data: bool = True,
     ) -> None:
