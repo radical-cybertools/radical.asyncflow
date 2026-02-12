@@ -38,7 +38,7 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: Get pip cache dir
         id: pip-cache-dir
-        run: echo "PIP_CACHE_DIR=$(pip cache dir)" >> $GITHUB_ENV
+        run: echo "PIP_CACHE_DIR=$(pip cache dir)" >> "$GITHUB_ENV"
       - name: Use pip cache
         id: pip-cache
         uses: actions/cache@v4
@@ -83,7 +83,7 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: Get pip cache dir
         id: pip-cache-dir
-        run: echo "PIP_CACHE_DIR=$(pip cache dir)" >> $GITHUB_ENV
+        run: echo "PIP_CACHE_DIR=$(pip cache dir)" >> "$GITHUB_ENV"
       - name: Use pip cache
         id: pip-cache
         uses: actions/cache@v4
