@@ -14,7 +14,8 @@ from typing import Any, Callable, Optional, Union
 
 import typeguard
 
-from .noop_executor import NoopExecutionBackend
+from .backends import NoopExecutionBackend
+from .backends import LocalExecutionBackend
 from .data import InputFile, OutputFile
 from .errors import DependencyFailureError
 from .utils import get_next_uid
@@ -40,9 +41,8 @@ class WorkflowEngine:
 
     Attributes:
         loop (asyncio.AbstractEventLoop): The asyncio event loop (current running loop).
-        backend (BaseExecutionBackend): The execution backend used for task execution.
+        backend: The execution backend used for task execution.
         dry_run (bool): Indicates whether the engine is in dry-run mode.
-        work_dir (str): The working directory for the workflow session.
         log (ru.Logger): Logger instance for logging workflow events.
         prof (ru.Profiler): Profiler instance for profiling workflow execution.
     """
@@ -50,7 +50,7 @@ class WorkflowEngine:
     @typeguard.typechecked
     def __init__(
         self,
-        backend,
+        backend = None,
         dry_run: bool = False,
         implicit_data: bool = True,
     ) -> None:
@@ -86,9 +86,6 @@ class WorkflowEngine:
         self._component_change_event = asyncio.Event()
 
         self.task_states_map = self.backend.get_task_states_map()
-
-        # Setup working directory
-        self.work_dir = self.backend.session.path or os.getcwd()
 
         # Register callback with backend
         self.backend.register_callback(self.task_callbacks)
@@ -148,7 +145,7 @@ class WorkflowEngine:
     @classmethod
     async def create(
         cls,
-        backend: Optional[BaseExecutionBackend] = None,
+        backend = None,
         dry_run: bool = False,
         implicit_data: bool = True,
     ) -> "WorkflowEngine":
@@ -168,7 +165,7 @@ class WorkflowEngine:
             engine = await WorkflowEngine.create(dry_run=True)
         """
         # Setup and validate backend first
-        validated_backend = cls._setup_execution_backend(backend, dry_run)
+        validated_backend = await cls._setup_execution_backend(backend, dry_run)
 
         # Create instance with validated backend
         instance = cls(
@@ -181,20 +178,17 @@ class WorkflowEngine:
         return instance
 
     @staticmethod
-    def _setup_execution_backend(
-        backend: Optional[BaseExecutionBackend], dry_run: bool
-    ) -> BaseExecutionBackend:
+    async def _setup_execution_backend(
+        backend, dry_run: bool
+    ):
         """Setup and validate the execution backend."""
         if backend is None:
             if dry_run:
                 return NoopExecutionBackend()
             else:
-                raise RuntimeError(
-                    'An execution backend must be provided when not in "dry_run" mode.'
-                )
+                logger.warning('No execution backend provided, and dry_run is False. Defaulting to LocalExecutionBackend')
+                return await LocalExecutionBackend()
         else:
-            if dry_run and not isinstance(backend, NoopExecutionBackend):
-                raise RuntimeError('Dry-run only supports the "NoopExecutionBackend".')
             return backend
 
     async def _start_async_components(self):

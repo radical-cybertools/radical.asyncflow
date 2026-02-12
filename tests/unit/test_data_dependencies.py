@@ -6,13 +6,13 @@ from radical.asyncflow import (
     InputFile,
     OutputFile,
     WorkflowEngine,
+    LocalExecutionBackend,
 )
 
-from rhapsody.backends.execution import ConcurrentExecutionBackend
 
 @pytest.mark.asyncio
 async def test_implicit_data_dependencies_trigger():
-    backend = await ConcurrentExecutionBackend()
+    backend = await LocalExecutionBackend()
     flow = await WorkflowEngine.create(backend)
     flow.backend.link_implicit_data_deps = MagicMock()
 
@@ -33,7 +33,7 @@ async def test_implicit_data_dependencies_trigger():
 
 @pytest.mark.asyncio
 async def test_explicit_data_dependencies_trigger():
-    backend = await ConcurrentExecutionBackend()
+    backend = await LocalExecutionBackend()
     flow = await WorkflowEngine.create(backend)
     flow.backend.link_explicit_data_deps = MagicMock()
 

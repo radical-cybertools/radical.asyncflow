@@ -4,7 +4,8 @@ import importlib.metadata as importlib_metadata
 
 from .data import InputFile, OutputFile
 from .workflow_manager import WorkflowEngine
-from .noop_executor import NoopExecutionBackend
+from .backends import NoopExecutionBackend
+from .backends import LocalExecutionBackend
 
 __version__ = importlib_metadata.version("radical.asyncflow")
 
@@ -12,5 +13,6 @@ __all__ = [
     "InputFile",
     "OutputFile",
     "WorkflowEngine",
-    "NoopExecutionBackend"
+    "NoopExecutionBackend",
+    "LocalExecutionBackend"
 ]
