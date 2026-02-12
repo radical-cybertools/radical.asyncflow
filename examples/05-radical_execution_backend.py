@@ -43,10 +43,11 @@ async def main():
     # Run workflows concurrently
     try:
         await asyncio.gather(*[run_wf(i) for i in range(10)])
-    except Exception as e:
+    except Exception:
         raise
     finally:
         await flow.shutdown()
+
 
 if __name__ == "__main__":
     asyncio.run(main())

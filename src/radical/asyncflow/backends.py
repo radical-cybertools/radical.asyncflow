@@ -1,11 +1,9 @@
-import os
 import asyncio
 import logging
-from typing import Callable
-from typing import Any
+from concurrent.futures import Executor, ProcessPoolExecutor, ThreadPoolExecutor
+from typing import Any, Callable
 
 import cloudpickle
-from concurrent.futures import Executor, ThreadPoolExecutor, ProcessPoolExecutor
 
 logger = logging.getLogger(__name__)
 
@@ -24,9 +22,9 @@ class StateMapper:
 class NoopExecutionBackend:
     """A no-operation execution backend for testing and development purposes.
 
-    This backend simulates task execution without actually running any tasks.
-    All submitted tasks immediately return dummy output and transition to DONE state.
-    Useful for testing workflow logic without computational overhead.
+    This backend simulates task execution without actually running any tasks. All
+    submitted tasks immediately return dummy output and transition to DONE state. Useful
+    for testing workflow logic without computational overhead.
     """
 
     def __init__(self):
@@ -136,8 +134,8 @@ class NoopExecutionBackend:
     async def shutdown(self) -> None:
         """Shutdown the no-op execution backend.
 
-        Performs cleanup operations. Since this is a no-op backend, no actual
-        resources need to be cleaned up.
+        Performs cleanup operations. Since this is a no-op backend, no actual resources
+        need to be cleaned up.
         """
         pass
 
@@ -146,10 +144,11 @@ class LocalExecutionBackend:
     """Simple async-only concurrent execution backend."""
 
     def __init__(self, executor: Executor = None):
-
         if not executor:
             executor = ThreadPoolExecutor()
-            logger.info("No executor was provided. Falling back to default ThreadPoolExecutor")
+            logger.info(
+                "No executor was provided. Falling back to default ThreadPoolExecutor"
+            )
 
         if not isinstance(executor, Executor):
             err = "Executor must be ThreadPoolExecutor or ProcessPoolExecutor"
@@ -365,7 +364,9 @@ class LocalExecutionBackend:
     def build_task(self, uid, task_desc, task_specific_kwargs):
         pass
 
-    def link_explicit_data_deps(self, src_task=None, dst_task=None, file_name=None, file_path=None):
+    def link_explicit_data_deps(
+        self, src_task=None, dst_task=None, file_name=None, file_path=None
+    ):
         pass
 
     def link_implicit_data_deps(self, src_task, dst_task):

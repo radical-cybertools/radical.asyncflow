@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import importlib.metadata as importlib_metadata
 
+from .backends import LocalExecutionBackend, NoopExecutionBackend
 from .data import InputFile, OutputFile
 from .workflow_manager import WorkflowEngine
-from .backends import NoopExecutionBackend
-from .backends import LocalExecutionBackend
 
 __version__ = importlib_metadata.version("radical.asyncflow")
 
@@ -14,5 +13,5 @@ __all__ = [
     "OutputFile",
     "WorkflowEngine",
     "NoopExecutionBackend",
-    "LocalExecutionBackend"
+    "LocalExecutionBackend",
 ]

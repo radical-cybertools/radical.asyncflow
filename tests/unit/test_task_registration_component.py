@@ -94,10 +94,10 @@ async def test_register_component_adds_block_entry():
     # only 1 block that is not unpacked yet
     assert len(engine.components) == 1
 
-    buid = next(iter(engine.components.keys()))
+    block_uid = next(iter(engine.components.keys()))
 
     # block gets registered first
-    assert BLOCK in buid
+    assert BLOCK in block_uid
 
     await block_future
 

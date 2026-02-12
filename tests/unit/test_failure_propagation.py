@@ -3,7 +3,7 @@ import asyncio
 import pytest
 import pytest_asyncio
 
-from radical.asyncflow import WorkflowEngine, LocalExecutionBackend
+from radical.asyncflow import LocalExecutionBackend, WorkflowEngine
 from radical.asyncflow.errors import DependencyFailureError
 
 

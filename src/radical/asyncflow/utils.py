@@ -19,8 +19,7 @@ def reset_uid_counter():
 def get_event_loop_or_raise(
     context_name: str = "AsyncWorkflowEngine",
 ) -> asyncio.AbstractEventLoop:
-    """
-    Get the current running event loop or raise a helpful error.
+    """Get the current running event loop or raise a helpful error.
 
     Args:
         context_name: Name of the class/context for error messages

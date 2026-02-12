@@ -100,12 +100,12 @@ markdown_extensions:
   - md_in_html
 
 nav:
-  - Home: 
+  - Home:
       - Introduction: index.md
       - Installation: install.md
   - Getting Started:
       - Basic Usage: basic.md
-  - Best Practices: 
+  - Best Practices:
       - Best Practices: best_practice.md
   - Workflows:
       - Asynchronous Workflows: async_workflows.md

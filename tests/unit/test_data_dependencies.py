@@ -4,9 +4,9 @@ import pytest
 
 from radical.asyncflow import (
     InputFile,
+    LocalExecutionBackend,
     OutputFile,
     WorkflowEngine,
-    LocalExecutionBackend,
 )
 
 

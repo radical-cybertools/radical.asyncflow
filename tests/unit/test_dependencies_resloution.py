@@ -4,7 +4,8 @@ import time
 import pytest
 import pytest_asyncio
 
-from radical.asyncflow import WorkflowEngine, LocalExecutionBackend
+from radical.asyncflow import LocalExecutionBackend, WorkflowEngine
+
 
 class TestFutureResolution:
     """Test suite for Future argument resolution in WorkflowEngine."""

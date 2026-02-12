@@ -92,7 +92,7 @@ async def task3(*args):
 
 ### Assign Resources for your application (task)
 
-Depending on the `ExecutionBackend` used, Asyncflow supports passing and assigning multiple/different task and resources parameters to each task. This is part of having a full and granular control on the parallelism that asyncflow can offer.  
+Depending on the `ExecutionBackend` used, Asyncflow supports passing and assigning multiple/different task and resources parameters to each task. This is part of having a full and granular control on the parallelism that asyncflow can offer.
 Both `@flow.executable_task` and `@flow.function_task` can do that by passing `task_description` to your function `kwargs` during task definition or task invocation.
 
 ```python
@@ -135,11 +135,11 @@ async def mpi_func(task_description={'ranks': 8, 'type': 'mpi'}):
 ```python
 async def run_wf(wf_id):
     print(f'Starting workflow {wf_id} at {time.time()}')
-    
+
     # Create dependent task execution
     t3 = task3(task1(), task2()) # (1)!
     await t3  # Wait for distributed execution to complete
-    
+
     print(f'Workflow {wf_id} completed at {time.time()}')
 ```
 
@@ -241,7 +241,7 @@ backend = RadicalExecutionBackend({
 
 AsyncFlow's backend abstraction means your workflow logic remains **identical** whether running on:
 - Your laptop with 8 cores
-- A university cluster with 1,000 nodes  
+- A university cluster with 1,000 nodes
 - A national supercomputer with 100,000+ cores
 - GPU clusters with thousands of accelerators
 
