@@ -13,7 +13,6 @@ Requires: pip install rhapsody
 
 import asyncio
 import logging
-import time
 
 from rhapsody.backends import DragonExecutionBackendV3
 
@@ -40,30 +39,30 @@ async def main():
     # Create workflow engine
     flow = await WorkflowEngine.create(backend=backend)
 
+    # Resource descriptions
+    single_process = {"process_template": {}}
+    parallel_processes = {"process_templates": [(2, {}), (2, {})]}
+
     # Single-process executable task
     @flow.executable_task
-    async def single_executable(*args, task_description={"process_template": {}}):
+    async def single_executable(*args, task_description=single_process):
         return "/bin/bash -c 'echo $HOSTNAME'"
 
     # Parallel-process executable task (2 processes)
     @flow.executable_task
-    async def parallel_executable(
-        *args, task_description={"process_templates": [(2, {}), (2, {})]}
-    ):
+    async def parallel_executable(*args, task_description=parallel_processes):
         return "/bin/bash -c 'echo $HOSTNAME'"
 
     # Single-process function task
     @flow.function_task
-    async def single_function(task_description={"process_template": {}}):
+    async def single_function(task_description=single_process):
         import socket
 
         return socket.gethostname()
 
     # Parallel-process function task
     @flow.function_task
-    async def parallel_function(
-        task_description={"process_templates": [(2, {}), (2, {})]}
-    ):
+    async def parallel_function(task_description=parallel_processes):
         import socket
 
         return socket.gethostname()

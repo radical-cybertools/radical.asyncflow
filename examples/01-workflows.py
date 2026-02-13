@@ -18,7 +18,6 @@ async def main():
     async def task1(*args):
         # Simulate lightweight data generation (e.g., creating a list of numbers)
         print("Task 1: Generating data")
-        # Reduced sleep to make it lighter
         data = list(range(1000))
         return sum(data)  # Simple computation: sum of numbers
 

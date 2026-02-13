@@ -31,7 +31,6 @@ RHAPSODY provides additional execution backends:
 
 - `RadicalExecutionBackend` — distributed execution via [RADICAL-Pilot](https://radicalpilot.readthedocs.io/en/stable/#)
 - `DaskExecutionBackend` — parallel computing via [Dask](https://docs.dask.org/en/stable/)
-- `ConcurrentExecutionBackend` — extended thread/process pool execution
 - `DragonExecutionBackendV3` — high-performance distributed execution
 
 ## Local vs HPC Execution: A Side-by-Side Comparison
