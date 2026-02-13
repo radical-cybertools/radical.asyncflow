@@ -26,19 +26,17 @@ graph TD
 
 ## Example: Independent Blocks
 
-Below is a full working example using `ConcurrentExecutionBackend` and Python's `asyncio` to execute three blocks in parallel, each with four dependent steps.
+Below is a full working example using `LocalExecutionBackend` and Python's `asyncio` to execute three blocks in parallel, each with four dependent steps.
 
 ### Setup
 
 ```python
 import time
 import asyncio
-from radical.asyncflow import ConcurrentExecutionBackend
-from radical.asyncflow import WorkflowEngine
-
+from radical.asyncflow import LocalExecutionBackend, WorkflowEngine
 from concurrent.futures import ThreadPoolExecutor
 
-backend = await ConcurrentExecutionBackend(ThreadPoolExecutor())
+backend = await LocalExecutionBackend(ThreadPoolExecutor())
 asyncflow = await WorkflowEngine.create(backend=backend)
 ```
 
@@ -315,4 +313,4 @@ await block3
     Do not forget to `await asyncflow.shutdown()` when you are done — otherwise, resources may remain allocated.
 
 !!! tip
-    You can replace `ConcurrentExecutionBackend` with `RadicalExecutionBackend` if you want to run on an HPC cluster instead of local threads/processes.
+    For HPC execution, install [RHAPSODY](https://github.com/radical-cybertools/rhapsody) and replace `LocalExecutionBackend` with a RHAPSODY backend like `RadicalExecutionBackend` to run on an HPC cluster instead of local threads/processes.

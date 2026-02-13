@@ -1,10 +1,9 @@
 import asyncio
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor
 
-from rhapsody.backends import DragonExecutionBackendV3
-
-from radical.asyncflow import WorkflowEngine
+from radical.asyncflow import LocalExecutionBackend, WorkflowEngine
 from radical.asyncflow.logging import init_default_logger
 
 logger = logging.getLogger(__name__)
@@ -12,10 +11,8 @@ logger = logging.getLogger(__name__)
 
 async def main():
     init_default_logger(logging.INFO)
-    b = await DragonExecutionBackendV3()
-    # or just
-    # flow = await WorkflowEngine.create()
-    flow = await WorkflowEngine.create(b)
+    backend = await LocalExecutionBackend(ThreadPoolExecutor())
+    flow = await WorkflowEngine.create(backend)
 
     @flow.function_task
     async def task1(*args):

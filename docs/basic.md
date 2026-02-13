@@ -10,7 +10,7 @@ You’ll learn how to define tasks, set dependencies, execute the workflow, and 
 ## Prerequisites
 
 - Make sure you have installed `radical.asyncflow` in your Python environment.
-- You also need a working Jupyter Notebook or Python >=3.8.
+- You also need a working Jupyter Notebook or Python >=3.9.
 
 ---
 
@@ -24,17 +24,17 @@ import asyncio
 
 from concurrent.futures import ThreadPoolExecutor
 
-from radical.asyncflow import WorkflowEngine, ConcurrentExecutionBackend
+from radical.asyncflow import WorkflowEngine, LocalExecutionBackend
 ```
 
 ---
 
 ## Set up the workflow engine
 
-We initialize the workflow engine with a `ConcurrentExecutionBackend` using Python’s `ThreadPoolExecutor` or `ProcessPoolExecutor`.
+We initialize the workflow engine with a `LocalExecutionBackend` using Python's `ThreadPoolExecutor` or `ProcessPoolExecutor`.
 
 ```python
-backend = await ConcurrentExecutionBackend(ThreadPoolExecutor())
+backend = await LocalExecutionBackend(ThreadPoolExecutor())
 flow = await WorkflowEngine.create(backend=backend)
 ```
 
@@ -131,7 +131,7 @@ You now know how to:
 ## Next Steps
 
 - Learn how to run multiple workflows concurrently.
-- Explore advanced backends like `DaskExecutionBackend` or `RadicalExecutionBackend`.
+- For HPC execution, install [RHAPSODY](https://github.com/radical-cybertools/rhapsody) and explore backends like `DaskExecutionBackend` or `RadicalExecutionBackend`.
 - Integrate with HPC schedulers.
 
 ---

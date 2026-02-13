@@ -2,8 +2,9 @@ import asyncio
 import logging
 
 import numpy as np
+from rhapsody.backends import DaskExecutionBackend
 
-from radical.asyncflow import DaskExecutionBackend, WorkflowEngine
+from radical.asyncflow import WorkflowEngine
 from radical.asyncflow.logging import init_default_logger
 
 logger = logging.getLogger(__name__)

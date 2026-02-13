@@ -8,13 +8,17 @@
 
 - 🧩 **Flexible and extensible** — Supports composite workflows management.
 
-Currently, RAF supports the following execution backends:
+AsyncFlow ships with the following **built-in** execution backends:
 
-- [Radical.Pilot](https://radicalpilot.readthedocs.io/en/stable/#)
-- [Dask.Parallel](https://docs.dask.org/en/stable/)
-- [Concurrent.Executor](https://docs.python.org/3/library/concurrent.futures.html#executor-objects)
-- Noop with `dry_run`
-- Custom implementations
+- `LocalExecutionBackend` — local execution using Python's [concurrent.futures](https://docs.python.org/3/library/concurrent.futures.html) (ThreadPoolExecutor / ProcessPoolExecutor)
+- `NoopExecutionBackend` — no-op backend for testing and `dry_run` mode
+
+For **HPC execution**, install [RHAPSODY](https://github.com/radical-cybertools/rhapsody) (`pip install rhapsody`) which provides additional backends:
+
+- [Radical.Pilot](https://radicalpilot.readthedocs.io/en/stable/#) — distributed HPC execution
+- [Dask](https://docs.dask.org/en/stable/) — parallel computing with Dask distributed
+- Concurrent — extended thread/process pool execution
+- Dragon — high-performance distributed execution
 
 ---
 
@@ -24,12 +28,11 @@ Basic Usage
 import asyncio
 
 from concurrent.futures import ThreadPoolExecutor
-from radical.asyncflow import WorkflowEngine
-from radical.asyncflow import ConcurrentExecutionBackend
+from radical.asyncflow import WorkflowEngine, LocalExecutionBackend
 
 async def run():
     # Create backend and workflow
-    backend = await ConcurrentExecutionBackend(ThreadPoolExecutor(max_workers=3))
+    backend = await LocalExecutionBackend(ThreadPoolExecutor(max_workers=3))
     flow = await WorkflowEngine.create(backend=backend)
 
     @flow.executable_task

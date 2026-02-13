@@ -2,7 +2,9 @@ import asyncio
 import logging
 import time
 
-from radical.asyncflow import RadicalExecutionBackend, WorkflowEngine
+from rhapsody.backends import RadicalExecutionBackend
+
+from radical.asyncflow import WorkflowEngine
 from radical.asyncflow.logging import init_default_logger
 
 logger = logging.getLogger(__name__)

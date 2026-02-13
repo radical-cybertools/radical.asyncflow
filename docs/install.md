@@ -7,7 +7,7 @@ This guide will help you install AsyncFlow in a clean Python environment.
 
 ## Prerequisites
 
-* Python ≥ **3.8** (recommended: 3.11 or newer)
+* Python ≥ **3.9** (recommended: 3.11 or newer)
 * `pip` ≥ 22.0
 * Optional: `conda` ≥ 4.10 for Conda environments
 
@@ -38,7 +38,7 @@ conda activate asyncflow
 ### Install AsyncFlow:
 
 ```bash
-pip install asyncflow
+pip install radical-asyncflow
 ```
 
 ### Verify installation:
@@ -51,7 +51,7 @@ python -c "import radical.asyncflow; print('AsyncFlow installed ✅')"
 
 ## Install with **venv** (built-in)
 
-If you don’t use Conda, you can use Python’s built-in `venv` module.
+If you don't use Conda, you can use Python's built-in `venv` module.
 
 ### Create and activate a virtual environment:
 
@@ -65,7 +65,7 @@ source ~/.venvs/asyncflow/bin/activate
 ### Install AsyncFlow:
 
 ```bash
-pip install asyncflow
+pip install radical-asyncflow
 ```
 
 ### Verify installation:
@@ -76,14 +76,26 @@ python -c "import radical.asyncflow; print('AsyncFlow installed ✅')"
 
 ---
 
+## Install RHAPSODY for HPC Execution (optional)
+
+To run workflows on HPC clusters, supercomputers, or with Dask, install [RHAPSODY](https://github.com/radical-cybertools/rhapsody):
+
+```bash
+pip install rhapsody
+```
+
+RHAPSODY provides HPC execution backends (`RadicalExecutionBackend`, `DaskExecutionBackend`, `DragonExecutionBackendV3`, etc.) that integrate seamlessly with AsyncFlow.
+
+---
+
 ## Development Installation (optional)
 
 If you want to contribute to AsyncFlow or use the latest code from GitHub:
 
 ```bash
-git clone https://github.com/radical-cybertools/asyncflow.git@devel
-cd asyncflow
-pip install -e .
+git clone https://github.com/radical-cybertools/radical.asyncflow.git
+cd radical.asyncflow
+pip install -e .[dev,lint,doc]
 ```
 
 The `-e` flag installs it in *editable mode* — any local changes you make to the code are reflected immediately.

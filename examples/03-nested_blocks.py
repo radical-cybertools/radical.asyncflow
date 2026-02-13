@@ -3,7 +3,7 @@ import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-from radical.asyncflow import ConcurrentExecutionBackend, WorkflowEngine
+from radical.asyncflow import LocalExecutionBackend, WorkflowEngine
 from radical.asyncflow.logging import init_default_logger
 
 logger = logging.getLogger(__name__)
@@ -13,7 +13,7 @@ async def main():
     init_default_logger(logging.INFO)
 
     # Create backend and workflow
-    backend = await ConcurrentExecutionBackend(ThreadPoolExecutor())
+    backend = await LocalExecutionBackend(ThreadPoolExecutor())
     flow = await WorkflowEngine.create(backend=backend)
 
     @flow.function_task
