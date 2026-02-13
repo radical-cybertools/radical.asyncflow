@@ -113,6 +113,8 @@ nav:
 
   - Composite Workflows: composite_workflow.md
 
+  - Changelog: changelog.md
+
   - API Reference:
       - AsyncFlow: api/
 
