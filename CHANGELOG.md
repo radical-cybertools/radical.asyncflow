@@ -4,7 +4,7 @@ All notable changes to RADICAL AsyncFlow will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [0.1.0] - 2026-02-12
+## [0.2.0] - 2026-02-12
 
 ### Added
 
@@ -22,3 +22,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Backend decoupling** — HPC backends (Dask, RadicalPilot, Concurrent, Dragon) moved from `radical.asyncflow` to the standalone `rhapsody` package. AsyncFlow now only ships `LocalExecutionBackend` and `NoopExecutionBackend`.
 - **Imports for HPC backends** — HPC backends are now imported from `rhapsody.backends` instead of `radical.asyncflow`.
 - **Documentation** — all docs and examples updated to reflect the new architecture, with clear separation between built-in local backends and RHAPSODY HPC backends.
+
+## [0.1.0] - 2025-12-07
+
+Initial public release of RADICAL AsyncFlow.
+
+### Added
+- Async-first workflow engine with DAG-based task scheduling.
+- Support for async and sync function execution within workflows.
+- Execution backend abstraction with pluggable backend interface.
+- RADICAL-based HPC execution backend integration.
+- Agentic workflow support.
+- Event-driven shutdown mechanism for backend lifecycle management.
+- Task cancellation signaling and cooperative cancellation support.
+- Enhanced async context manager support for workflow execution.
+- Unit and integration testing framework.
+- Initial project documentation.
+- Migration to `pyproject.toml` with `tox`-based test environments.
+
+### Changed
+- Renamed project from `flow` to `asyncflow`.
+- Removed legacy synchronous execution paradigm in favor of fully async architecture.
+- Refactored execution loop for thread-based backend.
+- Updated RADICAL execution backend callback mechanism to support service-style operation.
+- Improved error propagation for failed tasks.
+- Refactored internal utilities to remove dependency on `radical.utils`.
+- Eliminated redundant data dependency linking logic.
+
+### Fixed
+- Corrected handling of task failure without explicit `wait()`.
+- Fixed `handle_task_failure` logic for consistent error reporting.
+- Resolved process-based function execution launch issues.
+- Ensured `pre_exec` directives are properly applied.
+- Addressed multiple execution edge cases in RADICAL backend.
