@@ -29,7 +29,11 @@ import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-from radical.asyncflow import LocalExecutionBackend, NoopExecutionBackend, WorkflowEngine
+from radical.asyncflow import (
+    LocalExecutionBackend,
+    NoopExecutionBackend,
+    WorkflowEngine,
+)
 from radical.asyncflow.logging import init_default_logger
 
 logger = logging.getLogger(__name__)
@@ -41,7 +45,6 @@ async def main():
     # Initialize two named backends independently
     ai_backend = NoopExecutionBackend(name="ai")
     compute_backend = await LocalExecutionBackend(ThreadPoolExecutor(), name="compute")
-    
 
     # Register both on the same engine — first backend ("compute") is the default
     flow = await WorkflowEngine.create(backend=[compute_backend, ai_backend])

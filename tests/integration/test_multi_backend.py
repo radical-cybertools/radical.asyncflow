@@ -4,8 +4,11 @@ import asyncio
 
 import pytest
 
-from radical.asyncflow import LocalExecutionBackend, NoopExecutionBackend, WorkflowEngine
-
+from radical.asyncflow import (
+    LocalExecutionBackend,
+    NoopExecutionBackend,
+    WorkflowEngine,
+)
 
 # ---------------------------------------------------------------------------
 # prompt_task end-to-end
@@ -72,7 +75,8 @@ async def test_prompt_task_concurrent_workflows():
     results = await asyncio.gather(*[run_pipeline(d) for d in docs])
 
     assert len(results) == 8
-    # NoopExecutionBackend returns "Dummy Output" for function_task (function not executed)
+    # NoopExecutionBackend returns "Dummy Output"
+    # for function_task (function not executed)
     assert all(r == "Dummy Output" for r in results)
     await engine.shutdown()
 
@@ -132,14 +136,16 @@ async def test_mixed_routing_concurrent_pipelines():
     results = await asyncio.gather(*[run(d) for d in docs])
 
     assert len(results) == 16
-    # NoopExecutionBackend returns "Dummy Output" for function_task (function not executed)
+    # NoopExecutionBackend returns "Dummy Output"
+    # for function_task (function not executed)
     assert all(r == "Dummy Output" for r in results)
     await engine.shutdown()
 
 
 @pytest.mark.asyncio
 async def test_default_backend_handles_unrouted_tasks():
-    """Tasks without backend= are handled by the default backend in a multi-backend setup."""
+    """Tasks without backend= are handled by the default backend in a multi-backend
+    setup."""
     compute = NoopExecutionBackend(name="compute")
     ai = NoopExecutionBackend(name="ai")
     engine = await WorkflowEngine.create(backend=[compute, ai])
@@ -155,7 +161,7 @@ async def test_default_backend_handles_unrouted_tasks():
 
 @pytest.mark.asyncio
 async def test_shutdown_drains_all_backends():
-    """shutdown() completes even with multiple backends registered."""
+    """Shutdown() completes even with multiple backends registered."""
     b1 = NoopExecutionBackend(name="b1")
     b2 = NoopExecutionBackend(name="b2")
     b3 = NoopExecutionBackend(name="b3")

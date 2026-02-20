@@ -5,8 +5,7 @@ import asyncio
 import pytest
 
 from radical.asyncflow import NoopExecutionBackend, WorkflowEngine
-from radical.asyncflow.workflow_manager import EXECUTABLE, FUNCTION, PROMPT, TASK
-
+from radical.asyncflow.workflow_manager import EXECUTABLE, FUNCTION, PROMPT
 
 # ---------------------------------------------------------------------------
 # prompt_task registration
@@ -151,7 +150,7 @@ async def test_all_backends_receive_callback():
 
 @pytest.mark.asyncio
 async def test_target_backend_stored_in_comp_desc():
-    """backend= decorator param is stored as target_backend in comp_desc."""
+    """Backend= decorator param is stored as target_backend in comp_desc."""
     b1 = NoopExecutionBackend(name="compute")
     b2 = NoopExecutionBackend(name="ai")
     engine = await WorkflowEngine.create(backend=[b1, b2])
