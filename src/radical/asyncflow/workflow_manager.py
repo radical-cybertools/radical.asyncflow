@@ -26,6 +26,7 @@ TASK = "task"
 BLOCK = "block"
 FUNCTION = "function"
 EXECUTABLE = "executable"
+PROMPT = "prompt"
 
 logger = logging.getLogger(__name__)
 
@@ -65,8 +66,11 @@ class WorkflowEngine:
         # Get the current running loop - assume it exists
         self.loop = get_event_loop_or_raise("WorkflowEngine")
 
-        # Store backend (already validated by create method)
-        self.backend = backend
+        # Normalize backend: accept a single backend or a list of backends
+        if not isinstance(backend, list):
+            backend = [backend]
+        self._backends: dict = {b.name: b for b in backend}
+        self._default_backend_name: str = backend[0].name
 
         # Initialize core attributes
         self.running = []
@@ -85,8 +89,9 @@ class WorkflowEngine:
 
         self.task_states_map = self.backend.get_task_states_map()
 
-        # Register callback with backend
-        self.backend.register_callback(self.task_callbacks)
+        # Register callback with ALL backends so every backend can report state changes
+        for _b in self._backends.values():
+            _b.register_callback(self.task_callbacks)
 
         # Define decorators
         self.block = self._register_decorator(comp_type=BLOCK)
@@ -96,12 +101,18 @@ class WorkflowEngine:
         self.executable_task = self._register_decorator(
             comp_type=TASK, task_type=EXECUTABLE
         )
+        self.prompt_task = self._register_decorator(comp_type=TASK, task_type=PROMPT)
 
         # Initialize async task references (will be set in _start_async_components)
         self._run_task = None
         self._shutdown_event = asyncio.Event()  # Added shutdown signal
 
         self._setup_signal_handlers()
+
+    @property
+    def backend(self):
+        """Return the default execution backend."""
+        return self._backends[self._default_backend_name]
 
     def _setup_signal_handlers(self):
         """Register signal handlers for graceful shutdown on SIGHUP, SIGTERM, and
@@ -174,17 +185,26 @@ class WorkflowEngine:
 
     @staticmethod
     async def _setup_execution_backend(backend, dry_run: bool):
-        """Setup and validate the execution backend."""
+        """Setup and validate the execution backend.
+
+        Normalizes backend to a list so WorkflowEngine always works with a
+        registry of named backends.  A single backend or ``None`` are both
+        accepted for backward compatibility.
+        """
         if backend is None:
             if dry_run:
-                return NoopExecutionBackend()
+                b = NoopExecutionBackend()
             else:
                 logger.warning(
                     "No execution backend provided, and dry_run is False. Defaulting to LocalExecutionBackend"
                 )
-                return await LocalExecutionBackend()
-        else:
-            return backend
+                b = await LocalExecutionBackend()
+            return [b]
+
+        # Normalize single backend → list
+        if not isinstance(backend, list):
+            backend = [backend]
+        return backend
 
     async def _start_async_components(self):
         """Start internal async components (run and submit tasks)."""
@@ -267,7 +287,11 @@ class WorkflowEngine:
             take precedence over definition-time defaults.
         """
 
-        def outer(possible_func: Union[Callable, None] = None, service: bool = False):
+        def outer(
+            possible_func: Union[Callable, None] = None,
+            service: bool = False,
+            backend: Optional[str] = None,
+        ):
             if not isinstance(service, bool):
                 raise TypeError(
                     f"'service' must be a boolean, got {type(service).__name__}"
@@ -320,6 +344,7 @@ class WorkflowEngine:
                             comp_type=comp_type,
                             task_type=task_type,
                             task_backend_specific_kwargs=task_description_final,
+                            target_backend=backend,
                         )
 
                         return registered_func(*args, **kwargs)
@@ -347,6 +372,7 @@ class WorkflowEngine:
         comp_type: str,
         task_type: Optional[str],
         task_backend_specific_kwargs: Optional[dict] = None,
+        target_backend: Optional[str] = None,
     ):
         """Handles registration of async tasks and blocks as workflow components.
 
@@ -384,19 +410,26 @@ class WorkflowEngine:
                 "kwargs": kwargs,
                 "is_service": is_service,
                 "task_backend_specific_kwargs": task_backend_specific_kwargs or {},
+                "target_backend": target_backend,
             }
 
             # Only handle async functions
             if asyncio.iscoroutinefunction(func):
 
                 async def async_wrapper():
-                    # Get executable from async function call
-                    comp_desc[EXECUTABLE] = (
-                        await func(*args, **kwargs) if task_type == EXECUTABLE else None
-                    )
-                    return self._register_component(
-                        comp_fut, comp_type, comp_desc, task_type
-                    )
+                    try:
+                        if task_type == EXECUTABLE:
+                            comp_desc[EXECUTABLE] = await func(*args, **kwargs)
+                        elif task_type == PROMPT:
+                            comp_desc[PROMPT] = await func(*args, **kwargs)
+                        else:
+                            comp_desc[EXECUTABLE] = None
+                        return self._register_component(
+                            comp_fut, comp_type, comp_desc, task_type
+                        )
+                    except Exception as e:
+                        if not comp_fut.done():
+                            comp_fut.set_exception(e)
 
                 # FIXME: assign name for this comp (comp uid)
                 asyncio.create_task(async_wrapper())
@@ -468,9 +501,19 @@ class WorkflowEngine:
                     f"{type(executable_value)}"
                 )
             comp_desc[FUNCTION] = None  # Clear function since we're using executable
-        else:
-            # For regular tasks, clear executable and keep function
+        elif task_type == PROMPT:
+            # For prompt tasks, validate the prompt value
+            prompt_value = comp_desc.get(PROMPT)
+            if not prompt_value or not isinstance(prompt_value, str):
+                raise ValueError(
+                    f"Prompt task '{comp_desc['name']}' must return a non-empty string prompt"
+                )
+            comp_desc[FUNCTION] = None
             comp_desc[EXECUTABLE] = None
+        else:
+            # For regular tasks, clear executable/prompt and keep function
+            comp_desc[EXECUTABLE] = None
+            comp_desc[PROMPT] = None
 
         # Detect dependencies
         comp_deps, input_files_deps, output_files_deps = self._detect_dependencies(
@@ -990,7 +1033,22 @@ class WorkflowEngine:
             logger.debug(f"Submitting: {[b['name'] for b in objects]}")
 
             if tasks:
-                await self.backend.submit_tasks(tasks)
+                if not any(t.get("target_backend") for t in tasks):
+                    # Fast path: all tasks go to the default backend
+                    await self.backend.submit_tasks(tasks)
+                else:
+                    by_backend: dict = {}
+                    for t in tasks:
+                        by_backend.setdefault(
+                            t.get("target_backend") or self._default_backend_name, []
+                        ).append(t)
+                    # Submit to all target backends in parallel
+                    await asyncio.gather(
+                        *(
+                            self._backends[b_name].submit_tasks(b_tasks)
+                            for b_name, b_tasks in by_backend.items()
+                        )
+                    )
             if blocks:
                 await self._submit_blocks(blocks)
         except Exception as e:
@@ -1308,9 +1366,9 @@ class WorkflowEngine:
         except asyncio.CancelledError:
             logger.warning("Internal components shutdown cancelled")
 
-        # Shutdown execution backend
-        if not skip_execution_backend and self.backend:
-            await self.backend.shutdown()
+        # Shutdown all registered execution backends
+        if not skip_execution_backend and self._backends:
+            await asyncio.gather(*[b.shutdown() for b in self._backends.values()])
             self._clear_internal_records()
             logger.debug("Shutting down execution backend completed")
         else:

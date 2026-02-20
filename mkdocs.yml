@@ -109,6 +109,7 @@ nav:
       - Best Practices: best_practice.md
   - Workflows:
       - Asynchronous Workflows: async_workflows.md
+      - Multi-Backend Routing & AI Tasks: multi_backend.md
       - Execution Backends & HPC Integration: exec_backends.md
 
   - Composite Workflows: composite_workflow.md

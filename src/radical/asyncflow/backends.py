@@ -27,11 +27,15 @@ class NoopExecutionBackend:
     for testing workflow logic without computational overhead.
     """
 
-    def __init__(self):
+    def __init__(self, name: str = "default"):
         """Initialize the no-op execution backend.
 
         Sets up dummy task storage, and default callback function.
+
+        Args:
+            name: Name used to identify this backend in the multi-backend registry.
         """
+        self.name = name
         self.tasks = {}
         self._callback_func: Callable = lambda task, state: None  # default no-op
 
@@ -99,8 +103,12 @@ class NoopExecutionBackend:
                 receive dummy stdout and return_value before being marked as DONE.
         """
         for task in tasks:
-            task["stdout"] = "Dummy Output"
-            task["return_value"] = "Dummy Output"
+            if task.get("prompt"):
+                task["stdout"] = "Dummy Prompt Output"
+                task["return_value"] = "Dummy Prompt Output"
+            else:
+                task["stdout"] = "Dummy Output"
+                task["return_value"] = "Dummy Output"
             self._callback_func(task, "DONE")
 
     def link_explicit_data_deps(
@@ -143,7 +151,7 @@ class NoopExecutionBackend:
 class LocalExecutionBackend:
     """Simple async-only concurrent execution backend."""
 
-    def __init__(self, executor: Executor = None):
+    def __init__(self, executor: Executor = None, name: str = "default"):
         if not executor:
             executor = ThreadPoolExecutor()
             logger.info(
@@ -160,6 +168,7 @@ class LocalExecutionBackend:
                 "Install it with: pip install cloudpickle"
             )
 
+        self.name = name
         self.executor = executor
         self.tasks: dict[str, asyncio.Task] = {}
         self._callback_func: Callable = lambda t, s: None
@@ -211,6 +220,12 @@ class LocalExecutionBackend:
     async def _execute_task(self, task: dict) -> tuple[dict, str]:
         """Execute a single task."""
         try:
+            if task.get("prompt"):
+                raise NotImplementedError(
+                    "LocalExecutionBackend does not support prompt_task. "
+                    "Register an AI execution backend and route with "
+                    "@flow.prompt_task(backend='<name>')."
+                )
             if "function" in task and task["function"]:
                 return await self._execute_function(task)
             else:
