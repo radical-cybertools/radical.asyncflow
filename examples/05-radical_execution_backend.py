@@ -1,3 +1,12 @@
+"""RADICAL Execution Backend Example.
+
+Demonstrates HPC execution using RadicalExecutionBackend from RHAPSODY.
+
+Requires: pip install rhapsody-py
+RHAPSODY docs: https://radical-cybertools.github.io/rhapsody/
+AsyncFlow integration: https://radical-cybertools.github.io/rhapsody/integrations/#radical-asyncflow-integration
+"""
+
 import asyncio
 import logging
 import time

@@ -1,4 +1,4 @@
-# Execution Backends: Seamless Backend Switching
+# Execution Backends & HPC Integration
 
 AsyncFlow's architecture follows a **separation of concerns** principle, completely isolating the execution backend from the asynchronous programming layer. This **plug-and-play (PnP)** design allows you to switch between different execution environments with minimal code changes — from local development to massive HPC clusters.
 
@@ -21,13 +21,13 @@ AsyncFlow ships with two built-in backends:
 
 ## HPC Backends via RHAPSODY
 
-For HPC execution, install [RHAPSODY](https://github.com/radical-cybertools/rhapsody):
+For HPC execution, install [RHAPSODY](https://radical-cybertools.github.io/rhapsody/):
 
 ```bash
-pip install rhapsody
+pip install rhapsody-py
 ```
 
-RHAPSODY provides additional execution backends:
+RHAPSODY is a dedicated HPC execution layer that provides additional backends, all of which [integrate immediately with AsyncFlow](https://radical-cybertools.github.io/rhapsody/integrations/#radical-asyncflow-integration) — no changes to your workflow logic are needed:
 
 - `RadicalExecutionBackend` — distributed execution via [RADICAL-Pilot](https://radicalpilot.readthedocs.io/en/stable/#)
 - `DaskExecutionBackend` — parallel computing via [Dask](https://docs.dask.org/en/stable/)
@@ -212,7 +212,7 @@ await flow.shutdown()
 | **Storage** | Local filesystem | High-performance parallel filesystems |
 | **Task Type** | Python functions | Shell executables, compiled programs |
 | **Use Case** | Development, testing | Production HPC workloads |
-| **Install** | Built-in | `pip install rhapsody` |
+| **Install** | Built-in | `pip install rhapsody-py` |
 
 ## Advanced HPC Configurations
 
@@ -260,7 +260,7 @@ backend = await RadicalExecutionBackend({
 **Engineering Simulation**: Run computational fluid dynamics, finite element analysis, or structural optimization across distributed computing resources.
 
 !!! tip
-    **Development Strategy**: Start with `LocalExecutionBackend` for local development and testing, then install [RHAPSODY](https://github.com/radical-cybertools/rhapsody) and switch to `RadicalExecutionBackend` for production HPC runs.
+    **Development Strategy**: Start with `LocalExecutionBackend` for local development and testing, then install [RHAPSODY](https://radical-cybertools.github.io/rhapsody/) and switch to any RHAPSODY backend for production HPC runs. See the [AsyncFlow integration guide](https://radical-cybertools.github.io/rhapsody/integrations/#radical-asyncflow-integration) for details.
 
 ## The AsyncFlow Advantage
 

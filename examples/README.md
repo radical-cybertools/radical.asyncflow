@@ -22,7 +22,7 @@ python examples/03-nested_blocks.py
 
 ## HPC Execution (requires RHAPSODY)
 
-These examples require [RHAPSODY](https://github.com/radical-cybertools/rhapsody) to be installed (`pip install rhapsody`). They demonstrate how to run workflows on HPC backends.
+These examples require [RHAPSODY](https://radical-cybertools.github.io/rhapsody/) to be installed (`pip install rhapsody-py`). RHAPSODY backends [plug directly into AsyncFlow](https://radical-cybertools.github.io/rhapsody/integrations/#radical-asyncflow-integration) — see the integration guide for full details on configuration and usage.
 
 | Example | Description |
 |---------|-------------|
@@ -33,7 +33,7 @@ These examples require [RHAPSODY](https://github.com/radical-cybertools/rhapsody
 ### Running
 
 ```bash
-pip install rhapsody
+pip install rhapsody-py
 python examples/04-dask_execution_backend.py
 python examples/05-radical_execution_backend.py
 dragon examples/06-dragon_execution_backend.py

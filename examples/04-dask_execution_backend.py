@@ -1,3 +1,12 @@
+"""Dask Execution Backend Example.
+
+Demonstrates parallel data analysis using DaskExecutionBackend from RHAPSODY.
+
+Requires: pip install rhapsody-py
+RHAPSODY docs: https://radical-cybertools.github.io/rhapsody/
+AsyncFlow integration: https://radical-cybertools.github.io/rhapsody/integrations/#radical-asyncflow-integration
+"""
+
 import asyncio
 import logging
 

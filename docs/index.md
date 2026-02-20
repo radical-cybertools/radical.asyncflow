@@ -13,7 +13,7 @@ AsyncFlow ships with the following **built-in** execution backends:
 - `LocalExecutionBackend` — local execution using Python's [concurrent.futures](https://docs.python.org/3/library/concurrent.futures.html) (ThreadPoolExecutor / ProcessPoolExecutor)
 - `NoopExecutionBackend` — no-op backend for testing and `dry_run` mode
 
-For **HPC execution**, install [RHAPSODY](https://github.com/radical-cybertools/rhapsody) (`pip install rhapsody`) which provides additional backends:
+For **HPC execution**, install [RHAPSODY](https://radical-cybertools.github.io/rhapsody/) (`pip install rhapsody-py`) which provides additional backends — see [Execution Backends & HPC Integration](exec_backends.md) for the full guide:
 
 - [Radical.Pilot](https://radicalpilot.readthedocs.io/en/stable/#) — distributed HPC execution
 - [Dask](https://docs.dask.org/en/stable/) — parallel computing with Dask distributed

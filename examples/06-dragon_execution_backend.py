@@ -8,7 +8,9 @@ Demonstrates:
 - process_templates for multi-process parallel jobs
 - Native function execution (no task_description)
 
-Requires: pip install rhapsody
+Requires: pip install rhapsody-py
+RHAPSODY docs: https://radical-cybertools.github.io/rhapsody/
+AsyncFlow integration: https://radical-cybertools.github.io/rhapsody/integrations/#radical-asyncflow-integration
 """
 
 import asyncio

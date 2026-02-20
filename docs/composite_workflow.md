@@ -313,4 +313,4 @@ await block3
     Do not forget to `await asyncflow.shutdown()` when you are done — otherwise, resources may remain allocated.
 
 !!! tip
-    For HPC execution, install [RHAPSODY](https://github.com/radical-cybertools/rhapsody) and replace `LocalExecutionBackend` with a RHAPSODY backend like `RadicalExecutionBackend` to run on an HPC cluster instead of local threads/processes.
+    For HPC execution, install [RHAPSODY](https://radical-cybertools.github.io/rhapsody/) and replace `LocalExecutionBackend` with a RHAPSODY backend like `RadicalExecutionBackend` to run on an HPC cluster instead of local threads/processes. See [Execution Backends & HPC Integration](exec_backends.md) for the full guide — your workflow logic stays unchanged.

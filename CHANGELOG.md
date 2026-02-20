@@ -4,6 +4,15 @@ All notable changes to RADICAL AsyncFlow will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Changed
+
+- **Documentation** — all HPC backend references across docs, examples, and the Jupyter tutorial now point to the official [RHAPSODY documentation](https://radical-cybertools.github.io/rhapsody/) instead of the GitHub repository, and include a direct link to the [AsyncFlow integration guide](https://radical-cybertools.github.io/rhapsody/integrations/#radical-asyncflow-integration).
+- **Examples** — HPC example scripts (`04-dask_execution_backend.py`, `05-radical_execution_backend.py`, `06-dragon_execution_backend.py`) updated with module-level docstrings referencing RHAPSODY docs and the AsyncFlow integration guide.
+- **Proof-of-concept examples** — all basic/getting-started examples (`basic.md`, `async_workflows.md`, `composite_workflow.md`, examples 01–03) consistently use `LocalExecutionBackend`; RHAPSODY backends are only shown in dedicated HPC sections.
+- **Install command** — RHAPSODY install command corrected to `pip install rhapsody-py` across all docs and examples.
+
 ## [0.2.0] - 2026-02-12
 
 ### Added

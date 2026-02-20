@@ -78,13 +78,13 @@ python -c "import radical.asyncflow; print('AsyncFlow installed ✅')"
 
 ## Install RHAPSODY for HPC Execution (optional)
 
-To run workflows on HPC clusters, supercomputers, or with Dask, install [RHAPSODY](https://github.com/radical-cybertools/rhapsody):
+To run workflows on HPC clusters, supercomputers, or with Dask, install [RHAPSODY](https://radical-cybertools.github.io/rhapsody/):
 
 ```bash
-pip install rhapsody
+pip install rhapsody-py
 ```
 
-RHAPSODY provides HPC execution backends (`RadicalExecutionBackend`, `DaskExecutionBackend`, `DragonExecutionBackendV3`, etc.) that integrate seamlessly with AsyncFlow.
+RHAPSODY provides HPC execution backends (`RadicalExecutionBackend`, `DaskExecutionBackend`, `DragonExecutionBackendV3`, etc.) that plug directly into AsyncFlow — see [Execution Backends & HPC Integration](exec_backends.md) for usage, configuration, and examples.
 
 ---
 
