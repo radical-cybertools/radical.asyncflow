@@ -1,8 +1,19 @@
+"""RADICAL Execution Backend Example.
+
+Demonstrates HPC execution using RadicalExecutionBackend from RHAPSODY.
+
+Requires: pip install rhapsody-py
+RHAPSODY docs: https://radical-cybertools.github.io/rhapsody/
+AsyncFlow integration: https://radical-cybertools.github.io/rhapsody/integrations/#radical-asyncflow-integration
+"""
+
 import asyncio
 import logging
 import time
 
-from radical.asyncflow import RadicalExecutionBackend, WorkflowEngine
+from rhapsody.backends import RadicalExecutionBackend
+
+from radical.asyncflow import WorkflowEngine
 from radical.asyncflow.logging import init_default_logger
 
 logger = logging.getLogger(__name__)
@@ -43,10 +54,11 @@ async def main():
     # Run workflows concurrently
     try:
         await asyncio.gather(*[run_wf(i) for i in range(10)])
-    except Exception as e:
+    except Exception:
         raise
     finally:
         await flow.shutdown()
+
 
 if __name__ == "__main__":
     asyncio.run(main())

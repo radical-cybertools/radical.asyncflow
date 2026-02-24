@@ -22,15 +22,15 @@ URL_SCHEMES = [
 class File:
     """Base class for file handling in task execution systems.
 
-    Provides common attributes and functionality for managing files with
-    filename and filepath properties.
+    Provides common attributes and functionality for managing files with filename and
+    filepath properties.
     """
 
     def __init__(self) -> None:
         """Initialize a File object with default None values.
 
-        Sets filename and filepath attributes to None, to be populated
-        by subclasses during file resolution.
+        Sets filename and filepath attributes to None, to be populated by subclasses
+        during file resolution.
         """
         self.filename = None
         self.filepath = None
@@ -74,12 +74,12 @@ class File:
 
 
 class InputFile(File):
-    """Represents an input file that can be sourced from remote URLs, local paths,
-       or task outputs.
+    """Represents an input file that can be sourced from remote URLs, local paths, or
+    task outputs.
 
     Automatically detects the file source type and handles appropriate resolution.
-    Supports remote file downloading, local file path resolution, and task output
-    file references.
+    Supports remote file downloading, local file path resolution, and task output file
+    references.
     """
 
     def __init__(self, file):
@@ -147,8 +147,8 @@ class InputFile(File):
 class OutputFile(File):
     """Represents an output file that will be produced by a task.
 
-    Handles filename validation and extraction from file paths, ensuring
-    proper output file naming for task execution.
+    Handles filename validation and extraction from file paths, ensuring proper output
+    file naming for task execution.
     """
 
     def __init__(self, filename):

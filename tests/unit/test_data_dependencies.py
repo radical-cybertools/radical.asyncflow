@@ -1,11 +1,10 @@
-from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import MagicMock
 
 import pytest
 
 from radical.asyncflow import (
-    ConcurrentExecutionBackend,
     InputFile,
+    LocalExecutionBackend,
     OutputFile,
     WorkflowEngine,
 )
@@ -13,7 +12,7 @@ from radical.asyncflow import (
 
 @pytest.mark.asyncio
 async def test_implicit_data_dependencies_trigger():
-    backend = await ConcurrentExecutionBackend(ThreadPoolExecutor())
+    backend = await LocalExecutionBackend()
     flow = await WorkflowEngine.create(backend)
     flow.backend.link_implicit_data_deps = MagicMock()
 
@@ -34,7 +33,7 @@ async def test_implicit_data_dependencies_trigger():
 
 @pytest.mark.asyncio
 async def test_explicit_data_dependencies_trigger():
-    backend = await ConcurrentExecutionBackend(ThreadPoolExecutor())
+    backend = await LocalExecutionBackend()
     flow = await WorkflowEngine.create(backend)
     flow.backend.link_explicit_data_deps = MagicMock()
 

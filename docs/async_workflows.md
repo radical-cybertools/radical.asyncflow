@@ -31,11 +31,10 @@ graph TD
 
 import time
 import asyncio
-from radical.asyncflow import ConcurrentExecutionBackend
 from concurrent.futures import ThreadPoolExecutor
-from radical.asyncflow import WorkflowEngine
+from radical.asyncflow import WorkflowEngine, LocalExecutionBackend
 
-backend = await ConcurrentExecutionBackend(ThreadPoolExecutor())
+backend = await LocalExecutionBackend(ThreadPoolExecutor())
 flow = await WorkflowEngine.create(backend=backend)
 
 async def main():

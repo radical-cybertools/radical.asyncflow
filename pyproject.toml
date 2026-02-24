@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "radical.asyncflow"
-version = "0.1.0"
+version = "0.2.0"
 description = "A High Performance Asynchronous Workflow Scripting Library"
 
 authors = [
@@ -20,7 +20,8 @@ requires-python = ">=3.9"
 dependencies = [
     "pydantic",
     "typeguard",
-    "requests"
+    "requests",
+    "cloudpickle"
 ]
 
 [project.urls]
@@ -29,17 +30,14 @@ Issues = "https://github.com/radical-cybertools/radical.asyncflow/issues"
 Documentation = "https://radical-cybertools.github.io/radical.asyncflow"
 
 [project.optional-dependencies]
-dask = ["dask[distributed]"]
-radicalpilot = ["radical.pilot"]
-
-
 lint = ["ruff"]
 
 # All test deps
 dev = [
     "pytest",
     "pytest-asyncio",
-    "pytest-cov"
+    "pytest-cov",
+    "pre-commit"
 ]
 
 doc = [

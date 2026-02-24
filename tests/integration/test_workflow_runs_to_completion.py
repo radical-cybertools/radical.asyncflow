@@ -1,19 +1,19 @@
 import asyncio
 import time
-from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from radical.asyncflow import ConcurrentExecutionBackend, WorkflowEngine
+from radical.asyncflow import LocalExecutionBackend, WorkflowEngine
 
 
 @pytest.mark.asyncio
 async def test_flow_function_tasks():
+    """Integration test using `function_task`.
+
+    Each task updates a shared workflow state, which is verified at the end of
+    execution.
     """
-    Integration test using `function_task`. Each task updates a shared workflow state,
-    which is verified at the end of execution.
-    """
-    backend = await ConcurrentExecutionBackend(ThreadPoolExecutor())
+    backend = await LocalExecutionBackend()
     flow = await WorkflowEngine.create(backend=backend)
 
     # Shared state is passed and returned explicitly across tasks
@@ -46,9 +46,7 @@ async def test_flow_function_tasks():
         return state
 
     async def run_wf(wf_id):
-        """
-        Runs a chain of function tasks where each builds upon shared state.
-        """
+        """Runs a chain of function tasks where each builds upon shared state."""
         print(f"\n[WF {wf_id}] Start: {time.time():.2f}")
         s1 = await task1()
         s2 = await task2(s1)
@@ -75,12 +73,12 @@ async def test_flow_function_tasks():
 
 @pytest.mark.asyncio
 async def test_flow_executable_tasks(tmp_path):
+    """Integration test using `executable_task`.
+
+    Each task appends to a workflow-local file. Final task output is used to validate
+    execution order.
     """
-    Integration test using `executable_task`. Each task appends
-    to a workflow-local file.
-    Final task output is used to validate execution order.
-    """
-    backend = await ConcurrentExecutionBackend(ThreadPoolExecutor())
+    backend = await LocalExecutionBackend()
     flow = await WorkflowEngine.create(backend=backend)
 
     # Define executable tasks that append their ID to a shared file
@@ -105,9 +103,7 @@ async def test_flow_executable_tasks(tmp_path):
         return f'echo "task5" >> {wf_file}'
 
     async def run_wf(wf_id):
-        """
-        Runs executable tasks that log their execution to a local file.
-        """
+        """Runs executable tasks that log their execution to a local file."""
         wf_file = tmp_path / f"workflow_{wf_id}.log"
         wf_file_path = str(wf_file)
 
@@ -142,11 +138,11 @@ async def test_flow_executable_tasks(tmp_path):
 
 @pytest.mark.asyncio
 async def test_flow_mixed_function_and_executable_tasks(tmp_path):
-    """
-    Integration test mixing `function_task` and `executable_task`.
+    """Integration test mixing `function_task` and `executable_task`.
+
     Function tasks modify state, while executable tasks log their invocation.
     """
-    backend = await ConcurrentExecutionBackend(ThreadPoolExecutor())
+    backend = await LocalExecutionBackend()
     flow = await WorkflowEngine.create(backend=backend)
 
     # Function tasks
@@ -180,9 +176,7 @@ async def test_flow_mixed_function_and_executable_tasks(tmp_path):
         return f'echo "e_task3" >> {wf_file}'
 
     async def run_wf(wf_id):
-        """
-        Mixed function and executable tasks within one workflow.
-        """
+        """Mixed function and executable tasks within one workflow."""
         wf_file = tmp_path / f"wf_{wf_id}.log"
         wf_file_path = str(wf_file)
 

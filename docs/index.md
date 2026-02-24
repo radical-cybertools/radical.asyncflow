@@ -1,6 +1,6 @@
 # RADICAL AsyncFlow (RAF)
 
-**RADICAL AsyncFlow (RAF)** is a fast asynchronous scripting library built on top of [asyncio](https://docs.python.org/3/library/asyncio.html) for building powerful asynchronous workflows on HPC, clusters, and local machines. It supports pluggable execution backends with intuitive task dependencies and workflow composition. 
+**RADICAL AsyncFlow (RAF)** is a fast asynchronous scripting library built on top of [asyncio](https://docs.python.org/3/library/asyncio.html) for building powerful asynchronous workflows on HPC, clusters, and local machines. It supports pluggable execution backends with intuitive task dependencies and workflow composition.
 
 - ⚡ **Powerful asynchronous workflows** — Compose complex async and sync workflows easily, with intuitive task dependencies.
 
@@ -8,13 +8,17 @@
 
 - 🧩 **Flexible and extensible** — Supports composite workflows management.
 
-Currently, RAF supports the following execution backends:
+AsyncFlow ships with the following **built-in** execution backends:
 
-- [Radical.Pilot](https://radicalpilot.readthedocs.io/en/stable/#)
-- [Dask.Parallel](https://docs.dask.org/en/stable/)
-- [Concurrent.Executor](https://docs.python.org/3/library/concurrent.futures.html#executor-objects)
-- Noop with `dry_run`
-- Custom implementations
+- `LocalExecutionBackend` — local execution using Python's [concurrent.futures](https://docs.python.org/3/library/concurrent.futures.html) (ThreadPoolExecutor / ProcessPoolExecutor)
+- `NoopExecutionBackend` — no-op backend for testing and `dry_run` mode
+
+For **HPC execution**, install [RHAPSODY](https://radical-cybertools.github.io/rhapsody/) (`pip install rhapsody-py`) which provides additional backends — see [Execution Backends & HPC Integration](exec_backends.md) for the full guide:
+
+- [Radical.Pilot](https://radicalpilot.readthedocs.io/en/stable/#) — distributed HPC execution
+- [Dask](https://docs.dask.org/en/stable/) — parallel computing with Dask distributed
+- Concurrent — extended thread/process pool execution
+- Dragon — high-performance distributed execution
 
 ---
 
@@ -24,12 +28,11 @@ Basic Usage
 import asyncio
 
 from concurrent.futures import ThreadPoolExecutor
-from radical.asyncflow import WorkflowEngine
-from radical.asyncflow import ConcurrentExecutionBackend
+from radical.asyncflow import WorkflowEngine, LocalExecutionBackend
 
 async def run():
     # Create backend and workflow
-    backend = await ConcurrentExecutionBackend(ThreadPoolExecutor(max_workers=3))
+    backend = await LocalExecutionBackend(ThreadPoolExecutor(max_workers=3))
     flow = await WorkflowEngine.create(backend=backend)
 
     @flow.executable_task

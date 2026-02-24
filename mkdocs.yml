@@ -100,18 +100,21 @@ markdown_extensions:
   - md_in_html
 
 nav:
-  - Home: 
+  - Home:
       - Introduction: index.md
       - Installation: install.md
   - Getting Started:
       - Basic Usage: basic.md
-  - Best Practices: 
+  - Best Practices:
       - Best Practices: best_practice.md
   - Workflows:
       - Asynchronous Workflows: async_workflows.md
-      - Execution Backends: exec_backends.md
+      - Multi-Backend Routing & AI Tasks: multi_backend.md
+      - Execution Backends & HPC Integration: exec_backends.md
 
   - Composite Workflows: composite_workflow.md
+
+  - Changelog: changelog.md
 
   - API Reference:
       - AsyncFlow: api/

@@ -1,0 +1,14 @@
+[default.extend-words]
+# Allow common abbreviations and project-specific terms
+noop = "noop"
+# PnP = Plug-and-Play (intentional abbreviation)
+Pn = "Pn"
+
+[files]
+extend-exclude = [
+    "*.egg-info",
+    ".tox",
+    "build",
+    "dist",
+    ".git",
+]

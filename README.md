@@ -6,7 +6,7 @@
     <img src="https://img.shields.io/badge/License-MIT-gre.svg" alt="License: MIT">
   </a>
   <a href="https://www.python.org/downloads/">
-    <img src="https://img.shields.io/badge/python-3.8+-blue.svg" alt="Python 3.8+">
+    <img src="https://img.shields.io/badge/python-3.9+-blue.svg" alt="Python 3.9+">
   </a>
   <a href="https://github.com/radical-cybertools/radical.asyncflow/actions/workflows/tests.yml">
     <img src="https://github.com/radical-cybertools/radical.asyncflow/actions/workflows/tests.yml/badge.svg?branch=main" alt="Tests">
@@ -17,7 +17,7 @@
 </p>
 
 
-RADICAL AsyncFlow (RAF) is a fast asynchronous scripting library built on top of [asyncio](https://docs.python.org/3/library/asyncio.html) for building powerful async/sync workflows on HPC, clusters, and local machines. It supports pluggable execution backends with intuitive task dependencies and workflow composition. 
+RADICAL AsyncFlow (RAF) is a fast asynchronous scripting library built on top of [asyncio](https://docs.python.org/3/library/asyncio.html) for building powerful async/sync workflows on HPC, clusters, and local machines. It supports pluggable execution backends with intuitive task dependencies and workflow composition.
 
 - ⚡ Powerful asynchronous workflows — Compose complex async and sync workflows easily, with intuitive task dependencies and campaign orchestration.
 
@@ -26,19 +26,27 @@ RADICAL AsyncFlow (RAF) is a fast asynchronous scripting library built on top of
 - 🧩 Flexible and extensible — Supports campaign management and advanced workflow patterns, built on Python’s asyncio and RADICAL Cybertools expertise.
 
 
-Currently, RAF supports the following execution backends:
+AsyncFlow ships with the following **built-in** execution backends:
 
+- `LocalExecutionBackend` — local execution using Python's [concurrent.futures](https://docs.python.org/3/library/concurrent.futures.html) (ThreadPoolExecutor / ProcessPoolExecutor)
+- `NoopExecutionBackend` — no-op backend for testing and `dry_run` mode
 
-- [Radical.Pilot](https://radicalpilot.readthedocs.io/en/stable/#)
-- [Dask.Parallel](https://docs.dask.org/en/stable/)
-- [Concurrent.Executor](https://docs.python.org/3/library/concurrent.futures.html#executor-objects)
-- Noop with `dry_run`
-- Custom implementations
+For **HPC execution**, install [RHAPSODY](https://radical-cybertools.github.io/rhapsody/) which provides additional backends that [plug directly into AsyncFlow](https://radical-cybertools.github.io/rhapsody/integrations/#radical-asyncflow-integration):
+
+- [Radical.Pilot](https://radicalpilot.readthedocs.io/en/stable/#) — distributed HPC execution across supercomputers and clusters
+- [Dask](https://docs.dask.org/en/stable/) — parallel computing with Dask distributed
+- Concurrent — thread/process pool execution with extended HPC support
+- Dragon — high-performance distributed execution
 
 ## ⚙️ Installation
-Radical Asyncflow package is available on [PyPI](https://pypi.org/project/radical-asyncflow/).
+Radical AsyncFlow package is available on [PyPI](https://pypi.org/project/radical-asyncflow/).
 ```
 pip install radical-asyncflow
+```
+
+For **HPC execution** via [RHAPSODY](https://radical-cybertools.github.io/rhapsody/):
+```
+pip install rhapsody-py
 ```
 
 For developers:
@@ -58,14 +66,12 @@ pip install -e .[dev,lint,doc]
 ```python
 import asyncio
 
-from radical.asyncflow import WorkflowEngine
-from radical.asyncflow import ConcurrentExecutionBackend
-
+from radical.asyncflow import WorkflowEngine, LocalExecutionBackend
 from concurrent.futures import ThreadPoolExecutor
 
 async def main():
     # Create backend and workflow
-    backend = await ConcurrentExecutionBackend(ThreadPoolExecutor())
+    backend = await LocalExecutionBackend(ThreadPoolExecutor())
     flow = await WorkflowEngine.create(backend=backend)
 
     @flow.executable_task
@@ -79,7 +85,7 @@ async def main():
     # create the workflow
     t1_fut = task1()
     t2_result = await task2(t1_fut) # t2 depends on t1 (waits for it)
-  
+
     print(t2_result)
     # shutdown the execution backend
     await flow.shutdown()

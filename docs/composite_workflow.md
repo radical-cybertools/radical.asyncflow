@@ -8,37 +8,35 @@ This page walks you step by step through defining and running composite workflow
 graph TD
 
     subgraph Block A
-        A_WF1[task1 --> task2 --> task3] --> A_WF2[task1 --> task2 --> task3] --> A_WF3[task1 --> task2 --> task3] 
+        A_WF1[task1 --> task2 --> task3] --> A_WF2[task1 --> task2 --> task3] --> A_WF3[task1 --> task2 --> task3]
     end
 
     subgraph Block B
-        B_WF1[task1 --> task2 --> task3] --> B_WF2[task1 --> task2 --> task3] --> B_WF3[task1 --> task2 --> task3] 
+        B_WF1[task1 --> task2 --> task3] --> B_WF2[task1 --> task2 --> task3] --> B_WF3[task1 --> task2 --> task3]
     end
 
     subgraph Block C
-        C_WF1[task1 --> task2 --> task3] --> C_WF2[task1 --> task2 --> task3] --> C_WF3[task1 --> task2 --> task3] 
+        C_WF1[task1 --> task2 --> task3] --> C_WF2[task1 --> task2 --> task3] --> C_WF3[task1 --> task2 --> task3]
     end
 
 ```
 
 !!! note
-    `Block` entity can have DAG shaped workflows where some workflows depend on others. 
+    `Block` entity can have DAG shaped workflows where some workflows depend on others.
 
 ## Example: Independent Blocks
 
-Below is a full working example using `ConcurrentExecutionBackend` and Python's `asyncio` to execute three blocks in parallel, each with four dependent steps.
+Below is a full working example using `LocalExecutionBackend` and Python's `asyncio` to execute three blocks in parallel, each with four dependent steps.
 
 ### Setup
 
 ```python
 import time
 import asyncio
-from radical.asyncflow import ConcurrentExecutionBackend
-from radical.asyncflow import WorkflowEngine
-
+from radical.asyncflow import LocalExecutionBackend, WorkflowEngine
 from concurrent.futures import ThreadPoolExecutor
 
-backend = await ConcurrentExecutionBackend(ThreadPoolExecutor())
+backend = await LocalExecutionBackend(ThreadPoolExecutor())
 asyncflow = await WorkflowEngine.create(backend=backend)
 ```
 
@@ -315,4 +313,4 @@ await block3
     Do not forget to `await asyncflow.shutdown()` when you are done — otherwise, resources may remain allocated.
 
 !!! tip
-    You can replace `ConcurrentExecutionBackend` with `RadicalExecutionBackend` if you want to run on an HPC cluster instead of local threads/processes.
+    For HPC execution, install [RHAPSODY](https://radical-cybertools.github.io/rhapsody/) and replace `LocalExecutionBackend` with a RHAPSODY backend like `RadicalExecutionBackend` to run on an HPC cluster instead of local threads/processes. See [Execution Backends & HPC Integration](exec_backends.md) for the full guide — your workflow logic stays unchanged.

@@ -1,4 +1,4 @@
-# Execution Backends: Seamless Backend Switching
+# Execution Backends & HPC Integration
 
 AsyncFlow's architecture follows a **separation of concerns** principle, completely isolating the execution backend from the asynchronous programming layer. This **plug-and-play (PnP)** design allows you to switch between different execution environments with minimal code changes — from local development to massive HPC clusters.
 
@@ -12,26 +12,46 @@ By design, AsyncFlow enforces that the execution backend should be entirely isol
 
 **The best part?** Changing execution backends requires modifying just **one line of code**.
 
+## Built-in Backends
+
+AsyncFlow ships with two built-in backends:
+
+- `LocalExecutionBackend` — executes tasks locally using Python's `ThreadPoolExecutor` or `ProcessPoolExecutor`
+- `NoopExecutionBackend` — no-op backend for testing and `dry_run` mode
+
+## HPC Backends via RHAPSODY
+
+For HPC execution, install [RHAPSODY](https://radical-cybertools.github.io/rhapsody/):
+
+```bash
+pip install rhapsody-py
+```
+
+RHAPSODY is a dedicated HPC execution layer that provides additional backends, all of which [integrate immediately with AsyncFlow](https://radical-cybertools.github.io/rhapsody/integrations/#radical-asyncflow-integration) — no changes to your workflow logic are needed:
+
+- `RadicalExecutionBackend` — distributed execution via [RADICAL-Pilot](https://radicalpilot.readthedocs.io/en/stable/#)
+- `DaskExecutionBackend` — parallel computing via [Dask](https://docs.dask.org/en/stable/)
+- `DragonExecutionBackendV3` — high-performance distributed execution
+
 ## Local vs HPC Execution: A Side-by-Side Comparison
 
-### Local Execution with ConcurrentExecutionBackend
+### Local Execution with LocalExecutionBackend
 
 ```python
-# Local execution with threads
-
+# Local execution with threads (built-in)
 from concurrent.futures import ThreadPoolExecutor
-from radical.asyncflow import ConcurrentExecutionBackend
+from radical.asyncflow import LocalExecutionBackend
 
-backend = ConcurrentExecutionBackend(ThreadPoolExecutor())
+backend = await LocalExecutionBackend(ThreadPoolExecutor())
 ```
 
 ### HPC Execution with RadicalExecutionBackend
 
 ```python
-# HPC execution with Radical.Pilot
-from radical.asyncflow import RadicalExecutionBackend
+# HPC execution with Radical.Pilot (requires RHAPSODY)
+from rhapsody.backends import RadicalExecutionBackend
 
-backend = RadicalExecutionBackend({'resource': 'local.localhost'})
+backend = await RadicalExecutionBackend({'resource': 'local.localhost'})
 ```
 
 !!! success
@@ -39,19 +59,19 @@ backend = RadicalExecutionBackend({'resource': 'local.localhost'})
 
 ## Complete HPC Workflow Example
 
-Below is a complete example demonstrating how to execute workflows on HPC infrastructure using `RadicalExecutionBackend`.
+Below is a complete example demonstrating how to execute workflows on HPC infrastructure using `RadicalExecutionBackend` from RHAPSODY.
 
 ### Setup for HPC Execution
 
 ```python
 import time
 import asyncio
-from radical.asyncflow import RadicalExecutionBackend
+from rhapsody.backends import RadicalExecutionBackend
 from radical.asyncflow import WorkflowEngine
 
 # HPC backend configuration
-backend = RadicalExecutionBackend({'nodes': 1, 'resource': 'local.localhost'}) # (1)!
-flow = WorkflowEngine(backend=backend)
+backend = await RadicalExecutionBackend({'nodes': 1, 'resource': 'local.localhost'}) # (1)!
+flow = await WorkflowEngine.create(backend=backend)
 ```
 
 1. Configure for HPC execution - can target supercomputers, GPU clusters, local resources
@@ -92,7 +112,7 @@ async def task3(*args):
 
 ### Assign Resources for your application (task)
 
-Depending on the `ExecutionBackend` used, Asyncflow supports passing and assigning multiple/different task and resources parameters to each task. This is part of having a full and granular control on the parallelism that asyncflow can offer.  
+Depending on the `ExecutionBackend` used, AsyncFlow supports passing and assigning multiple/different task and resources parameters to each task. This is part of having a full and granular control on the parallelism that AsyncFlow can offer.
 Both `@flow.executable_task` and `@flow.function_task` can do that by passing `task_description` to your function `kwargs` during task definition or task invocation.
 
 ```python
@@ -122,7 +142,7 @@ async def mpi_func(task_description={'ranks': 8, 'type': 'mpi'}):
 ```
 
 !!! note
-    Specifying `task_description` keys and values depends on the corresponding `ExecutionBackend used`. The example above reflects the usage of `RadicalExecutionBackend`.
+    Specifying `task_description` keys and values depends on the corresponding `ExecutionBackend used`. The example above reflects the usage of `RadicalExecutionBackend` from RHAPSODY.
     For more information about what each task accepts as a resource parameters, please refer
     to the corresponding runtime system (`ExecutionBackend`) documentation.
 
@@ -135,11 +155,11 @@ async def mpi_func(task_description={'ranks': 8, 'type': 'mpi'}):
 ```python
 async def run_wf(wf_id):
     print(f'Starting workflow {wf_id} at {time.time()}')
-    
+
     # Create dependent task execution
     t3 = task3(task1(), task2()) # (1)!
     await t3  # Wait for distributed execution to complete
-    
+
     print(f'Workflow {wf_id} completed at {time.time()}')
 ```
 
@@ -185,21 +205,24 @@ await flow.shutdown()
 
 ## HPC vs Local Development: Key Differences
 
-| Aspect | ConcurrentExecutionBackend | RadicalExecutionBackend |
-|--------|---------------------------|-------------------------|
+| Aspect | LocalExecutionBackend | RadicalExecutionBackend (RHAPSODY) |
+|--------|----------------------|-------------------------------------|
 | **Scale** | Single machine, limited cores | Thousands of nodes, massive parallelism |
 | **Memory** | Local system RAM | Distributed memory across nodes |
 | **Storage** | Local filesystem | High-performance parallel filesystems |
 | **Task Type** | Python functions | Shell executables, compiled programs |
 | **Use Case** | Development, testing | Production HPC workloads |
+| **Install** | Built-in | `pip install rhapsody-py` |
 
 ## Advanced HPC Configurations
 
 ### GPU Cluster Configuration
 
 ```python
+from rhapsody.backends import RadicalExecutionBackend
+
 # Configure for GPU-accelerated computing
-backend = RadicalExecutionBackend({
+backend = await RadicalExecutionBackend({
     'resource': 'ornl.summit',
     'queue': 'gpu',
     'nodes': 100,
@@ -211,8 +234,10 @@ backend = RadicalExecutionBackend({
 ### Large-Scale CPU Configuration
 
 ```python
+from rhapsody.backends import RadicalExecutionBackend
+
 # Configure for massive CPU parallelism
-backend = RadicalExecutionBackend({
+backend = await RadicalExecutionBackend({
     'resource': 'tacc.frontera',
     'queue': 'normal',
     'nodes': 1000,
@@ -235,13 +260,13 @@ backend = RadicalExecutionBackend({
 **Engineering Simulation**: Run computational fluid dynamics, finite element analysis, or structural optimization across distributed computing resources.
 
 !!! tip
-    **Development Strategy**: Start with `ConcurrentExecutionBackend` for local development and testing, then seamlessly switch to `RadicalExecutionBackend` for production HPC runs.
+    **Development Strategy**: Start with `LocalExecutionBackend` for local development and testing, then install [RHAPSODY](https://radical-cybertools.github.io/rhapsody/) and switch to any RHAPSODY backend for production HPC runs. See the [AsyncFlow integration guide](https://radical-cybertools.github.io/rhapsody/integrations/#radical-asyncflow-integration) for details.
 
 ## The AsyncFlow Advantage
 
 AsyncFlow's backend abstraction means your workflow logic remains **identical** whether running on:
 - Your laptop with 8 cores
-- A university cluster with 1,000 nodes  
+- A university cluster with 1,000 nodes
 - A national supercomputer with 100,000+ cores
 - GPU clusters with thousands of accelerators
 

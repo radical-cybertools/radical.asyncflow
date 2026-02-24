@@ -1,7 +1,7 @@
 
 # Best Practices for AsyncFlow
 
-AsyncFlow is built on top of Python’s `asyncio`, combining asynchronous execution and task dependency management with a simple API.  
+AsyncFlow is built on top of Python’s `asyncio`, combining asynchronous execution and task dependency management with a simple API.
 This page outlines **recommended practices** when using AsyncFlow effectively in your projects.
 
 ---
@@ -47,7 +47,7 @@ Tasks can depend on the output of other tasks:
     Tasks that don’t depend on each other run in parallel automatically.
 
 ```python
-asyncflow = await WorkflowManager.create(dry_run=True)
+asyncflow = await WorkflowEngine.create(dry_run=True)
 
 async def task_a():
     asyncio.sleep(2) # (1)!
@@ -121,8 +121,8 @@ Logs show task dependencies, execution order, errors.
 ---
 
 !!! success
-    - Define tasks clearly and concisely.  
-    - Pass tasks as arguments to express dependencies.  
-    - Only await at the top level.  
-    - Shut down cleanly.  
-    - Log at `DEBUG` level when needed.  
+    - Define tasks clearly and concisely.
+    - Pass tasks as arguments to express dependencies.
+    - Only await at the top level.
+    - Shut down cleanly.
+    - Log at `DEBUG` level when needed.

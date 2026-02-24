@@ -1,15 +1,13 @@
 import asyncio
-from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from radical.asyncflow import ConcurrentExecutionBackend, WorkflowEngine
+from radical.asyncflow import LocalExecutionBackend, WorkflowEngine
 
 
 @pytest.mark.asyncio
 async def test_task_failure_handling():
-    """
-    Test the workflow engine's ability to handle task failures.
+    """Test the workflow engine's ability to handle task failures.
 
     This test verifies that:
     - A successful task returns the expected result.
@@ -25,7 +23,7 @@ async def test_task_failure_handling():
     - The result of good_task is "success".
     - failing_task raises an Exception with the message "Simulated failure".
     """
-    backend = await ConcurrentExecutionBackend(ThreadPoolExecutor())
+    backend = await LocalExecutionBackend()
     flow = await WorkflowEngine.create(backend=backend)
 
     @flow.function_task
@@ -53,9 +51,9 @@ async def test_task_failure_handling():
 
 @pytest.mark.asyncio
 async def test_awaiting_failed_task_propagates_exception():
-    """
-    Test that awaiting a failed task in a workflow propagates
-    the exception to dependent tasks.
+    """Test that awaiting a failed task in a workflow propagates the exception to
+    dependent tasks.
+
     This test verifies that when a task (`task1`) raises an
     exception, any subsequent task (`task2`) that awaits its
     result does not execute, and the exception is properly
@@ -64,7 +62,7 @@ async def test_awaiting_failed_task_propagates_exception():
     `task1()`. After the test, the workflow engine is properly
     shut down.
     """
-    backend = await ConcurrentExecutionBackend(ThreadPoolExecutor())
+    backend = await LocalExecutionBackend()
     flow = await WorkflowEngine.create(backend=backend)
 
     @flow.function_task
@@ -86,14 +84,14 @@ async def test_awaiting_failed_task_propagates_exception():
 
 @pytest.mark.asyncio
 async def test_independent_workflow_failures_do_not_affect_others():
-    """
-    Test that failure in one async workflow does not impact other
-    concurrently running workflows. Workflow 0 is designed to fail
-    at task1. Other workflows should complete successfully regardless
-    of the failure in workflow 0.
+    """Test that failure in one async workflow does not impact other concurrently
+    running workflows.
+
+    Workflow 0 is designed to fail at task1. Other workflows should complete
+    successfully regardless of the failure in workflow 0.
     """
 
-    backend = await ConcurrentExecutionBackend(ThreadPoolExecutor())
+    backend = await LocalExecutionBackend()
     flow = await WorkflowEngine.create(backend=backend)
 
     @flow.function_task
