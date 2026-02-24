@@ -6,13 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-02-24
+
 ### Added
 
 - **`prompt_task` decorator** — new first-class task type alongside `function_task` and `executable_task`. The decorated async function returns a prompt string that is forwarded to an AI execution backend (e.g. `DragonVllmInferenceBackend` from RHAPSODY). `NoopExecutionBackend` returns `"Dummy Prompt Output"` for testing; `LocalExecutionBackend` raises `NotImplementedError` with a clear message directing users to register an AI backend.
 - **Multi-backend registry** — `WorkflowEngine.create(backend=...)` now accepts either a single backend or a list of pre-initialized named backends (each must expose a `.name` attribute). The first backend in the list is the default. Built-in backends (`LocalExecutionBackend`, `NoopExecutionBackend`) gain a `name` parameter defaulting to `"default"`.
 - **Per-task backend routing** — task decorators (`function_task`, `executable_task`, `prompt_task`) accept an optional `backend="<name>"` parameter to route a specific task to a named backend. Tasks without `backend=` are sent to the default backend.
 - **Parallel backend submission** — when a batch contains tasks routed to multiple backends, `submit()` dispatches all backend calls concurrently via `asyncio.gather`. `shutdown()` similarly drains all registered backends in parallel.
-- **Example `07-concurrent_backends.py`** — demonstrates a compute + AI dual-backend workflow running document processing pipelines concurrently.
+- **Example `04-concurrent_backends.py`** — demonstrates a compute + AI dual-backend workflow running document processing pipelines concurrently.
 - **Tests** — unit tests (`tests/unit/test_prompt_task.py`) and integration tests (`tests/integration/test_multi_backend.py`) covering `prompt_task` registration, validation, multi-backend routing, parallel submission, and graceful shutdown.
 
 ### Fixed
