@@ -4,9 +4,8 @@ import asyncio
 
 import pytest
 
-from radical.asyncflow import NoopExecutionBackend, WorkflowEngine
+from radical.asyncflow import WorkflowEngine
 from radical.asyncflow.workflow_manager import EXECUTABLE, FUNCTION
-
 
 # ---------------------------------------------------------------------------
 # Split correctness
@@ -70,7 +69,7 @@ async def test_executable_task_multiple_arguments():
 
 @pytest.mark.asyncio
 async def test_executable_task_quoted_argument():
-    """shlex preserves quoted tokens as single arguments."""
+    """Shlex preserves quoted tokens as single arguments."""
     engine = await WorkflowEngine.create(dry_run=True)
 
     @engine.executable_task
