@@ -5,6 +5,7 @@ import asyncio
 import inspect
 import logging
 import os
+import shlex
 import signal
 from collections import defaultdict, deque
 from functools import wraps
@@ -419,7 +420,20 @@ class WorkflowEngine:
                 async def async_wrapper():
                     try:
                         if task_type == EXECUTABLE:
-                            comp_desc[EXECUTABLE] = await func(*args, **kwargs)
+                            cmd = await func(*args, **kwargs)
+                            if not cmd or not isinstance(cmd, str):
+                                raise ValueError(
+                                    f"Executable task '{func.__name__}' must return "
+                                    "a non-empty command string"
+                                )
+                            parts = shlex.split(cmd)
+                            if not parts:
+                                raise ValueError(
+                                    f"Executable task '{func.__name__}' must return "
+                                    "a non-empty command string"
+                                )
+                            comp_desc[EXECUTABLE] = parts[0]
+                            comp_desc["arguments"] = parts[1:]
                         elif task_type == PROMPT:
                             comp_desc[PROMPT] = await func(*args, **kwargs)
                         else:
@@ -488,18 +502,6 @@ class WorkflowEngine:
         comp_desc["uid"] = self._assign_uid(prefix=comp_type)
 
         if task_type == EXECUTABLE:
-            # For executable tasks, validate the executable value
-            executable_value = comp_desc.get(EXECUTABLE)
-            if executable_value is None:
-                raise ValueError(
-                    f"Executable task '{comp_desc['name']}' returned None — "
-                    "must return a string command"
-                )
-            if not isinstance(executable_value, str):
-                raise ValueError(
-                    "Executable task must return a string, got "
-                    f"{type(executable_value)}"
-                )
             comp_desc[FUNCTION] = None  # Clear function since we're using executable
         elif task_type == PROMPT:
             # For prompt tasks, validate the prompt value
