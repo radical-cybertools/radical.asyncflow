@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-03-09
+
+### Fixed
+
+- **`executable_task` command parsing** — `shlex.split` is now applied correctly to the command string returned by the decorated function, ensuring commands with arguments and quoted strings are parsed properly.
+
 ## [0.3.0] - 2026-02-24
 
 ### Added
