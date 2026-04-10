@@ -115,8 +115,8 @@ class WorkflowEngine:
 
         # Telemetry (opt-in via start_telemetry(), None = disabled, zero cost)
         self._telemetry = None
-        self._tel_make_event = None   # cached to avoid per-call import lookup
-        self._tel_events: dict = {}   # cached event classes: name -> class
+        self._tel_make_event = None  # cached to avoid per-call import lookup
+        self._tel_events: dict = {}  # cached event classes: name -> class
         self._task_submit_times: dict[str, float] = {}
         self._task_start_times: dict[str, float] = {}
 
@@ -170,6 +170,7 @@ class WorkflowEngine:
             TaskSubmitted,
             make_event,
         )
+
         self._tel_make_event = make_event
         self._tel_events = {
             "TaskCreated": TaskCreated,
@@ -182,8 +183,13 @@ class WorkflowEngine:
 
         return self._telemetry
 
-    def _emit(self, event_name: str, *, task_id: str, backend: str = None, **kwargs) -> None:
-        """Emit a telemetry event by name. No-op when telemetry is disabled."""
+    def _emit(
+        self, event_name: str, *, task_id: str, backend: str = None, **kwargs
+    ) -> None:
+        """Emit a telemetry event by name.
+
+        No-op when telemetry is disabled.
+        """
         if self._telemetry is None:
             return
         if "event_time" not in kwargs:
@@ -602,7 +608,9 @@ class WorkflowEngine:
 
         # Precompute static telemetry fields once — reused by all downstream emit calls
         comp_desc["_tel_task_type"] = task_type or FUNCTION
-        comp_desc["_tel_executable"] = comp_desc.get(EXECUTABLE) or comp_desc.get("name", "")
+        comp_desc["_tel_executable"] = comp_desc.get(EXECUTABLE) or comp_desc.get(
+            "name", ""
+        )
 
         # Detect dependencies
         comp_deps, input_files_deps, output_files_deps = self._detect_dependencies(
