@@ -642,7 +642,11 @@ class WorkflowEngine:
                     possible_dep = possible_dep.task
                 elif hasattr(possible_dep, BLOCK):
                     possible_dep = possible_dep.block
-                dependencies.append(possible_dep)
+                # Store only uid/name to avoid embedding the full task dict
+                # (which recursively includes its own dependencies, leading
+                # to large metadata trees that grow with each iteration).
+                dependencies.append({"uid":  possible_dep["uid"],
+                                     "name": possible_dep["name"]})
             # Input file dependency
             elif isinstance(possible_dep, InputFile):
                 input_files.append(possible_dep.filename)
@@ -694,17 +698,52 @@ class WorkflowEngine:
         reset_uid_counter()
 
     def _notify_dependents(self, comp_uid: str):
-        """Notify dependents that a component has completed and update ready queue."""
-        for dependent_uid in self._dependents_map[comp_uid]:
-            if dependent_uid in self._dependency_count:
+        """Notify dependents that a component has completed and update ready queue.
+
+        If the completed component failed or was cancelled, eagerly propagate
+        the failure to all dependents (push-based) instead of letting the run
+        loop re-verify them (pull-based).  This eliminates an O(n) dependency
+        check per ready component in the hot loop.
+        """
+        dependents = list(self._dependents_map.get(comp_uid, []))
+
+        comp_fut = self.components[comp_uid]["future"]
+        comp_failed = comp_fut.cancelled() or comp_fut.exception() is not None
+
+        propagate = []  # collect UIDs for recursive propagation
+
+        for dependent_uid in dependents:
+            if dependent_uid not in self._dependency_count:
+                continue
+
+            if comp_failed:
+                # Eagerly propagate failure — don't add to ready queue
+                dep_comp = self.components.get(dependent_uid)
+                if dep_comp:
+                    dep_desc = dep_comp["description"]
+                    dep_fut  = dep_comp["future"]
+                    if not dep_fut.done():
+                        if comp_fut.cancelled():
+                            self.handle_task_cancellation(dep_desc, dep_fut)
+                        else:
+                            chained = self._create_dependency_failure_exception(
+                                dep_desc, [comp_fut.exception()])
+                            self.handle_task_failure(dep_desc, dep_fut, chained)
+                    self.resolved.add(dependent_uid)
+                self._dependency_count.pop(dependent_uid, None)
+                propagate.append(dependent_uid)
+            else:
                 self._dependency_count[dependent_uid] -= 1
                 if self._dependency_count[dependent_uid] == 0:
                     self._ready_queue.append(dependent_uid)
 
         # Clean up
-        del self._dependents_map[comp_uid]
-        if comp_uid in self._dependency_count:
-            del self._dependency_count[comp_uid]
+        self._dependents_map.pop(comp_uid, None)
+        self._dependency_count.pop(comp_uid, None)
+
+        # Recursively propagate failure to transitive dependents
+        for uid in propagate:
+            self._notify_dependents(uid)
 
     def _create_dependency_failure_exception(self, comp_desc: dict, failed_deps: list):
         """Create a DependencyFailureError exception that shows both the immediate
@@ -804,57 +843,40 @@ class WorkflowEngine:
                     if comp_uid in self.resolved or comp_uid in self.running:
                         continue
 
-                    # Check if future is already done (could be cancelled/failed)
+                    # Check if future is already done (could be cancelled/failed
+                    # via push-based propagation in _notify_dependents)
                     if self.components[comp_uid]["future"].done():
                         self.resolved.add(comp_uid)
                         self._notify_dependents(comp_uid)
                         continue
 
-                    # Verify dependencies are still met
+                    # Check for failed/cancelled deps (catches late-registered
+                    # dependents whose deps failed before registration).
                     dependencies = self.dependencies[comp_uid]
-                    dep_futures = [
-                        self.components[dep["uid"]]["future"] for dep in dependencies
-                    ]
-
                     failed_deps = []
-                    cancelled_deps = []
+                    has_cancelled = False
+                    for dep in dependencies:
+                        dep_fut = self.components[dep["uid"]]["future"]
+                        if dep_fut.cancelled():
+                            has_cancelled = True
+                        elif dep_fut.done() and dep_fut.exception() is not None:
+                            failed_deps.append(dep_fut.exception())
 
-                    for fut in dep_futures:
-                        if fut.cancelled():
-                            cancelled_deps.append(fut)
-                        elif fut.exception() is not None:
-                            failed_deps.append(fut.exception())
-
-                    # Handle dependency issues
-                    if cancelled_deps or failed_deps:
+                    if has_cancelled or failed_deps:
                         comp_desc = self.components[comp_uid]["description"]
-
-                        if cancelled_deps:
-                            logger.info(
-                                f"Cancelling {comp_desc['name']} "
-                                "due to cancelled dependencies"
-                            )
-                            self.handle_task_cancellation(
-                                comp_desc, self.components[comp_uid]["future"]
-                            )
-                        else:  # failed_deps
-                            chained_exception = (
-                                self._create_dependency_failure_exception(
-                                    comp_desc, failed_deps
-                                )
-                            )
-                            self.handle_task_failure(
-                                comp_desc,
-                                self.components[comp_uid]["future"],
-                                chained_exception,
-                            )
-
-                        # Common cleanup
+                        comp_fut  = self.components[comp_uid]["future"]
+                        if has_cancelled:
+                            self.handle_task_cancellation(comp_desc, comp_fut)
+                        else:
+                            chained = self._create_dependency_failure_exception(
+                                comp_desc, failed_deps)
+                            self.handle_task_failure(comp_desc, comp_fut, chained)
                         self.resolved.add(comp_uid)
                         self._notify_dependents(comp_uid)
                         continue
 
                     # Handle data dependencies for tasks
+                    dependencies = self.dependencies[comp_uid]
                     comp_desc = self.components[comp_uid]["description"]
                     if self.components[comp_uid]["type"] == TASK:
                         explicit_files_to_stage = []
@@ -917,11 +939,15 @@ class WorkflowEngine:
                                 explicit_files_to_stage.append(data_dep)
 
                     try:
-                        # Update the component description with resolved values
-                        (
-                            comp_desc["args"],
-                            comp_desc["kwargs"],
-                        ) = await self._extract_dependency_values(comp_desc)
+                        # Resolve Future references in args/kwargs to their
+                        # actual values.  We inject them into a submission
+                        # copy instead of mutating comp_desc so that the
+                        # original stays pristine (enables retry/re-submit).
+                        resolved_args, resolved_kwargs = \
+                            await self._extract_dependency_values(comp_desc)
+                        comp_desc = dict(comp_desc,
+                                         args=resolved_args,
+                                         kwargs=resolved_kwargs)
                     except Exception as e:
                         logger.error(
                             f"Failed to resolve future for {comp_desc['name']}: {e}"

@@ -36,4 +36,39 @@ async def test_detect_task_dependencies():
     task_deps, _, _ = engine._detect_dependencies([task])
 
     assert len(task_deps) == 1
-    assert task1 in task_deps[0]["args"]
+    # Dependencies store only uid and name (not the full task dict)
+    assert "uid"  in task_deps[0]
+    assert "name" in task_deps[0]
+    assert set(task_deps[0].keys()) == {"uid", "name"}
+
+
+@pytest.mark.asyncio
+async def test_dependency_does_not_embed_full_task():
+    """Dependency entries must be lightweight {uid, name} dicts,
+    not recursive copies of the full task description."""
+    engine = await WorkflowEngine.create(backend=NoopExecutionBackend())
+
+    @engine.function_task
+    async def step1():
+        return 1
+
+    @engine.function_task
+    async def step2(prev):
+        return 2
+
+    @engine.function_task
+    async def step3(prev):
+        return 3
+
+    s1 = step1()
+    s2 = step2(s1)
+    s3 = step3(s2)
+    await s3
+
+    # Each dependency entry should be {uid, name} only
+    for uid, deps in engine.dependencies.items():
+        for dep in deps:
+            assert set(dep.keys()) == {"uid", "name"}, \
+                f"dependency of {uid} has unexpected keys: {dep.keys()}"
+            assert isinstance(dep["uid"], str)
+            assert isinstance(dep["name"], str)
