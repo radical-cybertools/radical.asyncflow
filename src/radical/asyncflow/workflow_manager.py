@@ -7,6 +7,8 @@ import logging
 import os
 import shlex
 import signal
+import time
+import uuid
 from collections import defaultdict, deque
 from functools import wraps
 from itertools import count
@@ -108,12 +110,93 @@ class WorkflowEngine:
         self._run_task = None
         self._shutdown_event = asyncio.Event()  # Added shutdown signal
 
+        # Stable engine identifier — used as session_id for telemetry
+        self.uid = f"workflow-{uuid.uuid4().hex[:8]}"
+
+        # Telemetry (opt-in via start_telemetry(), None = disabled, zero cost)
+        self._telemetry = None
+        self._tel_make_event = None   # cached to avoid per-call import lookup
+        self._tel_events: dict = {}   # cached event classes: name -> class
+        self._task_submit_times: dict[str, float] = {}
+        self._task_start_times: dict[str, float] = {}
+
         self._setup_signal_handlers()
 
     @property
     def backend(self):
         """Return the default execution backend."""
         return self._backends[self._default_backend_name]
+
+    async def start_telemetry(
+        self,
+        resource_poll_interval: float = 5.0,
+        checkpoint_interval: float | None = None,
+        checkpoint_path: str | None = None,
+    ):
+        """Create and start a RHAPSODY TelemetryManager for this workflow engine.
+
+        Mirrors Session.start_telemetry(): creates the manager, wires all
+        registered backends (silently skipping LocalExecutionBackend and
+        NoopExecutionBackend which have no adapter), starts the async dispatch
+        loop, and returns the manager.
+
+        Returns:
+            The active TelemetryManager instance.
+        """
+        from rhapsody.telemetry.manager import TelemetryManager  # noqa: PLC0415
+
+        self._telemetry = TelemetryManager(
+            session_id=self.uid,
+            checkpoint_interval=checkpoint_interval,
+            checkpoint_path=checkpoint_path,
+        )
+
+        for backend in self._backends.values():
+            self._telemetry.attach_backend(
+                backend,
+                session_id=self.uid,
+                backend_name=backend.name,
+                interval=resource_poll_interval,
+            )
+
+        await self._telemetry.start()
+
+        from rhapsody.telemetry.events import (  # noqa: PLC0415
+            TaskCompleted,
+            TaskCreated,
+            TaskFailed,
+            TaskQueued,
+            TaskStarted,
+            TaskSubmitted,
+            make_event,
+        )
+        self._tel_make_event = make_event
+        self._tel_events = {
+            "TaskCreated": TaskCreated,
+            "TaskQueued": TaskQueued,
+            "TaskSubmitted": TaskSubmitted,
+            "TaskStarted": TaskStarted,
+            "TaskCompleted": TaskCompleted,
+            "TaskFailed": TaskFailed,
+        }
+
+        return self._telemetry
+
+    def _emit(self, event_name: str, *, task_id: str, backend: str = None, **kwargs) -> None:
+        """Emit a telemetry event by name. No-op when telemetry is disabled."""
+        if self._telemetry is None:
+            return
+        if "event_time" not in kwargs:
+            kwargs["event_time"] = time.time()
+        self._telemetry.emit(
+            self._tel_make_event(
+                self._tel_events[event_name],
+                session_id=self._telemetry._session_id,
+                backend=backend or self._default_backend_name,
+                task_id=task_id,
+                **kwargs,
+            )
+        )
 
     def _setup_signal_handlers(self):
         """Register signal handlers for graceful shutdown on SIGHUP, SIGTERM, and
@@ -517,6 +600,10 @@ class WorkflowEngine:
             comp_desc[EXECUTABLE] = None
             comp_desc[PROMPT] = None
 
+        # Precompute static telemetry fields once — reused by all downstream emit calls
+        comp_desc["_tel_task_type"] = task_type or FUNCTION
+        comp_desc["_tel_executable"] = comp_desc.get(EXECUTABLE) or comp_desc.get("name", "")
+
         # Detect dependencies
         comp_deps, input_files_deps, output_files_deps = self._detect_dependencies(
             comp_desc["args"]
@@ -552,6 +639,16 @@ class WorkflowEngine:
 
         # Setup cancel hook
         comp_fut.cancel = self._setup_future_cancel_hook(comp_fut, comp_desc["uid"])
+
+        self._emit(
+            "TaskCreated",
+            task_id=comp_desc["uid"],
+            attributes={
+                "executable": comp_desc["_tel_executable"],
+                "task_type": comp_desc["_tel_task_type"],
+                "depends_on": [d["uid"] for d in comp_deps],
+            },
+        )
 
         return comp_fut
 
@@ -941,6 +1038,17 @@ class WorkflowEngine:
                     msg += f" with resolved dependencies: {res_deps}"
                     logger.debug(msg)
 
+                    if self.components[comp_uid]["type"] == TASK:
+                        self._emit(
+                            "TaskQueued",
+                            task_id=comp_uid,
+                            backend=comp_desc.get("target_backend"),
+                            attributes={
+                                "executable": comp_desc["_tel_executable"],
+                                "task_type": comp_desc["_tel_task_type"],
+                            },
+                        )
+
                 # Submit ready components
                 if to_submit:
                     await self.submit(to_submit)
@@ -1035,6 +1143,21 @@ class WorkflowEngine:
             logger.debug(f"Submitting: {[b['name'] for b in objects]}")
 
             if tasks:
+                if self._telemetry is not None:
+                    now = time.time()
+                    for t in tasks:
+                        self._task_submit_times[t["uid"]] = now
+                        self._emit(
+                            "TaskSubmitted",
+                            task_id=t["uid"],
+                            backend=t.get("target_backend"),
+                            event_time=now,
+                            attributes={
+                                "executable": t["_tel_executable"],
+                                "task_type": t["_tel_task_type"],
+                            },
+                        )
+
                 if not any(t.get("target_backend") for t in tasks):
                     # Fast path: all tasks go to the default backend
                     await self.backend.submit_tasks(tasks)
@@ -1295,7 +1418,9 @@ class WorkflowEngine:
             )
             return
 
-        task_fut = self.components[task_dct["uid"]]["future"]
+        comp = self.components[task_dct["uid"]]
+        task_fut = comp["future"]
+        comp_desc = comp["description"]
         logger.info(f"{task_dct['uid']} is in {state} state")
 
         if service_callback:
@@ -1303,18 +1428,74 @@ class WorkflowEngine:
             # mechanism that are provided during the callbacks only
             service_callback(task_fut, task_obj, state)
 
+        uid = task_dct["uid"]
+
+        tel_attrs = {
+            "executable": comp_desc["_tel_executable"],
+            "task_type": comp_desc["_tel_task_type"],
+        }
+
         if state == self.task_states_map.DONE:
             self.handle_task_success(task_dct, task_fut)
+            if self._telemetry is not None:
+                now = time.time()
+                start = self._task_start_times.pop(
+                    uid, self._task_submit_times.get(uid, now)
+                )
+                self._task_submit_times.pop(uid, None)
+                self._emit(
+                    "TaskCompleted",
+                    task_id=uid,
+                    event_time=now,
+                    duration_seconds=now - start,
+                    attributes=tel_attrs,
+                )
         elif state == self.task_states_map.RUNNING:
             # NOTE: with asyncio future the running state is
             # implicit: when a coroutine that awaits the future
-            # is scheduled and started by the event loop, that’s
-            # when the “work” is running.
-            pass
+            # is scheduled and started by the event loop, that's
+            # when the "work" is running.
+            if self._telemetry is not None:
+                now = time.time()
+                self._task_start_times[uid] = now
+                self._emit(
+                    "TaskStarted",
+                    task_id=uid,
+                    event_time=now,
+                    attributes=tel_attrs,
+                )
         elif state == self.task_states_map.CANCELED:
             self.handle_task_cancellation(task_dct, task_fut)
+            if self._telemetry is not None:
+                now = time.time()
+                start = self._task_start_times.pop(
+                    uid, self._task_submit_times.get(uid, now)
+                )
+                self._task_submit_times.pop(uid, None)
+                self._emit(
+                    "TaskFailed",
+                    task_id=uid,
+                    event_time=now,
+                    duration_seconds=now - start,
+                    error_type="CancelledError",
+                    attributes=tel_attrs,
+                )
         elif state == self.task_states_map.FAILED:
             self.handle_task_failure(task_dct, task_fut)
+            if self._telemetry is not None:
+                now = time.time()
+                start = self._task_start_times.pop(
+                    uid, self._task_submit_times.get(uid, now)
+                )
+                self._task_submit_times.pop(uid, None)
+                self._emit(
+                    "TaskFailed",
+                    task_id=uid,
+                    event_time=now,
+                    duration_seconds=now - start,
+                    error_type="unknown",
+                    attributes=tel_attrs,
+                )
 
     async def shutdown(self, skip_execution_backend: bool = False):
         """Internal implementation of asynchronous shutdown for the workflow manager.
