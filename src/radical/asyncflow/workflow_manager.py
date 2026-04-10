@@ -168,13 +168,19 @@ class WorkflowEngine:
             TaskQueued,
             TaskStarted,
             TaskSubmitted,
+            define_event,
             make_event,
         )
+
+        # asyncflow.TaskResolved is DAG-specific — not a RHAPSODY core event.
+        # Defined here with define_event so RHAPSODY stays unaware of DAG semantics.
+        TaskResolved = define_event("asyncflow.TaskResolved")
 
         self._tel_make_event = make_event
         self._tel_events = {
             "TaskCreated": TaskCreated,
             "TaskQueued": TaskQueued,
+            "asyncflow.TaskResolved": TaskResolved,
             "TaskSubmitted": TaskSubmitted,
             "TaskStarted": TaskStarted,
             "TaskCompleted": TaskCompleted,
@@ -658,6 +664,18 @@ class WorkflowEngine:
             },
         )
 
+        # Emit TaskResolved immediately for tasks with no dependencies.
+        # Tasks with deps will emit from _notify_dependents when the count hits 0.
+        if comp_type == TASK and self._dependency_count.get(comp_desc["uid"], -1) == 0:
+            self._emit(
+                "asyncflow.TaskResolved",
+                task_id=comp_desc["uid"],
+                attributes={
+                    "executable": comp_desc["_tel_executable"],
+                    "task_type": comp_desc["_tel_task_type"],
+                },
+            )
+
         return comp_fut
 
     def _setup_future_cancel_hook(
@@ -807,6 +825,17 @@ class WorkflowEngine:
                 self._dependency_count[dependent_uid] -= 1
                 if self._dependency_count[dependent_uid] == 0:
                     self._ready_queue.append(dependent_uid)
+                    dep_comp = self.components.get(dependent_uid)
+                    if dep_comp and dep_comp["type"] == TASK:
+                        dep_desc = dep_comp["description"]
+                        self._emit(
+                            "asyncflow.TaskResolved",
+                            task_id=dependent_uid,
+                            attributes={
+                                "executable": dep_desc["_tel_executable"],
+                                "task_type": dep_desc["_tel_task_type"],
+                            },
+                        )
 
         # Clean up
         del self._dependents_map[comp_uid]
