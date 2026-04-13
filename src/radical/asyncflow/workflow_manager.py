@@ -162,6 +162,7 @@ class WorkflowEngine:
         await self._telemetry.start()
 
         from rhapsody.telemetry.events import (  # noqa: PLC0415
+            TaskCanceled,
             TaskCompleted,
             TaskCreated,
             TaskFailed,
@@ -185,6 +186,7 @@ class WorkflowEngine:
             "TaskStarted": TaskStarted,
             "TaskCompleted": TaskCompleted,
             "TaskFailed": TaskFailed,
+            "TaskCanceled": TaskCanceled,
         }
 
         return self._telemetry
@@ -1510,11 +1512,10 @@ class WorkflowEngine:
                 )
                 self._task_submit_times.pop(uid, None)
                 self._emit(
-                    "TaskFailed",
+                    "TaskCanceled",
                     task_id=uid,
                     event_time=now,
                     duration_seconds=now - start,
-                    error_type="CancelledError",
                     attributes=tel_attrs,
                 )
         elif state == self.task_states_map.FAILED:
