@@ -173,13 +173,13 @@ async def main():
         )
         return result
 
-    N = 20
-    print(f"Running {N} ETL workflow instances …")
+    n = 20
+    print(f"Running {n} ETL workflow instances …")
     t0 = time.time()
-    results = await asyncio.gather(*(run_workflow(i) for i in range(N)))
+    await asyncio.gather(*(run_workflow(i) for i in range(n)))
     elapsed = time.time() - t0
 
-    print(f"Completed {N} workflows in {elapsed * 1000:.0f} ms")
+    print(f"Completed {n} workflows in {elapsed * 1000:.0f} ms")
 
     summary = telemetry.summary()
     print(f"Tasks — {summary['tasks']}")

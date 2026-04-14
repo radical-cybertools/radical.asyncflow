@@ -5,9 +5,9 @@ Reads a RHAPSODY JSONL checkpoint file and produces a workflow-focused PNG:
 
 Layout
 ------
-Row 0 (3 panels): Workflow Gantt (task lifecycle bars) · Stage Duration Distribution · Concurrency
-Row 1 (3 panels): Task Lifecycle Waterfall · Dependency Wait (resolved→started) · Stage Timer (custom events)
-Row 2 (full row): Task lifecycle timeline — one swim-lane per task, coloured by stage
+Row 0 (3 panels): Workflow Gantt · Stage Duration Distribution · Concurrency
+Row 1 (3 panels): Task Waterfall · Dependency Wait · Stage Timer (custom events)
+Row 2 (full row): Task lifecycle swim-lanes — one row per task, coloured by stage
 
 Usage
 -----
@@ -207,7 +207,7 @@ def _panel_gantt(ax, tl: dict, max_tasks: int = 80):
     if len(tasks) > max_tasks:
         tasks = tasks[:max_tasks]
 
-    for y, (tid, phases) in enumerate(tasks):
+    for y, (_tid, phases) in enumerate(tasks):
         # Draw a bar for each consecutive phase pair
         ordered = [
             "Created",
@@ -470,8 +470,8 @@ def _panel_swimlane(ax, tl: dict, max_tasks: int = 100):
         ("Failed", "Started", "Failed", "#d63031"),
     ]
 
-    for y, (tid, phases) in enumerate(tasks):
-        for label, p1, p2, color in seg_defs:
+    for y, (_tid, phases) in enumerate(tasks):
+        for _label, p1, p2, color in seg_defs:
             t1 = phases.get(p1)
             t2 = phases.get(p2)
             if t1 is not None and t2 is not None and t2 > t1:
@@ -486,7 +486,7 @@ def _panel_swimlane(ax, tl: dict, max_tasks: int = 100):
                 )
 
     # Legend patches
-    patches = [mpatches.Patch(color=c, label=l) for l, _, _, c in seg_defs[:3]]
+    patches = [mpatches.Patch(color=c, label=lbl) for lbl, _, _, c in seg_defs[:3]]
     handles, labels_l = patches, [p.get_label() for p in patches]
     _legend_below(ax, handles, labels_l, ncol=4)
 
@@ -540,13 +540,12 @@ def _panel_conc_resources(ax, events: list[dict], t0: float, t_c, y_c):
         }
     )
 
-    NODE_PALETTE_LOCAL = ["#ee5a24", "#009432", "#8854d0", "#2d3436"]
-    CPU_STYLES = [
+    cpu_styles = [
         dict(color="#f9ca24", linestyle=":", marker="o", markersize=4),
         dict(color="#fdcb6e", linestyle=":", marker="o", markersize=4),
         dict(color="#ffeaa7", linestyle=":", marker="o", markersize=4),
     ]
-    MEM_STYLES = [
+    mem_styles = [
         dict(color="#ee5a24", linestyle=":", marker="s", markersize=4),
         dict(color="#d63031", linestyle=":", marker="s", markersize=4),
         dict(color="#ff7675", linestyle=":", marker="s", markersize=4),
@@ -570,8 +569,8 @@ def _panel_conc_resources(ax, events: list[dict], t0: float, t_c, y_c):
         cpu = [e.get("cpu_percent") or 0.0 for e in ne]
         mem = [e.get("memory_percent") or 0.0 for e in ne]
 
-        cs = CPU_STYLES[k % len(CPU_STYLES)]
-        ms = MEM_STYLES[k % len(MEM_STYLES)]
+        cs = cpu_styles[k % len(cpu_styles)]
+        ms = mem_styles[k % len(mem_styles)]
 
         ax2.plot(
             ts, cpu, linewidth=1.8, label=f"{short} CPU %", alpha=0.9, zorder=4, **cs

@@ -69,6 +69,6 @@ repos:
           - --baseline
           - .secrets.baseline
           - --exclude-files
-          - (?i)(^\.?venv/|^\.direnv/|^\.mypy_cache/|^\.ruff_cache/|^\.pytest_cache/|^\.tox/|^\.cache/|^dist/|^build/|^site/|^htmlcov/|^node_modules/|^docs/_build/|^\.ipynb_checkpoints/|\.(png|jpe?g|gif|svg|pdf|zip|tar|gz|tgz|xz|bz2|zst|woff2?)$)
+          - (?i)(^\.?venv/|^\.direnv/|^\.mypy_cache/|^\.ruff_cache/|^\.pytest_cache/|^\.tox/|^\.cache/|^dist/|^build/|^site/|^htmlcov/|^node_modules/|^docs/_build/|^\.ipynb_checkpoints/|.*\.ipynb$|\.(png|jpe?g|gif|svg|pdf|zip|tar|gz|tgz|xz|bz2|zst|woff2?)$)
           - --exclude-lines
           - (?i)(^\s*POSTGRES_PASSWORD:\s*postgres$|postgresql://postgres:postgres@localhost(:\d+)?/|(user|username|password)\s*=\s*(test|example|dummy))
