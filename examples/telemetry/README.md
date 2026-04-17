@@ -18,7 +18,7 @@ Demonstrates:
 - Emitting **custom application events** (`etl.StageTimer`) per stage using `define_event` + `telemetry.emit()`
 - Full task lifecycle: `TaskCreated` → `asyncflow.TaskResolved` → `TaskSubmitted` → `TaskStarted` → `TaskCompleted`
 
-Writes a JSONL checkpoint to `telemetry-output/` for use with `plot_workflow.py`.
+Writes a JSONL checkpoint to `telemetry-output/` for use with `plot_workflow_dashboard.py`.
 
 ```bash
 python 00-telemetry_subscribe_basic.py
@@ -26,13 +26,16 @@ python 00-telemetry_subscribe_basic.py
 
 ---
 
-### `plot_workflow.py`
+### `plot_workflow_dashboard.py`
 
-Workflow-focused visualisation of the JSONL checkpoint. Produces a PNG with 7 panels:
+Workflow-focused visualization of the JSONL checkpoint. Produces a PNG with 7 panels:
 
 ```bash
-python plot_workflow.py telemetry-output/run.jsonl
-python plot_workflow.py telemetry-output/run.jsonl --out report.png
+python plot_workflow_dashboard.py telemetry-output/run.jsonl
+python plot_workflow_dashboard.py telemetry-output/run.jsonl --out report.png
+
+# Split each figure in the dashboard to be a standalone plot
+python plot_workflow_dashboard.py --split telemetry-output/run.jsonl
 ```
 
 | Panel | What it shows |

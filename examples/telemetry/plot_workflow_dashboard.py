@@ -8,11 +8,14 @@ Layout
 Row 0 (3 panels): Workflow Gantt · Stage Duration Distribution · Concurrency
 Row 1 (3 panels): Task Waterfall · Dependency Wait · Stage Timer (custom events)
 Row 2 (full row): Task lifecycle swim-lanes — one row per task, coloured by stage
+Row 3 (full row): Concurrency Profile + Node Resource Utilization (CPU/Mem/GPU)
 
 Usage
 -----
     python plot_workflow.py telemetry-output/run.jsonl
     python plot_workflow.py telemetry-output/run.jsonl --out report.png
+    python plot_workflow.py telemetry-output/run.jsonl --split
+    python plot_workflow.py telemetry-output/run.jsonl --split --out /some/dir/
 """
 
 from __future__ import annotations
@@ -78,6 +81,13 @@ STAGE_COLORS = {
     "workflow_total": "#2d3436",
 }
 DEFAULT_STAGE_COLOR = "#636e72"
+
+GPU_PALETTE = [
+    dict(color="#6c5ce7", linestyle="-.", marker="^", markersize=4),
+    dict(color="#00b894", linestyle="-.", marker="^", markersize=4),
+    dict(color="#a29bfe", linestyle="-.", marker="^", markersize=4),
+    dict(color="#00cec9", linestyle="-.", marker="^", markersize=4),
+]
 
 
 # ── I/O ───────────────────────────────────────────────────────────────────────
@@ -551,6 +561,7 @@ def _panel_conc_resources(ax, events: list[dict], t0: float, t_c, y_c):
         dict(color="#ff7675", linestyle=":", marker="s", markersize=4),
     ]
 
+    gpu_idx = 0
     for k, node in enumerate(nodes):
         short = node.split(".")[0]
         ne = sorted(
@@ -578,6 +589,43 @@ def _panel_conc_resources(ax, events: list[dict], t0: float, t_c, y_c):
         ax2.plot(
             ts, mem, linewidth=1.8, label=f"{short} Memory %", alpha=0.9, zorder=4, **ms
         )
+
+        # GPU lines — one per (node, gpu_id)
+        gpu_ids = sorted(
+            {
+                e["gpu_id"]
+                for e in events
+                if e.get("event_type") == "ResourceUpdate"
+                and e.get("node_id") == node
+                and e.get("gpu_id") is not None
+            }
+        )
+        for gid in gpu_ids:
+            ge = sorted(
+                [
+                    e
+                    for e in events
+                    if e.get("event_type") == "ResourceUpdate"
+                    and e.get("node_id") == node
+                    and e.get("gpu_id") == gid
+                ],
+                key=lambda e: e["event_time"],
+            )
+            if not ge:
+                continue
+            g_ts = [(e["event_time"] - t0) * 1000 for e in ge]
+            g_util = [e.get("gpu_percent") or 0.0 for e in ge]
+            gs_style = GPU_PALETTE[gpu_idx % len(GPU_PALETTE)]
+            ax2.plot(
+                g_ts,
+                g_util,
+                linewidth=1.8,
+                label=f"{short} GPU{gid} %",
+                alpha=0.9,
+                zorder=4,
+                **gs_style,
+            )
+            gpu_idx += 1
 
     ax2.set_ylim(0, 110)
     ax2.set_ylabel("Resource utilization (%)", labelpad=10, color="#555")
@@ -670,6 +718,53 @@ def plot(path: str, out: str | None = None, dpi: int = 140) -> None:
     plt.close(fig)
 
 
+# ── Split (individual panels) ─────────────────────────────────────────────────
+
+# Maps a short slug to (panel_fn, extra_kwargs).  Each fn receives (ax, *data).
+_PANEL_SPECS = [
+    ("gantt", _panel_gantt, lambda d: (d["tl"],), (10, 7)),
+    ("stage_dist", _panel_stage_dist, lambda d: (d["tl"],), (8, 6)),
+    ("concurrency", _panel_concurrency, lambda d: (d["t_c"], d["y_c"]), (8, 5)),
+    ("waterfall", _panel_waterfall, lambda d: (d["tl"],), (10, 7)),
+    ("dep_wait", _panel_dep_wait, lambda d: (d["tl"],), (8, 5)),
+    ("stage_timers", _panel_stage_timers, lambda d: (d["stages"],), (8, 5)),
+    ("swimlane", _panel_swimlane, lambda d: (d["tl"],), (26, 8)),
+    (
+        "conc_resources",
+        _panel_conc_resources,
+        lambda d: (d["events"], d["t0"], d["t_c"], d["y_c"]),
+        (26, 6),
+    ),
+]
+
+
+def plot_split(path: str, out_dir: str | None = None, dpi: int = 140) -> None:
+    """Save each panel as a separate file: {stem}.{panel_name}.{ext}."""
+    events = load(path)
+    t0 = session_t0(events)
+    stem = Path(path).stem
+
+    tl = build_task_timelines(events, t0)
+    t_c, y_c = build_concurrency(events, t0)
+    stages = stage_timers(events, t0)
+
+    data = dict(events=events, t0=t0, tl=tl, t_c=t_c, y_c=y_c, stages=stages)
+
+    base_dir = Path(out_dir) if out_dir else Path(path).parent
+    _sfx = Path(out_dir).suffix if out_dir else ""
+    ext = _sfx.lstrip(".") if _sfx else "png"
+
+    for slug, fn, args_fn, (w, h) in _PANEL_SPECS:
+        fig, ax = plt.subplots(figsize=(w, h), facecolor=BG)
+        fig.patch.set_facecolor(BG)
+        fn(ax, *args_fn(data))
+        fig.tight_layout()
+        out_path = base_dir / f"{stem}.{slug}.{ext}"
+        fig.savefig(str(out_path), dpi=dpi, bbox_inches="tight", facecolor=BG)
+        print(f"Saved → {out_path}")
+        plt.close(fig)
+
+
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 
@@ -681,9 +776,22 @@ def main() -> None:
         "file", nargs="?", default="telemetry-output/out.jsonl", metavar="FILE.jsonl"
     )
     ap.add_argument(
-        "--out", metavar="FILE", help="Output PNG path (default: same name as input)"
+        "--out",
+        metavar="PATH",
+        help=(
+            "Output path. Combined mode: PNG file path. "
+            "Split mode (--split): output directory (default: same dir as input)."
+        ),
     )
     ap.add_argument("--dpi", type=int, default=140)
+    ap.add_argument(
+        "--split",
+        action="store_true",
+        help=(
+            "Save each subplot as a separate file named "
+            "<jsonl_stem>.<panel_name>.png next to the input file."
+        ),
+    )
     args = ap.parse_args()
 
     p = Path(args.file)
@@ -691,7 +799,10 @@ def main() -> None:
         print(f"error: file not found: {p}", file=sys.stderr)
         sys.exit(1)
 
-    plot(str(p), out=args.out, dpi=args.dpi)
+    if args.split:
+        plot_split(str(p), out_dir=args.out, dpi=args.dpi)
+    else:
+        plot(str(p), out=args.out, dpi=args.dpi)
 
 
 if __name__ == "__main__":
