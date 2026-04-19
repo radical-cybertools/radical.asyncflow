@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 from concurrent.futures import Executor, ProcessPoolExecutor, ThreadPoolExecutor
 from typing import Any, Callable
 
@@ -38,6 +39,8 @@ class NoopExecutionBackend:
         self.name = name
         self.tasks = {}
         self._callback_func: Callable = lambda task, state: None  # default no-op
+        self._work_dir: str = os.getcwd()
+        self.is_attached: bool = False
 
     def state(self):
         """Get the current state of the no-op execution backend.
@@ -173,6 +176,8 @@ class LocalExecutionBackend:
         self.tasks: dict[str, asyncio.Task] = {}
         self._callback_func: Callable = lambda t, s: None
         self._initialized = False
+        self._work_dir: str = os.getcwd()
+        self.is_attached: bool = False
 
     def __await__(self):
         """Make backend awaitable."""
