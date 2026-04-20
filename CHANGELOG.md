@@ -16,7 +16,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `capture_stdio` is stored as a **top-level field** in `comp_desc` (not nested inside
   `task_backend_specific_kwargs`) so RHAPSODY backends can read it as `task.get("capture_stdio")`.
 - **`WorkflowEngine` `uid` and `work_dir` parameters** — `WorkflowEngine.create(uid=..., work_dir=...)`
-  sets the engine's unique identifier and working directory. The engine is now the single authority
+  sets the engine's unique identifier (UUID) and working directory. The engine is now the single authority
   for `backend._work_dir`; it sets `backend._work_dir = {work_dir}/{uid}` and creates the
   directory before any tasks run (mirrors `Session.add_backend()` in RHAPSODY).
 - **`WorkflowEngine._attach_backend()`** — new internal method that replaces the inline
