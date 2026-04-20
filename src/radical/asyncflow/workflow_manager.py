@@ -125,17 +125,12 @@ class WorkflowEngine:
         """Attach a backend to this engine, setting its work directory.
 
         Sets backend._work_dir to {work_dir}/{uid} so capture_stdio files land in a per-
-        engine subdirectory. Raises if the backend is already attached to another engine
-        or session.
+        engine subdirectory. Backends may be reused across engines sequentially.
         """
-        if backend.is_attached:
-            raise RuntimeError(
-                f"Backend '{backend.name}' is already attached to a session or workflow. "
-                "A backend cannot be shared across engines."
-            )
         backend._work_dir = os.path.join(self.work_dir, self.uid)
         os.makedirs(backend._work_dir, exist_ok=True)
         backend.is_attached = True
+        backend.attached_to.append(self.uid)
         self._backends[backend.name] = backend
         backend.register_callback(self.task_callbacks)
 

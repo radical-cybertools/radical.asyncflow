@@ -41,6 +41,7 @@ class NoopExecutionBackend:
         self._callback_func: Callable = lambda task, state: None  # default no-op
         self._work_dir: str = os.getcwd()
         self.is_attached: bool = False
+        self.attached_to: list[str] = []
 
     def state(self):
         """Get the current state of the no-op execution backend.
@@ -178,6 +179,7 @@ class LocalExecutionBackend:
         self._initialized = False
         self._work_dir: str = os.getcwd()
         self.is_attached: bool = False
+        self.attached_to: list[str] = []
 
     def __await__(self):
         """Make backend awaitable."""

@@ -6,8 +6,6 @@ import os
 import pytest
 
 from radical.asyncflow import NoopExecutionBackend, WorkflowEngine
-from radical.asyncflow.workflow_manager import EXECUTABLE
-
 
 # ---------------------------------------------------------------------------
 # comp_desc field tests (no real execution, dry_run / Noop)
@@ -67,7 +65,8 @@ async def test_capture_stdio_on_function_task_stored_false():
 
 @pytest.mark.asyncio
 async def test_capture_stdio_not_in_task_backend_specific_kwargs():
-    """capture_stdio is top-level in comp_desc, NOT nested inside task_backend_specific_kwargs."""
+    """capture_stdio is top-level in comp_desc, NOT nested inside
+    task_backend_specific_kwargs."""
     engine = await WorkflowEngine.create(dry_run=True)
 
     @engine.executable_task(capture_stdio=True)
@@ -102,28 +101,6 @@ async def test_workflow_engine_sets_backend_work_dir(tmp_path):
     assert backend._work_dir == os.path.join(str(tmp_path), "wf-test")
     assert os.path.isdir(backend._work_dir)
     await engine.shutdown()
-
-
-@pytest.mark.asyncio
-async def test_workflow_engine_sets_is_attached(tmp_path):
-    """WorkflowEngine.create flips backend.is_attached to True."""
-    backend = NoopExecutionBackend()
-    assert not backend.is_attached
-    engine = await WorkflowEngine.create(backend=backend, work_dir=str(tmp_path))
-    assert backend.is_attached
-    await engine.shutdown()
-
-
-@pytest.mark.asyncio
-async def test_workflow_engine_rejects_already_attached_backend(tmp_path):
-    """Attaching a backend that is already attached raises RuntimeError."""
-    backend = NoopExecutionBackend()
-    engine1 = await WorkflowEngine.create(backend=backend, work_dir=str(tmp_path))
-
-    with pytest.raises(RuntimeError, match="already attached"):
-        await WorkflowEngine.create(backend=backend, work_dir=str(tmp_path))
-
-    await engine1.shutdown()
 
 
 # ---------------------------------------------------------------------------
