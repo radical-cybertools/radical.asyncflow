@@ -1,5 +1,8 @@
+from __future__ import annotations
+
 import os
 from pathlib import Path
+from typing import Union
 from urllib.parse import urlparse
 
 import requests
@@ -50,7 +53,7 @@ class File:
 
         Raises:
             requests.exceptions.RequestException: If the download fails
-            or URL is invalid.
+                or URL is invalid.
 
         Example:
             ::
@@ -82,7 +85,7 @@ class InputFile(File):
     references.
     """
 
-    def __init__(self, file):
+    def __init__(self, file: Union[str, Path]) -> None:
         """Initialize an InputFile with automatic source type detection and resolution.
 
         Determines whether the input is a remote URL, local file path, or reference
@@ -151,7 +154,7 @@ class OutputFile(File):
     file naming for task execution.
     """
 
-    def __init__(self, filename):
+    def __init__(self, filename: Union[str, Path]) -> None:
         """Initialize an OutputFile with filename validation.
 
         Extracts the filename from the provided path and validates that it
