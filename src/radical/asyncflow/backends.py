@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import logging
 from concurrent.futures import Executor, ProcessPoolExecutor, ThreadPoolExecutor
@@ -39,7 +41,7 @@ class NoopExecutionBackend:
         self.tasks = {}
         self._callback_func: Callable = lambda task, state: None  # default no-op
 
-    def state(self):
+    def state(self) -> str:
         """Get the current state of the no-op execution backend.
 
         Returns:
@@ -59,7 +61,7 @@ class NoopExecutionBackend:
         """
         pass
 
-    def get_task_states_map(self):
+    def get_task_states_map(self) -> StateMapper:
         """Retrieve a mapping of task IDs to their current states.
 
         Returns:
@@ -67,7 +69,7 @@ class NoopExecutionBackend:
         """
         return StateMapper()
 
-    def register_callback(self, func: Callable):
+    def register_callback(self, func: Callable) -> None:
         """Register a callback for task state changes.
 
         Args:
@@ -76,7 +78,7 @@ class NoopExecutionBackend:
         """
         self._callback_func = func
 
-    def build_task(self, uid, task_desc, task_specific_kwargs):
+    def build_task(self, uid: str, task_desc: dict, task_specific_kwargs: dict) -> None:
         """Build or prepare a task for execution.
 
         Args:
@@ -92,7 +94,7 @@ class NoopExecutionBackend:
     async def cancel_task(self, uid: str) -> None:
         pass
 
-    async def submit_tasks(self, tasks):
+    async def submit_tasks(self, tasks: list) -> None:
         """Submit tasks for mock execution.
 
         Immediately marks all tasks as completed with dummy output without
@@ -112,8 +114,12 @@ class NoopExecutionBackend:
             self._callback_func(task, "DONE")
 
     def link_explicit_data_deps(
-        self, src_task=None, dst_task=None, file_name=None, file_path=None
-    ):
+        self,
+        src_task: dict | None = None,
+        dst_task: dict | None = None,
+        file_name: str | None = None,
+        file_path: str | None = None,
+    ) -> None:
         """Handle explicit data dependencies between tasks.
 
         Args:
@@ -127,7 +133,7 @@ class NoopExecutionBackend:
         """
         pass
 
-    def link_implicit_data_deps(self, src_task, dst_task):
+    def link_implicit_data_deps(self, src_task: dict, dst_task: dict) -> None:
         """Handle implicit data dependencies for a task.
 
         Args:
@@ -205,10 +211,10 @@ class LocalExecutionBackend:
 
         return self
 
-    def get_task_states_map(self):
+    def get_task_states_map(self) -> StateMapper:
         return StateMapper()
 
-    def register_callback(self, func: Callable):
+    def register_callback(self, func: Callable) -> None:
         """Register a callback for task state changes.
 
         Args:
@@ -376,15 +382,19 @@ class LocalExecutionBackend:
         self.executor.shutdown(wait=True)
         logger.info("Concurrent execution backend shutdown complete")
 
-    def build_task(self, uid, task_desc, task_specific_kwargs):
+    def build_task(self, uid: str, task_desc: dict, task_specific_kwargs: dict) -> None:
         pass
 
     def link_explicit_data_deps(
-        self, src_task=None, dst_task=None, file_name=None, file_path=None
-    ):
+        self,
+        src_task: dict | None = None,
+        dst_task: dict | None = None,
+        file_name: str | None = None,
+        file_path: str | None = None,
+    ) -> None:
         pass
 
-    def link_implicit_data_deps(self, src_task, dst_task):
+    def link_implicit_data_deps(self, src_task: dict, dst_task: dict) -> None:
         pass
 
     def state(self) -> str:
@@ -409,7 +419,7 @@ class LocalExecutionBackend:
         await self.shutdown()
 
     @classmethod
-    async def create(cls, executor: Executor) -> "LocalExecutionBackend":
+    async def create(cls, executor: Executor) -> LocalExecutionBackend:
         """Alternative factory method for creating initialized backend.
 
         Args:

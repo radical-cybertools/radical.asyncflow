@@ -53,7 +53,7 @@ class WorkflowEngine:
     @typeguard.typechecked
     def __init__(
         self,
-        backend=None,
+        backend: Any = None,
         dry_run: bool = False,
         implicit_data: bool = True,
     ) -> None:
@@ -132,7 +132,7 @@ class WorkflowEngine:
         resource_poll_interval: float = 5.0,
         checkpoint_interval: float | None = None,
         checkpoint_path: str | None = None,
-    ):
+    ) -> Any:
         """Create and start a RHAPSODY TelemetryManager for this workflow engine.
 
         Mirrors Session.start_telemetry(): creates the manager, wires all
@@ -250,7 +250,7 @@ class WorkflowEngine:
     @classmethod
     async def create(
         cls,
-        backend=None,
+        backend: Any = None,
         dry_run: bool = False,
         implicit_data: bool = True,
     ) -> "WorkflowEngine":
@@ -907,12 +907,6 @@ class WorkflowEngine:
             4. Handles data staging between components
             5. Submits ready components to execution
 
-        Args:
-            None
-
-        Returns:
-            None
-
         Raises:
             asyncio.CancelledError: If the coroutine is cancelled during execution
 
@@ -1151,7 +1145,7 @@ class WorkflowEngine:
                 await self._handle_shutdown_signal(signal.SIGUSR1, source="internal")
                 break
 
-    async def submit(self, objects):
+    async def submit(self, objects: list) -> None:
         """Manages asynchronous submission of tasks/blocks to the execution backend.
 
         Retrieves and submit ready tasks and blocks for execution. Separates incoming
@@ -1240,12 +1234,6 @@ class WorkflowEngine:
                 - 'args' (list): Positional arguments for the function
                 - 'kwargs' (dict): Keyword arguments for the function
 
-        Returns:
-            None
-
-        Raises:
-            None
-
         State Management:
             - components (dict): Maps block UIDs to their metadata and future objects
             - Each block execution is tracked via its associated future
@@ -1266,8 +1254,8 @@ class WorkflowEngine:
             )
 
     async def execute_block(
-        self, block_fut: asyncio.Future, func: Callable, *args, **kwargs
-    ):
+        self, block_fut: asyncio.Future, func: Callable, *args: Any, **kwargs: Any
+    ) -> None:
         """Executes a block function and sets its result on the associated future.
 
         Calls the given function with provided args, awaiting it if it's a coroutine,
@@ -1297,7 +1285,7 @@ class WorkflowEngine:
             if not block_fut.done():
                 block_fut.set_exception(e)
 
-    def handle_task_success(self, task: dict, task_fut: asyncio.Future):
+    def handle_task_success(self, task: dict, task_fut: asyncio.Future) -> None:
         """Handles successful task completion and updates the associated future.
 
         Sets the result of the task's future based on whether the task was a function
@@ -1308,12 +1296,6 @@ class WorkflowEngine:
                 - 'uid' (str): Unique task identifier
                 - 'return_value' / 'stdout': Result of the task execution
             task_fut (asyncio.Future): Future to set the result on.
-
-        Returns:
-            None
-
-        Raises:
-            None
         """
         internal_task = self.components[task["uid"]]["description"]
 
@@ -1345,7 +1327,7 @@ class WorkflowEngine:
                 - 'exception' or 'stderr': Error information from execution
             task_fut (Union[SyncFuture, AsyncFuture]): Future to mark as failed.
             override_error_message (Union[str, Exception], optional): Custom
-            error message or exception to set instead of the task's recorded error.
+                error message or exception to set instead of the task's recorded error.
 
         Returns:
             None
@@ -1396,8 +1378,8 @@ class WorkflowEngine:
 
     @typeguard.typechecked
     def task_callbacks(
-        self, task, state: str, service_callback: Optional[Callable] = None
-    ):
+        self, task: Any, state: str, service_callback: Optional[Callable] = None
+    ) -> None:
         """Processes task state changes and invokes appropriate handlers.
 
         Handles state transitions for tasks, updates their futures, and triggers
@@ -1406,11 +1388,11 @@ class WorkflowEngine:
 
         Args:
             task (Union[dict, object]): Task object or dictionary containing task
-            state information.
+                state information.
             state (str): New state of the task.
             service_callback (Optional[Callable], optional): Callback function
-            for service tasks. Must be daemon-threaded to avoid blocking.
-            Defaults to None.
+                for service tasks. Must be daemon-threaded to avoid blocking.
+                Defaults to None.
 
         Returns:
             None
@@ -1535,7 +1517,7 @@ class WorkflowEngine:
                     attributes=tel_attrs,
                 )
 
-    async def shutdown(self, skip_execution_backend: bool = False):
+    async def shutdown(self, skip_execution_backend: bool = False) -> None:
         """Internal implementation of asynchronous shutdown for the workflow manager.
 
         This method performs the following steps:

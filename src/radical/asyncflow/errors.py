@@ -13,7 +13,7 @@ class DependencyFailureError(Exception):
             message (str): Human-readable error message
             failed_dependencies (list, optional): List of failed dependency names
             root_cause (Exception, optional): The original exception that caused
-            the failure
+                the failure
         """
         super().__init__(message)
         self.failed_dependencies = failed_dependencies or []
