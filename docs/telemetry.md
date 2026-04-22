@@ -8,6 +8,10 @@ For the complete reference on events, OTel instruments, JSONL format, Prometheus
 
 ## Enabling telemetry
 
+!!! note
+    **Requires:** `pip install rhapsody-py[telemetry]`
+
+
 ```python
 from concurrent.futures import ProcessPoolExecutor
 from radical.asyncflow import WorkflowEngine

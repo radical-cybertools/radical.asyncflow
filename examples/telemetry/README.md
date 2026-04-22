@@ -1,5 +1,7 @@
 # AsyncFlow Telemetry Examples
 
+> **Requires:** `pip install rhapsody-py[telemetry]`
+
 ---
 
 ## Files
