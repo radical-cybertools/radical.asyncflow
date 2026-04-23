@@ -28,6 +28,13 @@ class NoopExecutionBackend:
     This backend simulates task execution without actually running any tasks. All
     submitted tasks immediately return dummy output and transition to DONE state. Useful
     for testing workflow logic without computational overhead.
+
+    Attributes:
+        _work_dir: Output directory for capture_stdio files. Defaults to cwd;
+            overwritten by WorkflowEngine._attach_backend.
+        is_attached: True once registered with a WorkflowEngine or Session.
+        attached_to: Ordered list of engine/session UIDs this backend has been
+            attached to (most recent last).
     """
 
     def __init__(self, name: str = "default"):
@@ -159,7 +166,15 @@ class NoopExecutionBackend:
 
 
 class LocalExecutionBackend:
-    """Simple async-only concurrent execution backend."""
+    """Simple async-only concurrent execution backend.
+
+    Attributes:
+        _work_dir: Output directory for capture_stdio files. Defaults to cwd;
+            overwritten by WorkflowEngine._attach_backend.
+        is_attached: True once registered with a WorkflowEngine or Session.
+        attached_to: Ordered list of engine/session UIDs this backend has been
+            attached to (most recent last).
+    """
 
     def __init__(self, executor: Executor = None, name: str = "default"):
         if not executor:

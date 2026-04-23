@@ -67,7 +67,8 @@ class WorkflowEngine:
             backend: Execution backend (required, pre-validated)
             dry_run: Whether to run in dry-run mode
             implicit_data: Whether to enable implicit data dependency linking
-            uid: Optional unique identifier for this engine (default: "workflow.0000")
+            uid: Optional unique identifier for this engine. Defaults to
+                ``asyncflow.session.{hex8}`` (UUID-based).
             work_dir: Working directory for output files (default: cwd)
         """
         # Get the current running loop - assume it exists
@@ -114,9 +115,6 @@ class WorkflowEngine:
         # Initialize async task references (will be set in _start_async_components)
         self._run_task = None
         self._shutdown_event = asyncio.Event()  # Added shutdown signal
-
-        # Stable engine identifier — used as session_id for telemetry
-        self.uid = f"workflow-{uuid.uuid4().hex[:8]}"
 
         # Telemetry (opt-in via start_telemetry(), None = disabled, zero cost)
         self._telemetry = None
@@ -281,7 +279,8 @@ class WorkflowEngine:
                      uses NoopExecutionBackend
             dry_run: Whether to run in dry-run mode
             implicit_data: Whether to enable implicit data dependency linking
-            uid: Optional unique identifier for this engine (default: "workflow.0000")
+            uid: Optional unique identifier for this engine. Defaults to
+                ``asyncflow.session.{hex8}`` (UUID-based).
             work_dir: Working directory for output files (default: cwd)
 
         Returns:

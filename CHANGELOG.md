@@ -22,10 +22,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **`WorkflowEngine._attach_backend()`** — new internal method that replaces the inline
   `register_callback` loop. Handles `_work_dir` injection, `is_attached` flag, and callback
   registration in one place.
-- **`is_attached` guard** — attaching a backend that is already registered with another engine
-  or session now raises `RuntimeError` immediately, preventing silent sharing bugs.
 - Unit tests for `capture_stdio` field placement, default value, `_work_dir` authority,
-  `is_attached` guard, and end-to-end file I/O with `ConcurrentExecutionBackend`.
+  and end-to-end file I/O with `ConcurrentExecutionBackend`.
 
 ## [0.3.1] - 2026-03-09
 
