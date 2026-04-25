@@ -56,6 +56,8 @@ class WorkflowEngine:
         backend: Any = None,
         dry_run: bool = False,
         implicit_data: bool = True,
+        uid: Optional[str] = None,
+        work_dir: Optional[str] = None,
     ) -> None:
         """Initialize the WorkflowEngine (sync part only).
 
@@ -65,14 +67,22 @@ class WorkflowEngine:
             backend: Execution backend (required, pre-validated)
             dry_run: Whether to run in dry-run mode
             implicit_data: Whether to enable implicit data dependency linking
+            uid: Optional unique identifier for this engine. Defaults to
+                ``asyncflow.session.{hex8}`` (UUID-based).
+            work_dir: Working directory for output files (default: cwd)
         """
         # Get the current running loop - assume it exists
         self.loop = get_event_loop_or_raise("WorkflowEngine")
 
+        self.uid = uid or f"asyncflow.session.{uuid.uuid4().hex[:8]}"
+        self.work_dir = work_dir or os.getcwd()
+
         # Normalize backend: accept a single backend or a list of backends
         if not isinstance(backend, list):
             backend = [backend]
-        self._backends: dict = {b.name: b for b in backend}
+        self._backends: dict = {}
+        for b in backend:
+            self._attach_backend(b)
         self._default_backend_name: str = backend[0].name
 
         # Initialize core attributes
@@ -92,10 +102,6 @@ class WorkflowEngine:
 
         self.task_states_map = self.backend.get_task_states_map()
 
-        # Register callback with ALL backends so every backend can report state changes
-        for _b in self._backends.values():
-            _b.register_callback(self.task_callbacks)
-
         # Define decorators
         self.block = self._register_decorator(comp_type=BLOCK)
         self.function_task = self._register_decorator(
@@ -110,9 +116,6 @@ class WorkflowEngine:
         self._run_task = None
         self._shutdown_event = asyncio.Event()  # Added shutdown signal
 
-        # Stable engine identifier — used as session_id for telemetry
-        self.uid = f"workflow-{uuid.uuid4().hex[:8]}"
-
         # Telemetry (opt-in via start_telemetry(), None = disabled, zero cost)
         self._telemetry = None
         self._tel_make_event = None  # cached to avoid per-call import lookup
@@ -126,6 +129,19 @@ class WorkflowEngine:
     def backend(self):
         """Return the default execution backend."""
         return self._backends[self._default_backend_name]
+
+    def _attach_backend(self, backend) -> None:
+        """Attach a backend to this engine, setting its work directory.
+
+        Sets backend._work_dir to {work_dir}/{uid} so capture_stdio files land in a per-
+        engine subdirectory. Backends may be reused across engines sequentially.
+        """
+        backend._work_dir = os.path.join(self.work_dir, self.uid)
+        os.makedirs(backend._work_dir, exist_ok=True)
+        backend.is_attached = True
+        backend.attached_to.append(self.uid)
+        self._backends[backend.name] = backend
+        backend.register_callback(self.task_callbacks)
 
     async def start_telemetry(
         self,
@@ -253,6 +269,8 @@ class WorkflowEngine:
         backend: Any = None,
         dry_run: bool = False,
         implicit_data: bool = True,
+        uid: Optional[str] = None,
+        work_dir: Optional[str] = None,
     ) -> "WorkflowEngine":
         """Factory method to create and initialize a WorkflowEngine.
 
@@ -261,6 +279,9 @@ class WorkflowEngine:
                      uses NoopExecutionBackend
             dry_run: Whether to run in dry-run mode
             implicit_data: Whether to enable implicit data dependency linking
+            uid: Optional unique identifier for this engine. Defaults to
+                ``asyncflow.session.{hex8}`` (UUID-based).
+            work_dir: Working directory for output files (default: cwd)
 
         Returns:
             WorkflowEngine: Fully initialized workflow engine
@@ -273,7 +294,11 @@ class WorkflowEngine:
 
         # Create instance with validated backend
         instance = cls(
-            backend=validated_backend, dry_run=dry_run, implicit_data=implicit_data
+            backend=validated_backend,
+            dry_run=dry_run,
+            implicit_data=implicit_data,
+            uid=uid,
+            work_dir=work_dir,
         )
 
         # Initialize async components
@@ -389,6 +414,7 @@ class WorkflowEngine:
             possible_func: Union[Callable, None] = None,
             service: bool = False,
             backend: Optional[str] = None,
+            capture_stdio: bool = False,
         ):
             if not isinstance(service, bool):
                 raise TypeError(
@@ -443,6 +469,7 @@ class WorkflowEngine:
                             task_type=task_type,
                             task_backend_specific_kwargs=task_description_final,
                             target_backend=backend,
+                            capture_stdio=capture_stdio,
                         )
 
                         return registered_func(*args, **kwargs)
@@ -471,6 +498,7 @@ class WorkflowEngine:
         task_type: Optional[str],
         task_backend_specific_kwargs: Optional[dict] = None,
         target_backend: Optional[str] = None,
+        capture_stdio: bool = False,
     ):
         """Handles registration of async tasks and blocks as workflow components.
 
@@ -484,6 +512,9 @@ class WorkflowEngine:
             task_type (str): Task type, determines result handling
             task_backend_specific_kwargs (dict, optional): Backend-specific kwargs.
             Defaults to None.
+            capture_stdio (bool): If True, redirect stdout/stderr to files in the
+            backend's _work_dir. task["stdout"] and task["stderr"] will be file paths
+            instead of decoded strings. Only applies to executable tasks.
 
         Returns:
             Callable: A decorator that:
@@ -509,6 +540,7 @@ class WorkflowEngine:
                 "is_service": is_service,
                 "task_backend_specific_kwargs": task_backend_specific_kwargs or {},
                 "target_backend": target_backend,
+                "capture_stdio": capture_stdio,
             }
 
             # Only handle async functions

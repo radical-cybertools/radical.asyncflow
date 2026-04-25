@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from concurrent.futures import Executor, ProcessPoolExecutor, ThreadPoolExecutor
 from typing import Any, Callable
 
@@ -27,6 +28,13 @@ class NoopExecutionBackend:
     This backend simulates task execution without actually running any tasks. All
     submitted tasks immediately return dummy output and transition to DONE state. Useful
     for testing workflow logic without computational overhead.
+
+    Attributes:
+        _work_dir: Output directory for capture_stdio files. Defaults to cwd;
+            overwritten by WorkflowEngine._attach_backend.
+        is_attached: True once registered with a WorkflowEngine or Session.
+        attached_to: Ordered list of engine/session UIDs this backend has been
+            attached to (most recent last).
     """
 
     def __init__(self, name: str = "default"):
@@ -40,6 +48,9 @@ class NoopExecutionBackend:
         self.name = name
         self.tasks = {}
         self._callback_func: Callable = lambda task, state: None  # default no-op
+        self._work_dir: str = os.getcwd()
+        self.is_attached: bool = False
+        self.attached_to: list[str] = []
 
     def state(self) -> str:
         """Get the current state of the no-op execution backend.
@@ -155,7 +166,15 @@ class NoopExecutionBackend:
 
 
 class LocalExecutionBackend:
-    """Simple async-only concurrent execution backend."""
+    """Simple async-only concurrent execution backend.
+
+    Attributes:
+        _work_dir: Output directory for capture_stdio files. Defaults to cwd;
+            overwritten by WorkflowEngine._attach_backend.
+        is_attached: True once registered with a WorkflowEngine or Session.
+        attached_to: Ordered list of engine/session UIDs this backend has been
+            attached to (most recent last).
+    """
 
     def __init__(self, executor: Executor = None, name: str = "default"):
         if not executor:
@@ -179,6 +198,9 @@ class LocalExecutionBackend:
         self.tasks: dict[str, asyncio.Task] = {}
         self._callback_func: Callable = lambda t, s: None
         self._initialized = False
+        self._work_dir: str = os.getcwd()
+        self.is_attached: bool = False
+        self.attached_to: list[str] = []
 
     def __await__(self):
         """Make backend awaitable."""

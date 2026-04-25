@@ -110,6 +110,44 @@ async def task3(*args):
     - **MPI-based parallel applications**
 
 
+### Capture stdout/stderr to Files
+
+By default, stdout and stderr from executable tasks are collected in memory as strings
+(accessible via `task.stdout` / `task.stderr`, and the awaited future resolves to the stdout
+string). For long-running tasks or large outputs, set `capture_stdio=True` on the decorator
+to redirect output directly to files — zero in-memory buffering.
+
+```python
+flow = await WorkflowEngine.create(
+    backend=backend,
+    uid="my-run",
+    work_dir="/scratch/logs",  # files land under /scratch/logs/my-run/
+)
+
+@flow.executable_task(capture_stdio=True)
+async def simulate():
+    return "/bin/bash -c './simulate.sh --steps 10000'"
+
+stdout_path = await simulate()
+# stdout_path → "/scratch/logs/my-run/task.000001.stdout"
+print(open(stdout_path).read())
+```
+
+When `capture_stdio=True`, the awaited future resolves to the **file path** rather than the
+decoded string. `work_dir` and `uid` are set on `WorkflowEngine.create()`; files are named
+`{work_dir}/{uid}/{task_uid}.stdout` and `.stderr`.
+
+!!! note "Backend support"
+    `capture_stdio` is honoured by all RHAPSODY backends (`ConcurrentExecutionBackend`,
+    `DaskExecutionBackend`, `DragonExecutionBackendV3`). The built-in `LocalExecutionBackend`
+    does not support it — use a RHAPSODY backend for file-based I/O.
+
+!!! note "Function tasks"
+    `capture_stdio` only applies to executable tasks. Function tasks (`@flow.function_task`)
+    ignore it regardless of the flag value.
+
+---
+
 ### Assign Resources for your application (task)
 
 Depending on the `ExecutionBackend` used, AsyncFlow supports passing and assigning multiple/different task and resources parameters to each task. This is part of having a full and granular control on the parallelism that AsyncFlow can offer.
