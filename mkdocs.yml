@@ -116,6 +116,8 @@ nav:
 
   - Composite Workflows: composite_workflow.md
 
+  - Telemetry: telemetry.md
+
   - Changelog: changelog.md
 
   - API Reference:

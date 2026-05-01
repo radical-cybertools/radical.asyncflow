@@ -30,12 +30,7 @@ async def main():
     # Set Dragon as multiprocessing backend
     mp.set_start_method("dragon")
 
-    # Create Dragon Batch backend (4 nodes with 128 workers each)
-    nodes = 1
-    backend = await DragonExecutionBackendV3(
-        num_workers=nodes * mp.cpu_count(),
-        disable_background_batching=False,
-    )
+    backend = await DragonExecutionBackendV3()
     init_default_logger(logging.INFO)
 
     # Create workflow engine

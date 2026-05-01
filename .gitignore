@@ -169,4 +169,5 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+telemetry-output/
 asyncflow.session.*
