@@ -21,8 +21,8 @@ backend = await ConcurrentExecutionBackend(ProcessPoolExecutor())
 flow = await WorkflowEngine.create(backend)
 
 telemetry = await flow.start_telemetry(
-    resource_poll_interval=5.0,       # node CPU/memory/GPU every 5 s
-    checkpoint_path="./telemetry/",   # write a JSONL file (optional)
+    resource_poll_interval=5.0,        # node CPU/memory/GPU every 5 s
+    checkpoint_path="./telemetry/",    # write a JSONL file (optional)
 )
 ```
 
@@ -33,6 +33,74 @@ await flow.shutdown()   # also stops telemetry
 # or explicitly:
 await telemetry.stop()
 ```
+
+### Forwarding to an external backend
+
+Pass pre-built OTel `SpanProcessor` and/or `MetricReader` instances to forward data to Jaeger, Grafana Tempo, Honeycomb, Prometheus, or any other OTel-compatible backend:
+
+```python
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
+from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
+
+telemetry = await flow.start_telemetry(
+    span_processors=[BatchSpanProcessor(OTLPSpanExporter())],
+    metric_readers=[PeriodicExportingMetricReader(OTLPMetricExporter())],
+)
+```
+
+Exporters read `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_EXPORTER_OTLP_HEADERS`, and `OTEL_SERVICE_NAME` from the environment. See [RHAPSODY Integrations](https://radical-cybertools.github.io/rhapsody/telemetry/integrations/) for the full parameter reference.
+
+---
+
+## Workflow grouping with `workflow_scope()`
+
+By default all tasks share the same `session_id`. Use `workflow_scope()` to tag every task submitted inside the scope with a `asyncflow.workflow_id` attribute — enabling per-workflow filtering in Jaeger, Tempo, and the JSONL checkpoint:
+
+```python
+async with flow.workflow_scope("etl-run-42"):
+    raw = ingest("source.csv")
+    val = validate(raw)
+    result = await report(val)
+```
+
+Every span and JSONL event emitted inside the scope carries `asyncflow.workflow_id = "etl-run-42"`. The scope maps directly onto a named OTel span (`name="workflow"`), so the flame graph in Tempo shows `session → workflow(etl-run-42) → task` hierarchy.
+
+If no `workflow_id` is passed, one is auto-generated (`wf-<hex8>`).
+
+```python
+# Auto-ID
+async with flow.workflow_scope() as wid:
+    print(wid)   # e.g. "wf-3a1b9c2d"
+```
+
+`@flow.block`-decorated functions are automatically tagged with the block's UID as the `workflow_id` — no explicit `workflow_scope()` needed inside a block body.
+
+---
+
+## OTel span hierarchy
+
+When telemetry is enabled, AsyncFlow produces a four-level span tree:
+
+```
+Trace (one per session)
+└── session span  [SessionStarted … SessionEnded]
+    │
+    ├── workflow span  [workflow_scope("etl-run-42")]
+    │   ├── task span  task_id=ingest-001
+    │   ├── task span  task_id=validate-001
+    │   └── task span  task_id=report-001
+    │
+    ├── block span  [execute_block("pipeline_block")]
+    │   ├── task span  task_id=preprocess-001
+    │   ├── task span  task_id=compute-001
+    │   └── task span  task_id=store-001
+    │
+    └── task span  (ungrouped — submitted outside any scope)
+```
+
+The `asyncflow.workflow_id` attribute is stamped on every task span and every JSONL lifecycle event inside a scope. This makes per-workflow Gantt views, performance comparison across workflow types, and span filtering all possible without any post-processing join.
 
 ---
 

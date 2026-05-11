@@ -156,6 +156,9 @@ class WorkflowEngine:
         resource_poll_interval: float = 5.0,
         checkpoint_interval: float | None = None,
         checkpoint_path: str | None = None,
+        span_processors: list | None = None,
+        metric_readers: list | None = None,
+        resource: object | None = None,
     ) -> Any:
         """Create and start a RHAPSODY TelemetryManager for this workflow engine.
 
@@ -163,6 +166,21 @@ class WorkflowEngine:
         registered backends (silently skipping LocalExecutionBackend and
         NoopExecutionBackend which have no adapter), starts the async dispatch
         loop, and returns the manager.
+
+        Args:
+            resource_poll_interval: Seconds between resource metric polls (default: 5.0).
+            checkpoint_interval:    Seconds between periodic metric+span flushes to disk.
+                                    None = no periodic flush (file still written at stop).
+            checkpoint_path:        Directory for the JSONL checkpoint file.
+                                    None = no file output.
+            span_processors:        Optional list of OTel SpanProcessor instances added to
+                                    RHAPSODY's TracerProvider alongside the internal
+                                    SpanBuffer. Callers own exporter construction.
+            metric_readers:         Optional list of OTel MetricReader instances added to
+                                    RHAPSODY's MeterProvider alongside InMemoryMetricReader.
+            resource:               Optional ``opentelemetry.sdk.resources.Resource``.
+                                    When None, ``Resource.create()`` reads
+                                    ``OTEL_SERVICE_NAME`` from the environment automatically.
 
         Returns:
             The active TelemetryManager instance.
@@ -173,6 +191,9 @@ class WorkflowEngine:
             session_id=self.uid,
             checkpoint_interval=checkpoint_interval,
             checkpoint_path=checkpoint_path,
+            span_processors=span_processors,
+            metric_readers=metric_readers,
+            resource=resource,
         )
 
         for backend in self._backends.values():
