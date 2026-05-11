@@ -15,7 +15,7 @@ from contextvars import ContextVar
 from functools import wraps
 from itertools import count
 from pathlib import Path
-from typing import Any, Callable, Optional, Union
+from typing import Any, AsyncIterator, Callable, Optional, Union
 
 import typeguard
 
@@ -275,7 +275,9 @@ class WorkflowEngine:
         )
 
     @asynccontextmanager
-    async def workflow_scope(self, workflow_id: str | None = None):
+    async def workflow_scope(
+        self, workflow_id: str | None = None
+    ) -> AsyncIterator[str]:
         """Tag all tasks registered inside this scope with a shared workflow_id.
 
         Also creates an OTel workflow span (when telemetry is active) so that task spans
