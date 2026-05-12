@@ -35,12 +35,6 @@ PROMPT = "prompt"
 
 logger = logging.getLogger(__name__)
 
-# Per-coroutine workflow scope: asyncio copies this context into every create_task/gather
-# branch, so concurrent workflows remain isolated from each other automatically.
-_workflow_id_ctx: ContextVar[str | None] = ContextVar(
-    "asyncflow_workflow_id", default=None
-)
-
 
 class WorkflowEngine:
     """An asynchronous workflow manager that uses asyncio event loops and coroutines to
@@ -84,6 +78,11 @@ class WorkflowEngine:
 
         self.uid = uid or f"asyncflow.session.{uuid.uuid4().hex[:8]}"
         self.work_dir = work_dir or os.getcwd()
+        # Per-engine ContextVar avoids cross-engine context leakage in shared coroutines,
+        # while asyncio still propagates it across create_task/gather branches.
+        self._workflow_id_ctx: ContextVar[str | None] = ContextVar(
+            f"asyncflow_workflow_id.{self.uid}", default=None
+        )
 
         # Normalize backend: accept a single backend or a list of backends
         if not isinstance(backend, list):
@@ -291,7 +290,7 @@ class WorkflowEngine:
             The workflow_id string in use.
         """
         wid = workflow_id or f"wf-{uuid.uuid4().hex[:8]}"
-        token = _workflow_id_ctx.set(wid)
+        token = self._workflow_id_ctx.set(wid)
         try:
             scope = (
                 self._telemetry.span_scope("workflow", {"asyncflow.workflow_id": wid})
@@ -301,7 +300,7 @@ class WorkflowEngine:
             with scope:
                 yield wid
         finally:
-            _workflow_id_ctx.reset(token)
+            self._workflow_id_ctx.reset(token)
 
     def _setup_signal_handlers(self):
         """Register signal handlers for graceful shutdown on SIGHUP, SIGTERM, and
@@ -704,7 +703,7 @@ class WorkflowEngine:
         # make sure not to specify both func and executable at the same time
         comp_desc["name"] = comp_desc["function"].__name__
         comp_desc["uid"] = self._assign_uid(prefix=comp_type)
-        comp_desc["workflow_id"] = _workflow_id_ctx.get()
+        comp_desc["workflow_id"] = self._workflow_id_ctx.get()
 
         if task_type == EXECUTABLE:
             comp_desc[FUNCTION] = None  # Clear function since we're using executable
@@ -1386,7 +1385,7 @@ class WorkflowEngine:
         """
 
         block_uid = block_fut.block["uid"]
-        token = _workflow_id_ctx.set(block_uid)
+        token = self._workflow_id_ctx.set(block_uid)
         try:
             scope = (
                 self._telemetry.span_scope(
@@ -1403,7 +1402,7 @@ class WorkflowEngine:
             if not block_fut.done():
                 block_fut.set_exception(e)
         finally:
-            _workflow_id_ctx.reset(token)
+            self._workflow_id_ctx.reset(token)
 
     def handle_task_success(self, task: dict, task_fut: asyncio.Future) -> None:
         """Handles successful task completion and updates the associated future.

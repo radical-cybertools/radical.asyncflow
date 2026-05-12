@@ -17,10 +17,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   spans inside structural children in the trace hierarchy. Auto-generates a
   short UUID if `workflow_id` is `None`.
 
-- **`_workflow_id_ctx` ContextVar** — module-level `ContextVar` (default
+- **`_workflow_id_ctx` ContextVar** — per-instance `ContextVar` (default
   `None`) that carries the active workflow ID across asyncio task boundaries
-  without explicit argument passing. `@flow.block` execution sets it to the
-  block's UID so tasks inside a block inherit the workflow ID automatically.
+  without explicit argument passing. Each `WorkflowEngine` instance owns its
+  own uniquely-named ContextVar (`asyncflow_workflow_id.<uid>`), preventing
+  context leakage when multiple engines are used within the same coroutine.
+  `@flow.block` execution sets it to the block's UID so tasks inside a block
+  inherit the workflow ID automatically.
 
 - **`WorkflowEngine.start_telemetry()` new parameters** — `span_processors`,
   `metric_readers`, `resource` — forwarded to `TelemetryManager.__init__()`,
