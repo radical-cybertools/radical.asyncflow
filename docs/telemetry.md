@@ -77,6 +77,31 @@ async with flow.workflow_scope() as wid:
 
 `@flow.block`-decorated functions are automatically tagged with the block's UID as the `workflow_id` — no explicit `workflow_scope()` needed inside a block body.
 
+### Visualising workflow telemetry
+
+The example in `examples/telemetry/01-workflow_grouping.py`
+runs six parallel ML training pipelines (load → preprocess → train → evaluate), each
+wrapped in a `workflow_scope()`. Running the companion plotting script against the
+JSONL checkpoint:
+
+```bash
+python examples/telemetry/01-workflow_grouping.py --out results/
+python examples/telemetry/plot_workflow_gantt.py results/
+```
+
+produces a six-panel dashboard:
+
+![AsyncFlow workflow telemetry dashboard](assets/workflow-telemetry-dashboard.png)
+
+| Panel | What it shows |
+|---|---|
+| **Workflow Gantt** | One row per workflow instance; coloured bars = pipeline stages; light band = dependency wait |
+| **Stage Execution Time** | Stacked bars in ms per stage per workflow — reveals which stage dominates each run |
+| **Workflow Concurrency** | In-flight workflows over time — shows scheduler saturation |
+| **Workflow Throughput** | Completion histogram — when pipelines finish relative to session start |
+| **E2E Latency Distribution** | Histogram of total elapsed time per workflow with mean/median lines |
+| **Stage × Time Heatmap** | 2-D heatmap (stages × time bins): task occupancy per cell — reveals bottleneck stages |
+
 ---
 
 ## OTel span hierarchy
