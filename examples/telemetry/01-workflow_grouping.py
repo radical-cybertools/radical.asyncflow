@@ -24,11 +24,11 @@ import time
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
-from radical.asyncflow import WorkflowEngine
 from rhapsody.backends import ConcurrentExecutionBackend
 from rhapsody.telemetry import define_event
 from rhapsody.telemetry.events import make_event
 
+from radical.asyncflow import WorkflowEngine
 from radical.asyncflow.logging import init_default_logger
 
 logger = logging.getLogger(__name__)
@@ -51,7 +51,7 @@ EXPERIMENTS = [
     (100, 0.010),
     (200, 0.005),
     (150, 0.020),
-    (80,  0.050),
+    (80, 0.050),
     (250, 0.001),
     (120, 0.010),
 ]
