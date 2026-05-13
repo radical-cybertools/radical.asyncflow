@@ -10,10 +10,12 @@ import signal
 import time
 import uuid
 from collections import defaultdict, deque
+from contextlib import asynccontextmanager, nullcontext
+from contextvars import ContextVar
 from functools import wraps
 from itertools import count
 from pathlib import Path
-from typing import Any, Callable, Optional, Union
+from typing import Any, AsyncIterator, Callable, Optional, Union
 
 import typeguard
 
@@ -76,6 +78,11 @@ class WorkflowEngine:
 
         self.uid = uid or f"asyncflow.session.{uuid.uuid4().hex[:8]}"
         self.work_dir = work_dir or os.getcwd()
+        # Per-engine ContextVar avoids cross-engine context leakage in shared coroutines,
+        # while asyncio still propagates it across create_task/gather branches.
+        self._workflow_id_ctx: ContextVar[str | None] = ContextVar(
+            f"asyncflow_workflow_id.{self.uid}", default=None
+        )
 
         # Normalize backend: accept a single backend or a list of backends
         if not isinstance(backend, list):
@@ -148,6 +155,9 @@ class WorkflowEngine:
         resource_poll_interval: float = 5.0,
         checkpoint_interval: float | None = None,
         checkpoint_path: str | None = None,
+        span_processors: list | None = None,
+        metric_readers: list | None = None,
+        resource: object | None = None,
     ) -> Any:
         """Create and start a RHAPSODY TelemetryManager for this workflow engine.
 
@@ -155,6 +165,21 @@ class WorkflowEngine:
         registered backends (silently skipping LocalExecutionBackend and
         NoopExecutionBackend which have no adapter), starts the async dispatch
         loop, and returns the manager.
+
+        Args:
+            resource_poll_interval: Seconds between resource metric polls (default: 5.0).
+            checkpoint_interval:    Seconds between periodic metric+span flushes to disk.
+                                    None = no periodic flush (file still written at stop).
+            checkpoint_path:        Directory for the JSONL checkpoint file.
+                                    None = no file output.
+            span_processors:        Optional list of OTel SpanProcessor instances added to
+                                    RHAPSODY's TracerProvider alongside the internal
+                                    SpanBuffer. Callers own exporter construction.
+            metric_readers:         Optional list of OTel MetricReader instances added to
+                                    RHAPSODY's MeterProvider alongside InMemoryMetricReader.
+            resource:               Optional ``opentelemetry.sdk.resources.Resource``.
+                                    When None, ``Resource.create()`` reads
+                                    ``OTEL_SERVICE_NAME`` from the environment automatically.
 
         Returns:
             The active TelemetryManager instance.
@@ -165,6 +190,9 @@ class WorkflowEngine:
             session_id=self.uid,
             checkpoint_interval=checkpoint_interval,
             checkpoint_path=checkpoint_path,
+            span_processors=span_processors,
+            metric_readers=metric_readers,
+            resource=resource,
         )
 
         for backend in self._backends.values():
@@ -176,6 +204,15 @@ class WorkflowEngine:
             )
 
         await self._telemetry.start()
+
+        self._telemetry.register_span_enricher(
+            lambda event: (
+                {"asyncflow.workflow_id": event.attributes["asyncflow.workflow_id"]}
+                if isinstance(event.attributes, dict)
+                and "asyncflow.workflow_id" in event.attributes
+                else {}
+            )
+        )
 
         from rhapsody.telemetry.events import (  # noqa: PLC0415
             TaskCanceled,
@@ -208,7 +245,13 @@ class WorkflowEngine:
         return self._telemetry
 
     def _emit(
-        self, event_name: str, *, task_id: str, backend: str = None, **kwargs
+        self,
+        event_name: str,
+        *,
+        task_id: str,
+        backend: str = None,
+        workflow_id: str | None = None,
+        **kwargs,
     ) -> None:
         """Emit a telemetry event by name.
 
@@ -218,6 +261,8 @@ class WorkflowEngine:
             return
         if "event_time" not in kwargs:
             kwargs["event_time"] = time.time()
+        if workflow_id is not None:
+            kwargs.setdefault("attributes", {})["asyncflow.workflow_id"] = workflow_id
         self._telemetry.emit(
             self._tel_make_event(
                 self._tel_events[event_name],
@@ -227,6 +272,35 @@ class WorkflowEngine:
                 **kwargs,
             )
         )
+
+    @asynccontextmanager
+    async def workflow_scope(
+        self, workflow_id: str | None = None
+    ) -> AsyncIterator[str]:
+        """Tag all tasks registered inside this scope with a shared workflow_id.
+
+        Also creates an OTel workflow span (when telemetry is active) so that task spans
+        registered inside become structural children in the trace hierarchy.
+
+        Args:
+            workflow_id: Explicit id for this workflow instance.
+                If omitted, a short UUID is generated automatically.
+
+        Yields:
+            The workflow_id string in use.
+        """
+        wid = workflow_id or f"wf-{uuid.uuid4().hex[:8]}"
+        token = self._workflow_id_ctx.set(wid)
+        try:
+            scope = (
+                self._telemetry.span_scope("workflow", {"asyncflow.workflow_id": wid})
+                if self._telemetry is not None
+                else nullcontext()
+            )
+            with scope:
+                yield wid
+        finally:
+            self._workflow_id_ctx.reset(token)
 
     def _setup_signal_handlers(self):
         """Register signal handlers for graceful shutdown on SIGHUP, SIGTERM, and
@@ -629,6 +703,7 @@ class WorkflowEngine:
         # make sure not to specify both func and executable at the same time
         comp_desc["name"] = comp_desc["function"].__name__
         comp_desc["uid"] = self._assign_uid(prefix=comp_type)
+        comp_desc["workflow_id"] = self._workflow_id_ctx.get()
 
         if task_type == EXECUTABLE:
             comp_desc[FUNCTION] = None  # Clear function since we're using executable
@@ -691,6 +766,7 @@ class WorkflowEngine:
         self._emit(
             "TaskCreated",
             task_id=comp_desc["uid"],
+            workflow_id=comp_desc.get("workflow_id"),
             attributes={
                 "executable": comp_desc["_tel_executable"],
                 "task_type": comp_desc["_tel_task_type"],
@@ -704,6 +780,7 @@ class WorkflowEngine:
             self._emit(
                 "asyncflow.TaskResolved",
                 task_id=comp_desc["uid"],
+                workflow_id=comp_desc.get("workflow_id"),
                 attributes={
                     "executable": comp_desc["_tel_executable"],
                     "task_type": comp_desc["_tel_task_type"],
@@ -865,6 +942,7 @@ class WorkflowEngine:
                         self._emit(
                             "asyncflow.TaskResolved",
                             task_id=dependent_uid,
+                            workflow_id=dep_desc.get("workflow_id"),
                             attributes={
                                 "executable": dep_desc["_tel_executable"],
                                 "task_type": dep_desc["_tel_task_type"],
@@ -1108,6 +1186,7 @@ class WorkflowEngine:
                             "TaskQueued",
                             task_id=comp_uid,
                             backend=comp_desc.get("target_backend"),
+                            workflow_id=comp_desc.get("workflow_id"),
                             attributes={
                                 "executable": comp_desc["_tel_executable"],
                                 "task_type": comp_desc["_tel_task_type"],
@@ -1216,6 +1295,7 @@ class WorkflowEngine:
                             "TaskSubmitted",
                             task_id=t["uid"],
                             backend=t.get("target_backend"),
+                            workflow_id=t.get("workflow_id"),
                             event_time=now,
                             attributes={
                                 "executable": t["_tel_executable"],
@@ -1304,18 +1384,25 @@ class WorkflowEngine:
             None
         """
 
+        block_uid = block_fut.block["uid"]
+        token = self._workflow_id_ctx.set(block_uid)
         try:
-            if asyncio.iscoroutinefunction(func):
+            scope = (
+                self._telemetry.span_scope(
+                    "block", {"asyncflow.workflow_id": block_uid}
+                )
+                if self._telemetry is not None
+                else nullcontext()
+            )
+            with scope:
                 result = await func(*args, **kwargs)
-            else:
-                # Run sync function in executor
-                result = await self.loop.run_in_executor(None, func, *args, **kwargs)
-
             if not block_fut.done():
                 block_fut.set_result(result)
         except Exception as e:
             if not block_fut.done():
                 block_fut.set_exception(e)
+        finally:
+            self._workflow_id_ctx.reset(token)
 
     def handle_task_success(self, task: dict, task_fut: asyncio.Future) -> None:
         """Handles successful task completion and updates the associated future.
@@ -1499,6 +1586,7 @@ class WorkflowEngine:
                 self._emit(
                     "TaskCompleted",
                     task_id=uid,
+                    workflow_id=task_dct.get("workflow_id"),
                     event_time=now,
                     duration_seconds=now - start,
                     attributes=tel_attrs,
@@ -1514,6 +1602,7 @@ class WorkflowEngine:
                 self._emit(
                     "TaskStarted",
                     task_id=uid,
+                    workflow_id=task_dct.get("workflow_id"),
                     event_time=now,
                     attributes=tel_attrs,
                 )
@@ -1528,6 +1617,7 @@ class WorkflowEngine:
                 self._emit(
                     "TaskCanceled",
                     task_id=uid,
+                    workflow_id=task_dct.get("workflow_id"),
                     event_time=now,
                     duration_seconds=now - start,
                     attributes=tel_attrs,
@@ -1543,6 +1633,7 @@ class WorkflowEngine:
                 self._emit(
                     "TaskFailed",
                     task_id=uid,
+                    workflow_id=task_dct.get("workflow_id"),
                     event_time=now,
                     duration_seconds=now - start,
                     error_type="unknown",

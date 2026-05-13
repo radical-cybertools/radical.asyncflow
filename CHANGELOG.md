@@ -8,6 +8,59 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **`WorkflowEngine.workflow_scope(workflow_id=None)`** — new async context
+  manager that groups all tasks registered inside under a shared
+  `asyncflow.workflow_id`. Internally sets `_workflow_id_ctx` (a module-level
+  `ContextVar`), which asyncio copies into every `create_task` / `gather`
+  branch automatically so concurrent workflow instances remain isolated. When
+  telemetry is active, also opens an OTel `"workflow"` span, making all task
+  spans inside structural children in the trace hierarchy. Auto-generates a
+  short UUID if `workflow_id` is `None`.
+
+- **`_workflow_id_ctx` ContextVar** — per-instance `ContextVar` (default
+  `None`) that carries the active workflow ID across asyncio task boundaries
+  without explicit argument passing. Each `WorkflowEngine` instance owns its
+  own uniquely-named ContextVar (`asyncflow_workflow_id.<uid>`), preventing
+  context leakage when multiple engines are used within the same coroutine.
+  `@flow.block` execution sets it to the block's UID so tasks inside a block
+  inherit the workflow ID automatically.
+
+- **`WorkflowEngine.start_telemetry()` new parameters** — `span_processors`,
+  `metric_readers`, `resource` — forwarded to `TelemetryManager.__init__()`,
+  mirroring `Session.start_telemetry()`. Enables passing pre-built OTel
+  exporters (OTLP, Prometheus, Jaeger) without any RHAPSODY code changes.
+
+- **Span enricher for `asyncflow.workflow_id`** — registered automatically by
+  `start_telemetry()` via `register_span_enricher()`. Stamps
+  `asyncflow.workflow_id` onto every task OTel span when the task was created
+  inside a `workflow_scope()` or `@flow.block`. Enables per-workflow Gantt
+  views and span filtering in Jaeger / Grafana Tempo.
+
+- **`_emit()` `workflow_id` kwarg** — when `workflow_id` is set, injects
+  `asyncflow.workflow_id` into the event's `attributes` dict. All task lifecycle
+  events emitted by `WorkflowEngine` (TaskCreated, asyncflow.TaskResolved,
+  TaskSubmitted) carry the active workflow ID.
+
+- **Example `01-workflow_grouping.py`** — complete rewrite as an HPC Campaign
+  Manager simulation. Models 4 workflow types with resource tracking and
+  dependency chains:
+  - `simulate` (4 tasks, GPU, no deps) — molecular dynamics runs
+  - `analyze` (4 tasks, GPU, deps=simulate) — post-processing per simulation
+  - `train` (8 tasks, GPU, no deps) — distributed ML training
+  - `evaluate` (8 tasks, CPU, deps=train) — lightweight model evaluation
+  Uses `ResourcePool` (asyncio-queue-based GPU/CPU slot tracking) and emits
+  `campaign.ResourceAssigned` custom events to record per-instance resource
+  assignments in the JSONL checkpoint.
+
+- **`plot_campaign.py`** — new plotting script producing a two-panel Campaign
+  Manager timeline figure:
+  - **Top panel**: Gantt chart with rows per workflow instance, bars coloured by
+    workflow type and labelled with the assigned resource (`gpu:N` / `cpu:N`).
+    Right-margin annotations show priority / cpu / gpu per type. Right column
+    renders a config table, scheduler description box, and dependency graph.
+  - **Bottom panel**: GPU (left axis) and CPU (right axis) utilisation as step
+    functions over elapsed time, with total-capacity dashed reference lines.
+
 - **`capture_stdio` decorator parameter** — `@flow.executable_task(capture_stdio=True)` redirects
   stdout/stderr from executable tasks directly to files instead of collecting them in memory.
   The awaited future resolves to the stdout **file path** (`{work_dir}/{uid}/{task_uid}.stdout`)
@@ -24,6 +77,43 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   registration in one place.
 - Unit tests for `capture_stdio` field placement, default value, `_work_dir` authority,
   and end-to-end file I/O with `ConcurrentExecutionBackend`.
+
+### Fixed
+
+- **Block spans parented correctly** — `execute_block()` now benefits from the
+  `span_scope()` session-span fallback added in RHAPSODY: block spans that run
+  in a context with no active OTel span (e.g. spawned from `run()` before
+  `start_telemetry()` was awaited) now correctly nest under the session root
+  span instead of floating as unrooted traces.
+
+- **`execute_block()` dead branch removed** — the `run_in_executor` code path
+  (used when the wrapped function was sync) is removed. `WorkflowEngine`
+  enforces a strict async API; all block functions must be `async def`.
+
+### Changed
+
+- **`execute_block()` uses `nullcontext`** — the no-telemetry code path uses
+  stdlib `nullcontext` (Python >= 3.7) instead of the former custom
+  `_null_context()` helper, which is removed.
+
+- **`execute_block()` sets `_workflow_id_ctx`** — the block's UID is set as the
+  active `_workflow_id_ctx` for the duration of block execution so every task
+  registered inside the block inherits it as `asyncflow.workflow_id` without
+  requiring an explicit `workflow_scope()` call.
+
+### Docs
+
+- **`docs/telemetry.md`**:
+  - Added "Forwarding to an external backend" section with corrected
+    `span_processors` / `metric_readers` code examples (replaces the broken
+    `set_tracer_provider()` pattern).
+  - Added "`workflow_scope()` context manager" section with usage examples and
+    auto-ID generation.
+  - Added "OTel span hierarchy" section showing the four-level
+    `session -> workflow -> block -> task` tree and explaining how
+    `asyncflow.workflow_id` propagates to every span attribute and JSONL event.
+  - Updated `start_telemetry()` signature to include `span_processors`,
+    `metric_readers`, and `resource` parameters.
 
 ## [0.3.1] - 2026-03-09
 
