@@ -93,7 +93,7 @@ class WorkflowEngine:
         self._default_backend_name: str = backend[0].name
 
         # Initialize core attributes
-        self.running = []
+        self.running: set[str] = set()
         self.components = {}
         self.resolved = set()
         self.dependencies = {}
@@ -965,6 +965,10 @@ class WorkflowEngine:
         self._dependency_count.clear()
         self._block_members.clear()
         self._block_asyncio_tasks.clear()
+        self.resolved.clear()
+        self.running.clear()
+        self._task_submit_times.clear()
+        self._task_start_times.clear()
 
         reset_uid_counter()
 
@@ -1245,7 +1249,7 @@ class WorkflowEngine:
                     await self.submit(to_submit)
                     for comp_desc in to_submit:
                         comp_uid = comp_desc["uid"]
-                        self.running.append(comp_uid)
+                        self.running.add(comp_uid)
                         self.resolved.add(comp_uid)
 
                 # Check for completed components and update dependency tracking
@@ -1253,7 +1257,7 @@ class WorkflowEngine:
                 for comp_uid in list(self.running):
                     if self.components[comp_uid]["future"].done():
                         completed_components.append(comp_uid)
-                        self.running.remove(comp_uid)
+                        self.running.discard(comp_uid)
 
                 # Notify dependents of completed components
                 for comp_uid in completed_components:
