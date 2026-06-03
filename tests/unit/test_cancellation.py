@@ -13,7 +13,8 @@ async def _make_engine():
 
 @pytest.mark.asyncio
 async def test_pending_cancel_actually_cancels():
-    """cancel() on a pending future must mark it cancelled, not return the method object."""
+    """Cancel() on a pending future must mark it cancelled, not return the method
+    object."""
     engine = await _make_engine()
 
     fut = asyncio.Future()
@@ -25,6 +26,28 @@ async def test_pending_cancel_actually_cancels():
 
     assert result is True
     assert fut.cancelled()
+    assert fut.state == "CANCELLED"
+
+    await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_pending_cancel_forwards_msg():
+    """Cancel(msg) must forward the message through to the underlying future."""
+    engine = await _make_engine()
+
+    fut = asyncio.Future()
+    fut.state = "PENDING"
+    fut.cancel = engine._setup_future_cancel_hook(fut, "task.msg-test")
+
+    fut.cancel("cancel-reason")
+
+    assert fut.cancelled()
+    assert fut.state == "CANCELLED"
+
+    with pytest.raises(asyncio.CancelledError) as exc_info:
+        await fut
+    assert "cancel-reason" in str(exc_info.value)
 
     await engine.shutdown()
 

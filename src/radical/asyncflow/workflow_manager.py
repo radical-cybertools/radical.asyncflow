@@ -714,7 +714,9 @@ class WorkflowEngine:
         comp_desc["name"] = comp_desc["function"].__name__
         comp_desc["uid"] = self._assign_uid(prefix=comp_type)
         # call-time workflow_id takes precedence over the ContextVar
-        comp_desc["workflow_id"] = comp_desc.pop("_explicit_workflow_id", None) or self._workflow_id_ctx.get()
+        comp_desc["workflow_id"] = (
+            comp_desc.pop("_explicit_workflow_id", None) or self._workflow_id_ctx.get()
+        )
 
         if task_type == EXECUTABLE:
             comp_desc[FUNCTION] = None  # Clear function since we're using executable
@@ -781,9 +783,13 @@ class WorkflowEngine:
             and parent_block_uid in self.components
             and self.components[parent_block_uid]["type"] == BLOCK
         ):
-            self._block_members.setdefault(parent_block_uid, set()).add(comp_desc["uid"])
+            self._block_members.setdefault(parent_block_uid, set()).add(
+                comp_desc["uid"]
+            )
             comp_fut.add_done_callback(
-                lambda _, buid=parent_block_uid, tuid=comp_desc["uid"]: self._remove_member(buid, tuid)
+                lambda _,
+                b_uid=parent_block_uid,
+                tuid=comp_desc["uid"]: self._remove_member(b_uid, tuid)
             )
 
         # Patch cancel for tasks only; blocks are cancelled via a done_callback
@@ -855,7 +861,10 @@ class WorkflowEngine:
             else:
                 # Task is pending -> cancel locally
                 logger.info(f"Cancellation requested for {uid} (pending) locally")
-                return fut.original_cancel()
+                result = fut.original_cancel(*args, **kwargs)
+                if result:
+                    fut.state = "CANCELLED"
+                return result
 
         return patched_cancel
 
@@ -955,6 +964,7 @@ class WorkflowEngine:
         self._dependents_map.clear()
         self._dependency_count.clear()
         self._block_members.clear()
+        self._block_asyncio_tasks.clear()
 
         reset_uid_counter()
 
@@ -1395,24 +1405,31 @@ class WorkflowEngine:
             block_uid = block["uid"]
             block_fut = self.components[block_uid]["future"]
             t = asyncio.create_task(
-                self.execute_block(block_fut, block["function"], *block["args"], **block["kwargs"]),
+                self.execute_block(
+                    block_fut, block["function"], *block["args"], **block["kwargs"]
+                ),
                 name=block_uid,
             )
+            block_fut.state = "RUNNING"
             self._block_asyncio_tasks[block_uid] = t
             # Remove from registry when the asyncio.Task finishes (any outcome)
-            t.add_done_callback(lambda _, uid=block_uid: self._block_asyncio_tasks.pop(uid, None))
+            t.add_done_callback(
+                lambda _, uid=block_uid: self._block_asyncio_tasks.pop(uid, None)
+            )
+
             # Wire cancellation: if block_fut is cancelled externally after submission,
             # propagate to the asyncio.Task.
-            def _on_block_fut_done(f, task=t, buid=block_uid):
+            def _on_block_fut_done(f, task=t, b_uid=block_uid):
+                members = self._block_members.pop(b_uid, None)
                 if f.cancelled():
                     task.cancel()
                     f.state = "CANCELLED"
-                    members = self._block_members.pop(buid, None)
                     if members:
                         for member_uid in members:
                             comp = self.components.get(member_uid)
                             if comp and not comp["future"].done():
                                 comp["future"].cancel()
+
             block_fut.add_done_callback(_on_block_fut_done)
 
     async def execute_block(
@@ -1448,9 +1465,11 @@ class WorkflowEngine:
                 result = await func(*args, **kwargs)
             if not block_fut.done():
                 block_fut.set_result(result)
+                block_fut.state = "DONE"
         except Exception as e:
             if not block_fut.done():
                 block_fut.set_exception(e)
+                block_fut.state = "FAILED"
         finally:
             self._workflow_id_ctx.reset(token)
 

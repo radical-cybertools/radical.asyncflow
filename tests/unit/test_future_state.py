@@ -73,7 +73,11 @@ async def test_future_state_transitions_to_failed():
 
     fut = asyncio.Future()
     fut.state = "RUNNING"
-    task_desc = {"uid": "task.fail-test", "exception": RuntimeError("boom"), "stderr": "boom"}
+    task_desc = {
+        "uid": "task.fail-test",
+        "exception": RuntimeError("boom"),
+        "stderr": "boom",
+    }
 
     engine.handle_task_failure(task_desc, fut)
 
@@ -95,5 +99,52 @@ async def test_future_state_transitions_to_cancelled():
     engine.handle_task_cancellation(task_desc, fut)
 
     assert fut.state == "CANCELLED"
+
+    await engine.shutdown()
+
+
+# ---------------------------------------------------------------------------
+# Block future state lifecycle
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_block_future_state_transitions_running_then_done():
+    """Block future must be RUNNING after submit and DONE after normal completion."""
+    engine = await _make_engine()
+    block_release = asyncio.Event()
+
+    @engine.block
+    async def held_block():
+        await block_release.wait()
+
+    block_fut = held_block()
+    await asyncio.sleep(0.05)
+
+    assert block_fut.state == "RUNNING"
+
+    block_release.set()
+    await asyncio.sleep(0.05)
+
+    assert block_fut.state == "DONE"
+
+    await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_block_future_state_transitions_to_failed():
+    """A block that raises must have state == 'FAILED' after the exception
+    propagates."""
+    engine = await _make_engine()
+
+    @engine.block
+    async def failing_block():
+        raise ValueError("block error")
+
+    block_fut = failing_block()
+    await asyncio.sleep(0.1)
+
+    assert block_fut.state == "FAILED"
+    assert isinstance(block_fut.exception(), ValueError)
 
     await engine.shutdown()

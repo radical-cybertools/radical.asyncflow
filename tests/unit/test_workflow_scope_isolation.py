@@ -133,7 +133,8 @@ async def test_explicit_workflow_id_not_passed_to_function():
 
 @pytest.mark.asyncio
 async def test_explicit_workflow_id_overrides_context_var():
-    """An explicit workflow_id kwarg must take precedence over the active workflow_scope."""
+    """An explicit workflow_id kwarg must take precedence over the active
+    workflow_scope."""
     engine = await WorkflowEngine.create(backend=NoopExecutionBackend())
 
     async with engine.workflow_scope("ctx-wf"):
@@ -153,7 +154,8 @@ async def test_explicit_workflow_id_overrides_context_var():
 
 @pytest.mark.asyncio
 async def test_workflow_id_falls_back_to_context_var():
-    """When no explicit workflow_id is passed, the active workflow_scope value is used."""
+    """When no explicit workflow_id is passed, the active workflow_scope value is
+    used."""
     engine = await WorkflowEngine.create(backend=NoopExecutionBackend())
 
     async with engine.workflow_scope("scope-wf"):
