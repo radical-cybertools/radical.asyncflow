@@ -50,7 +50,8 @@ async def test_running_membership_and_cleanup():
 
 @pytest.mark.asyncio
 async def test_clear_internal_records_resets_resolved_and_running():
-    """resolved and running must be empty after shutdown (which calls _clear_internal_records)."""
+    """Resolved and running must be empty after shutdown (which calls
+    _clear_internal_records)."""
     engine = await _make_engine()
 
     @engine.function_task
@@ -71,7 +72,8 @@ async def test_clear_internal_records_resets_resolved_and_running():
 
 @pytest.mark.asyncio
 async def test_clear_internal_records_resets_timing_dicts():
-    """_task_submit_times and _task_start_times must be empty after _clear_internal_records."""
+    """_task_submit_times and _task_start_times must be empty after
+    _clear_internal_records."""
     engine = await _make_engine()
 
     # Populate the timing dicts directly to simulate telemetry state
