@@ -6,6 +6,49 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **`future.state` attribute** — every component future (task and block) now exposes a `.state`
+  string attribute tracking its full lifecycle: `PENDING` → `RUNNING` → `DONE` / `FAILED` /
+  `CANCELLED`. Block futures now correctly transition through all states; previously they remained
+  at `PENDING` for the duration of their execution. Readable at any point without awaiting.
+
+- **`workflow_id=` call-time kwarg** — any task or block call now accepts `workflow_id="<id>"` as
+  a keyword argument to tag that specific component. Takes precedence over any active
+  `workflow_scope()`. The kwarg is stripped before the function body is invoked.
+
+### Fixed
+
+- **Block future state lifecycle** — block futures now transition to `RUNNING` immediately after
+  `asyncio.create_task`, to `DONE` on normal completion, and to `FAILED` when the block body
+  raises. Previously all three transitions were missing.
+
+- **`_block_members` cleanup on non-cancelled outcomes** — member sets are now removed from
+  `_block_members` for every terminal outcome (DONE, FAILED, CANCELLED). Previously the cleanup
+  only ran on cancellation, leaving stale entries after normal or failed block completion.
+
+- **`patched_cancel` forwards `msg` argument** — `fut.cancel(msg=...)` now correctly forwards
+  all positional and keyword arguments to the underlying `asyncio.Future.cancel()`. Previously
+  the `msg` was silently dropped, breaking callers that rely on the cancellation message being
+  propagated through `CancelledError`.
+
+- **Pending-task cancellation sets `future.state`** — when a pending task is cancelled locally
+  via `patched_cancel`, `future.state` is now set to `"CANCELLED"`. All other cancellation paths
+  already set this attribute; this was the only missing case.
+
+- **`_clear_internal_records` completeness** — `resolved`, `running`, `_task_submit_times`, and
+  `_task_start_times` are now cleared alongside the other internal structures. Previously these
+  accumulated stale entries across engine reuse after `shutdown()`.
+
+- **`_block_asyncio_tasks` cleared on shutdown** — `_clear_internal_records` now also clears the
+  asyncio.Task registry for blocks, eliminating stale references after engine reset.
+
+### Changed
+
+- **`self.running` changed from `list` to `set`** — membership check (`uid in self.running`) and
+  removal (`running.discard`) in the run loop and `patched_cancel` are now O(1) instead of O(n).
+  No public API change.
+
 ## [0.4.0] - 2026-05-18
 
 ### Added
