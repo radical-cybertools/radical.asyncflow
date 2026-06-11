@@ -80,6 +80,25 @@ async def test_block_cancel_stops_execution():
 
 
 @pytest.mark.asyncio
+async def test_shutdown_with_running_block_does_not_crash():
+    """Shutdown() must not raise AttributeError when a block is still running."""
+    engine = await _make_engine()
+    block_started = asyncio.Event()
+
+    @engine.block
+    async def long_block():
+        block_started.set()
+        await asyncio.sleep(10)
+
+    block_fut = long_block()
+    await block_started.wait()
+
+    await engine.shutdown()
+
+    assert block_fut.cancelled() or block_fut.done()
+
+
+@pytest.mark.asyncio
 async def test_handle_task_cancellation_is_idempotent():
     """Calling handle_task_cancellation twice on the same future is a silent no-op."""
     engine = await _make_engine()

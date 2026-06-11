@@ -1750,9 +1750,13 @@ class WorkflowEngine:
         # cancel workflow futures (tasks and blocks)
         for comp in self.components.values():
             future = comp["future"]
-            comp_desc = comp["description"]
             if not future.done():
-                self.handle_task_cancellation(comp_desc, future)
+                if comp["type"] == BLOCK:
+                    # Block futures are not patched with original_cancel — cancel directly.
+                    future.cancel()
+                    future.state = "CANCELLED"
+                else:
+                    self.handle_task_cancellation(comp["description"], future)
 
         # Cancel internal components task
         if not self._run_task.done():

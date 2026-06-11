@@ -97,10 +97,12 @@ class TestGracefulShutdown:
 
         engine.components = {
             "task.000001": {
+                "type": "task",
                 "future": mock_future1,
                 "description": {"uid": "task.000001", "name": "test_task_1"},
             },
             "task.000002": {
+                "type": "task",
                 "future": mock_future2,
                 "description": {"uid": "task.000002", "name": "test_task_2"},
             },

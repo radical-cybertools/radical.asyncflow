@@ -19,6 +19,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **`shutdown()` no longer crashes when blocks are still running** — block futures are now cancelled directly instead of routing through `handle_task_cancellation`, which assumed `original_cancel` was set (only true for task futures).
+
 - **Block future state lifecycle** — block futures now transition to `RUNNING` immediately after
   `asyncio.create_task`, to `DONE` on normal completion, and to `FAILED` when the block body
   raises. Previously all three transitions were missing.
