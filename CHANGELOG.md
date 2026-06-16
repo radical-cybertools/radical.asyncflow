@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-06-16
+
 ### Added
 
 - **`future.state` attribute** — every component future (task and block) now exposes a `.state`
