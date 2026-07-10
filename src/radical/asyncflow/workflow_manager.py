@@ -10,10 +10,12 @@ import signal
 import time
 import uuid
 from collections import defaultdict, deque
+from contextlib import asynccontextmanager, nullcontext
+from contextvars import ContextVar
 from functools import wraps
 from itertools import count
 from pathlib import Path
-from typing import Any, Callable, Optional, Union
+from typing import Any, AsyncIterator, Callable, Optional, Union
 
 import typeguard
 
@@ -76,6 +78,11 @@ class WorkflowEngine:
 
         self.uid = uid or f"asyncflow.session.{uuid.uuid4().hex[:8]}"
         self.work_dir = work_dir or os.getcwd()
+        # Per-engine ContextVar avoids cross-engine context leakage in shared coroutines,
+        # while asyncio still propagates it across create_task/gather branches.
+        self._workflow_id_ctx: ContextVar[str | None] = ContextVar(
+            f"asyncflow_workflow_id.{self.uid}", default=None
+        )
 
         # Normalize backend: accept a single backend or a list of backends
         if not isinstance(backend, list):
@@ -86,7 +93,7 @@ class WorkflowEngine:
         self._default_backend_name: str = backend[0].name
 
         # Initialize core attributes
-        self.running = []
+        self.running: set[str] = set()
         self.components = {}
         self.resolved = set()
         self.dependencies = {}
@@ -99,6 +106,11 @@ class WorkflowEngine:
         self._dependents_map = defaultdict(set)
         self._dependency_count = {}
         self._component_change_event = asyncio.Event()
+
+        # Block task registry: uid -> asyncio.Task for running execute_block coroutines
+        self._block_asyncio_tasks: dict[str, asyncio.Task] = {}
+        # Block member registry: block_uid -> set of component UIDs registered within it
+        self._block_members: dict[str, set[str]] = {}
 
         self.task_states_map = self.backend.get_task_states_map()
 
@@ -148,6 +160,9 @@ class WorkflowEngine:
         resource_poll_interval: float = 5.0,
         checkpoint_interval: float | None = None,
         checkpoint_path: str | None = None,
+        span_processors: list | None = None,
+        metric_readers: list | None = None,
+        resource: object | None = None,
     ) -> Any:
         """Create and start a RHAPSODY TelemetryManager for this workflow engine.
 
@@ -155,6 +170,21 @@ class WorkflowEngine:
         registered backends (silently skipping LocalExecutionBackend and
         NoopExecutionBackend which have no adapter), starts the async dispatch
         loop, and returns the manager.
+
+        Args:
+            resource_poll_interval: Seconds between resource metric polls (default: 5.0).
+            checkpoint_interval:    Seconds between periodic metric+span flushes to disk.
+                                    None = no periodic flush (file still written at stop).
+            checkpoint_path:        Directory for the JSONL checkpoint file.
+                                    None = no file output.
+            span_processors:        Optional list of OTel SpanProcessor instances added to
+                                    RHAPSODY's TracerProvider alongside the internal
+                                    SpanBuffer. Callers own exporter construction.
+            metric_readers:         Optional list of OTel MetricReader instances added to
+                                    RHAPSODY's MeterProvider alongside InMemoryMetricReader.
+            resource:               Optional ``opentelemetry.sdk.resources.Resource``.
+                                    When None, ``Resource.create()`` reads
+                                    ``OTEL_SERVICE_NAME`` from the environment automatically.
 
         Returns:
             The active TelemetryManager instance.
@@ -165,6 +195,9 @@ class WorkflowEngine:
             session_id=self.uid,
             checkpoint_interval=checkpoint_interval,
             checkpoint_path=checkpoint_path,
+            span_processors=span_processors,
+            metric_readers=metric_readers,
+            resource=resource,
         )
 
         for backend in self._backends.values():
@@ -176,6 +209,15 @@ class WorkflowEngine:
             )
 
         await self._telemetry.start()
+
+        self._telemetry.register_span_enricher(
+            lambda event: (
+                {"asyncflow.workflow_id": event.attributes["asyncflow.workflow_id"]}
+                if isinstance(event.attributes, dict)
+                and "asyncflow.workflow_id" in event.attributes
+                else {}
+            )
+        )
 
         from rhapsody.telemetry.events import (  # noqa: PLC0415
             TaskCanceled,
@@ -208,7 +250,13 @@ class WorkflowEngine:
         return self._telemetry
 
     def _emit(
-        self, event_name: str, *, task_id: str, backend: str = None, **kwargs
+        self,
+        event_name: str,
+        *,
+        task_id: str,
+        backend: str = None,
+        workflow_id: str | None = None,
+        **kwargs,
     ) -> None:
         """Emit a telemetry event by name.
 
@@ -218,6 +266,8 @@ class WorkflowEngine:
             return
         if "event_time" not in kwargs:
             kwargs["event_time"] = time.time()
+        if workflow_id is not None:
+            kwargs.setdefault("attributes", {})["asyncflow.workflow_id"] = workflow_id
         self._telemetry.emit(
             self._tel_make_event(
                 self._tel_events[event_name],
@@ -227,6 +277,35 @@ class WorkflowEngine:
                 **kwargs,
             )
         )
+
+    @asynccontextmanager
+    async def workflow_scope(
+        self, workflow_id: str | None = None
+    ) -> AsyncIterator[str]:
+        """Tag all tasks registered inside this scope with a shared workflow_id.
+
+        Also creates an OTel workflow span (when telemetry is active) so that task spans
+        registered inside become structural children in the trace hierarchy.
+
+        Args:
+            workflow_id: Explicit id for this workflow instance.
+                If omitted, a short UUID is generated automatically.
+
+        Yields:
+            The workflow_id string in use.
+        """
+        wid = workflow_id or f"wf-{uuid.uuid4().hex[:8]}"
+        token = self._workflow_id_ctx.set(wid)
+        try:
+            scope = (
+                self._telemetry.span_scope("workflow", {"asyncflow.workflow_id": wid})
+                if self._telemetry is not None
+                else nullcontext()
+            )
+            with scope:
+                yield wid
+        finally:
+            self._workflow_id_ctx.reset(token)
 
     def _setup_signal_handlers(self):
         """Register signal handlers for graceful shutdown on SIGHUP, SIGTERM, and
@@ -532,6 +611,10 @@ class WorkflowEngine:
         def wrapper(*args, **kwargs):
             # Create async future - we only support async
             comp_fut = asyncio.Future()
+            comp_fut.state = "PENDING"
+
+            # Extract call-time workflow_id before storing kwargs or calling the function
+            explicit_workflow_id = kwargs.pop("workflow_id", None)
 
             comp_desc = {
                 "args": args,
@@ -541,6 +624,7 @@ class WorkflowEngine:
                 "task_backend_specific_kwargs": task_backend_specific_kwargs or {},
                 "target_backend": target_backend,
                 "capture_stdio": capture_stdio,
+                "_explicit_workflow_id": explicit_workflow_id,
             }
 
             # Only handle async functions
@@ -629,6 +713,10 @@ class WorkflowEngine:
         # make sure not to specify both func and executable at the same time
         comp_desc["name"] = comp_desc["function"].__name__
         comp_desc["uid"] = self._assign_uid(prefix=comp_type)
+        # call-time workflow_id takes precedence over the ContextVar
+        comp_desc["workflow_id"] = (
+            comp_desc.pop("_explicit_workflow_id", None) or self._workflow_id_ctx.get()
+        )
 
         if task_type == EXECUTABLE:
             comp_desc[FUNCTION] = None  # Clear function since we're using executable
@@ -685,12 +773,34 @@ class WorkflowEngine:
         self._update_dependency_tracking(comp_desc["uid"])
         self._component_change_event.set()
 
-        # Setup cancel hook
-        comp_fut.cancel = self._setup_future_cancel_hook(comp_fut, comp_desc["uid"])
+        # Track block membership: if this component is registered from within a block's
+        # execution context, record it so it gets cancelled when the block is cancelled.
+        # Read ContextVar directly — not comp_desc["workflow_id"] which may be overridden
+        # by an explicit call-time kwarg (a telemetry label, not a membership signal).
+        parent_block_uid = self._workflow_id_ctx.get()
+        if (
+            parent_block_uid
+            and parent_block_uid in self.components
+            and self.components[parent_block_uid]["type"] == BLOCK
+        ):
+            self._block_members.setdefault(parent_block_uid, set()).add(
+                comp_desc["uid"]
+            )
+            comp_fut.add_done_callback(
+                lambda _,
+                b_uid=parent_block_uid,
+                tuid=comp_desc["uid"]: self._remove_member(b_uid, tuid)
+            )
+
+        # Patch cancel for tasks only; blocks are cancelled via a done_callback
+        # installed in _submit_blocks that cancels the underlying asyncio.Task directly.
+        if comp_type != BLOCK:
+            comp_fut.cancel = self._setup_future_cancel_hook(comp_fut, comp_desc["uid"])
 
         self._emit(
             "TaskCreated",
             task_id=comp_desc["uid"],
+            workflow_id=comp_desc.get("workflow_id"),
             attributes={
                 "executable": comp_desc["_tel_executable"],
                 "task_type": comp_desc["_tel_task_type"],
@@ -704,6 +814,7 @@ class WorkflowEngine:
             self._emit(
                 "asyncflow.TaskResolved",
                 task_id=comp_desc["uid"],
+                workflow_id=comp_desc.get("workflow_id"),
                 attributes={
                     "executable": comp_desc["_tel_executable"],
                     "task_type": comp_desc["_tel_task_type"],
@@ -750,7 +861,10 @@ class WorkflowEngine:
             else:
                 # Task is pending -> cancel locally
                 logger.info(f"Cancellation requested for {uid} (pending) locally")
-                return fut.original_cancel
+                result = fut.original_cancel(*args, **kwargs)
+                if result:
+                    fut.state = "CANCELLED"
+                return result
 
         return patched_cancel
 
@@ -853,6 +967,12 @@ class WorkflowEngine:
         self._ready_queue.clear()
         self._dependents_map.clear()
         self._dependency_count.clear()
+        self._block_members.clear()
+        self._block_asyncio_tasks.clear()
+        self.resolved.clear()
+        self.running.clear()
+        self._task_submit_times.clear()
+        self._task_start_times.clear()
 
         reset_uid_counter()
 
@@ -901,6 +1021,7 @@ class WorkflowEngine:
                         self._emit(
                             "asyncflow.TaskResolved",
                             task_id=dependent_uid,
+                            workflow_id=dep_desc.get("workflow_id"),
                             attributes={
                                 "executable": dep_desc["_tel_executable"],
                                 "task_type": dep_desc["_tel_task_type"],
@@ -914,6 +1035,14 @@ class WorkflowEngine:
         # Recursively propagate failure to transitive dependents
         for uid in propagate:
             self._notify_dependents(uid)
+
+    def _remove_member(self, block_uid: str, task_uid: str) -> None:
+        """Remove a completed task from its parent block's member set."""
+        members = self._block_members.get(block_uid)
+        if members is not None:
+            members.discard(task_uid)
+            if not members:
+                del self._block_members[block_uid]
 
     def _create_dependency_failure_exception(self, comp_desc: dict, failed_deps: list):
         """Create a DependencyFailureError exception that shows both the immediate
@@ -1134,6 +1263,7 @@ class WorkflowEngine:
                             "TaskQueued",
                             task_id=comp_uid,
                             backend=comp_desc.get("target_backend"),
+                            workflow_id=comp_desc.get("workflow_id"),
                             attributes={
                                 "executable": comp_desc["_tel_executable"],
                                 "task_type": comp_desc["_tel_task_type"],
@@ -1145,7 +1275,7 @@ class WorkflowEngine:
                     await self.submit(to_submit)
                     for comp_desc in to_submit:
                         comp_uid = comp_desc["uid"]
-                        self.running.append(comp_uid)
+                        self.running.add(comp_uid)
                         self.resolved.add(comp_uid)
 
                 # Check for completed components and update dependency tracking
@@ -1153,7 +1283,7 @@ class WorkflowEngine:
                 for comp_uid in list(self.running):
                     if self.components[comp_uid]["future"].done():
                         completed_components.append(comp_uid)
-                        self.running.remove(comp_uid)
+                        self.running.discard(comp_uid)
 
                 # Notify dependents of completed components
                 for comp_uid in completed_components:
@@ -1242,6 +1372,7 @@ class WorkflowEngine:
                             "TaskSubmitted",
                             task_id=t["uid"],
                             backend=t.get("target_backend"),
+                            workflow_id=t.get("workflow_id"),
                             event_time=now,
                             attributes={
                                 "executable": t["_tel_executable"],
@@ -1301,15 +1432,35 @@ class WorkflowEngine:
             - Relies on `execute_block` to handle the actual function call and future
         """
         for block in blocks:
-            args = block["args"]
-            kwargs = block["kwargs"]
-            func = block["function"]
-            block_fut = self.components[block["uid"]]["future"]
-
-            # Execute the block function as a coroutine
-            asyncio.create_task(
-                self.execute_block(block_fut, func, *args, **kwargs), name=block["uid"]
+            block_uid = block["uid"]
+            block_fut = self.components[block_uid]["future"]
+            t = asyncio.create_task(
+                self.execute_block(
+                    block_fut, block["function"], *block["args"], **block["kwargs"]
+                ),
+                name=block_uid,
             )
+            block_fut.state = "RUNNING"
+            self._block_asyncio_tasks[block_uid] = t
+            # Remove from registry when the asyncio.Task finishes (any outcome)
+            t.add_done_callback(
+                lambda _, uid=block_uid: self._block_asyncio_tasks.pop(uid, None)
+            )
+
+            # Wire cancellation: if block_fut is cancelled externally after submission,
+            # propagate to the asyncio.Task.
+            def _on_block_fut_done(f, task=t, b_uid=block_uid):
+                members = self._block_members.pop(b_uid, None)
+                if f.cancelled():
+                    task.cancel()
+                    f.state = "CANCELLED"
+                    if members:
+                        for member_uid in members:
+                            comp = self.components.get(member_uid)
+                            if comp and not comp["future"].done():
+                                comp["future"].cancel()
+
+            block_fut.add_done_callback(_on_block_fut_done)
 
     async def execute_block(
         self, block_fut: asyncio.Future, func: Callable, *args: Any, **kwargs: Any
@@ -1330,18 +1481,27 @@ class WorkflowEngine:
             None
         """
 
+        block_uid = block_fut.block["uid"]
+        token = self._workflow_id_ctx.set(block_uid)
         try:
-            if asyncio.iscoroutinefunction(func):
+            scope = (
+                self._telemetry.span_scope(
+                    "block", {"asyncflow.workflow_id": block_uid}
+                )
+                if self._telemetry is not None
+                else nullcontext()
+            )
+            with scope:
                 result = await func(*args, **kwargs)
-            else:
-                # Run sync function in executor
-                result = await self.loop.run_in_executor(None, func, *args, **kwargs)
-
             if not block_fut.done():
                 block_fut.set_result(result)
+                block_fut.state = "DONE"
         except Exception as e:
             if not block_fut.done():
                 block_fut.set_exception(e)
+                block_fut.state = "FAILED"
+        finally:
+            self._workflow_id_ctx.reset(token)
 
     def handle_task_success(self, task: dict, task_fut: asyncio.Future) -> None:
         """Handles successful task completion and updates the associated future.
@@ -1362,6 +1522,7 @@ class WorkflowEngine:
                 task_fut.set_result(task["return_value"])
             else:
                 task_fut.set_result(task["stdout"])
+            task_fut.state = "DONE"
         else:
             logger.warning(
                 f'Attempted to handle an already finished task "{task["uid"]}"'
@@ -1421,18 +1582,18 @@ class WorkflowEngine:
                 exception = RuntimeError(str(original_error))
 
         task_fut.set_exception(exception)
+        task_fut.state = "FAILED"
 
     def handle_task_cancellation(self, task: dict, task_fut: asyncio.Future):
         """Handle task cancellation."""
         if task_fut.done():
-            logger.warning(
-                f'Attempted to handle an already cancelled task "{task["uid"]}"'
-            )
-            return
+            return  # already resolved — idempotent, nothing to do
 
         # Restore original cancel method
         task_fut.cancel = task_fut.original_cancel
-        return task_fut.cancel()
+        result = task_fut.cancel()
+        task_fut.state = "CANCELLED"
+        return result
 
     @typeguard.typechecked
     def task_callbacks(
@@ -1525,6 +1686,7 @@ class WorkflowEngine:
                 self._emit(
                     "TaskCompleted",
                     task_id=uid,
+                    workflow_id=task_dct.get("workflow_id"),
                     event_time=now,
                     duration_seconds=now - start,
                     attributes=tel_attrs,
@@ -1534,12 +1696,14 @@ class WorkflowEngine:
             # implicit: when a coroutine that awaits the future
             # is scheduled and started by the event loop, that's
             # when the "work" is running.
+            task_fut.state = "RUNNING"
             if self._telemetry is not None:
                 now = time.time()
                 self._task_start_times[uid] = now
                 self._emit(
                     "TaskStarted",
                     task_id=uid,
+                    workflow_id=task_dct.get("workflow_id"),
                     event_time=now,
                     attributes=tel_attrs,
                 )
@@ -1554,6 +1718,7 @@ class WorkflowEngine:
                 self._emit(
                     "TaskCanceled",
                     task_id=uid,
+                    workflow_id=task_dct.get("workflow_id"),
                     event_time=now,
                     duration_seconds=now - start,
                     attributes=tel_attrs,
@@ -1569,6 +1734,7 @@ class WorkflowEngine:
                 self._emit(
                     "TaskFailed",
                     task_id=uid,
+                    workflow_id=task_dct.get("workflow_id"),
                     event_time=now,
                     duration_seconds=now - start,
                     error_type="unknown",
@@ -1610,9 +1776,13 @@ class WorkflowEngine:
         # cancel workflow futures (tasks and blocks)
         for comp in self.components.values():
             future = comp["future"]
-            comp_desc = comp["description"]
             if not future.done():
-                self.handle_task_cancellation(comp_desc, future)
+                if comp["type"] == BLOCK:
+                    # Block futures are not patched with original_cancel — cancel directly.
+                    future.cancel()
+                    future.state = "CANCELLED"
+                else:
+                    self.handle_task_cancellation(comp["description"], future)
 
         # Cancel internal components task
         if not self._run_task.done():

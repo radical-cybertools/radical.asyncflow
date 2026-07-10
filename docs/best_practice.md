@@ -37,6 +37,72 @@ By following these best practices, you can:
     ```
 ---
 
+## Inspect Task and Block State
+
+Every future returned by a task or block call exposes a `.state` attribute that tracks its lifecycle:
+
+| State | Meaning |
+|---|---|
+| `"PENDING"` | Registered; waiting for dependencies to resolve |
+| `"RUNNING"` | Submitted to the backend and executing |
+| `"DONE"` | Completed successfully |
+| `"FAILED"` | Raised an exception |
+| `"CANCELLED"` | Cancelled before or during execution |
+
+```python
+fut = my_task()
+print(fut.state)        # "PENDING" — not yet submitted
+
+await asyncio.sleep(0)
+print(fut.state)        # "RUNNING" or "DONE" depending on backend speed
+
+await fut
+print(fut.state)        # "DONE", "FAILED", or "CANCELLED"
+```
+
+!!! tip
+    Prefer reading `.state` over combining `fut.done()` + `fut.exception()` — `.state` is explicit
+    about which terminal outcome occurred without a separate branch.
+
+---
+
+## React to Task Completion Without Background Coroutines
+
+A common mistake is spawning one background coroutine per task to monitor its completion:
+
+```python
+# ❌ Anti-pattern: one coroutine per task
+async def watch(fut):
+    await fut
+    handle(fut.result())
+
+for fut in futs:
+    asyncio.create_task(watch(fut))   # N coroutines for N tasks
+```
+
+Use `add_done_callback` instead — one callback function handles all completions, zero extra coroutines:
+
+```python
+# ✅ Correct: zero coroutines, purely event-driven
+def on_done(fut):
+    if fut.cancelled():
+        print(f"cancelled — state={fut.state}")
+    elif fut.exception():
+        print(f"failed: {fut.exception()} — state={fut.state}")
+    else:
+        print(f"done: {fut.result()} — state={fut.state}")
+
+for fut in [task1(), task2(), task3()]:
+    fut.add_done_callback(on_done)
+```
+
+!!! note
+    The callback fires synchronously from within the event loop when the future settles.
+    Keep it fast — offload heavy work to a queue or schedule it with `asyncio.create_task`.
+    `fut.state` is already set before the callback fires, so it is safe to read inside.
+
+---
+
 ## Use Dependencies Correctly
 
 Tasks can depend on the output of other tasks:

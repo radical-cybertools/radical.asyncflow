@@ -98,3 +98,52 @@ asyncio.run(main())
 !!! important "When to Use Each"
     - Use synchronous when workflows must run in sequence or have dependencies
     - Use asynchronous when workflows are independent and you want better performance
+
+---
+
+## Tagging Workflows with IDs
+
+AsyncFlow provides two complementary ways to attach a `workflow_id` label to tasks, useful for
+grouping related work in logs, dashboards, and telemetry.
+
+### `workflow_scope()` — tag all tasks in a block of code
+
+`workflow_scope()` is an async context manager. Every task submitted inside the `async with` block
+inherits the given `workflow_id`:
+
+```python
+async with flow.workflow_scope("experiment-42") as wid:
+    t1 = preprocess()
+    t2 = train(t1)
+    await t2
+# all tasks submitted inside carry workflow_id="experiment-42"
+```
+
+If no ID is passed, a short UUID is generated automatically:
+
+```python
+async with flow.workflow_scope() as wid:
+    print(wid)   # e.g. "wf-3a7f1c2b"
+    my_task()
+```
+
+!!! note
+    Scoping is per-engine instance. Multiple engines running in the same process each have their
+    own independent scope — one engine's `workflow_scope()` never leaks into another engine's tasks.
+
+### `workflow_id=` kwarg — tag a single task at call time
+
+Pass `workflow_id=` directly when calling any task or block to tag only that component:
+
+```python
+result = my_task(workflow_id="run-007")
+```
+
+- Call-time `workflow_id=` takes precedence over any active `workflow_scope()`.
+- The kwarg is stripped before being forwarded to the function body — the function never sees it.
+
+### How workflow IDs are used
+
+Workflow IDs flow through to the telemetry system when enabled, making it possible to filter
+OTel spans and RHAPSODY JSONL events by workflow. They are also available on the component
+description as `comp["description"]["workflow_id"]` for custom introspection.
