@@ -920,6 +920,14 @@ class WorkflowEngine:
                     possible_dep = possible_dep.task
                 elif hasattr(possible_dep, BLOCK):
                     possible_dep = possible_dep.block
+                else:
+                    # not created by an asyncflow task/block — dependency
+                    # tracking cannot resolve it
+                    raise TypeError(
+                        "Only futures returned by asyncflow tasks or blocks "
+                        "can be used as dependencies, got a plain "
+                        f"{type(possible_dep).__name__}"
+                    )
                 # Deduplicate: the same future passed more than once must only
                 # count once, or the dependency count can never reach zero.
                 if possible_dep["uid"] in seen_dep_uids:
