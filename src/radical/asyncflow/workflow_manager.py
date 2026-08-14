@@ -773,6 +773,10 @@ class WorkflowEngine:
         self._update_dependency_tracking(comp_desc["uid"])
         self._component_change_event.set()
 
+        # Wake the run loop when this component completes, so dependents are
+        # noticed immediately instead of on the next poll interval or timeout.
+        comp_fut.add_done_callback(lambda _: self._component_change_event.set())
+
         # Track block membership: if this component is registered from within a block's
         # execution context, record it so it gets cancelled when the block is cancelled.
         # Read ContextVar directly — not comp_desc["workflow_id"] which may be overridden
@@ -1087,7 +1091,8 @@ class WorkflowEngine:
 
         Note:
             - Runs indefinitely until cancelled or shutdown is signaled
-            - Uses sleep intervals to prevent busy-waiting
+            - Event-driven: waits on component change events (registration
+              and completion) instead of a fixed poll interval
             - Handles both implicit and explicit data dependencies
             - Trigger internal shutdown on loop failure
         """
@@ -1303,7 +1308,12 @@ class WorkflowEngine:
                                 task.cancel()
                         raise
                 else:
-                    await asyncio.sleep(0.01)
+                    # There was activity this pass; yield to let backend
+                    # coroutines and callbacks run, then re-check immediately.
+                    # Completion wake-ups arrive via _component_change_event
+                    # (set by each component future's done callback), so no
+                    # fixed poll interval is needed.
+                    await asyncio.sleep(0)
 
             except asyncio.CancelledError:
                 logger.debug("Run component stopped")
