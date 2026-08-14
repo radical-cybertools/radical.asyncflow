@@ -1,6 +1,12 @@
+import asyncio
+
 import pytest
 
-from radical.asyncflow import NoopExecutionBackend, WorkflowEngine
+from radical.asyncflow import (
+    LocalExecutionBackend,
+    NoopExecutionBackend,
+    WorkflowEngine,
+)
 from radical.asyncflow.data import InputFile, OutputFile
 
 
@@ -37,3 +43,52 @@ async def test_detect_task_dependencies():
 
     assert len(task_deps) == 1
     assert task1 in task_deps[0]["args"]
+
+
+@pytest.mark.asyncio
+async def test_kwarg_future_is_tracked_as_dependency():
+    """A future passed as kwarg must delay submission until it is resolved.
+
+    Regression test: kwarg futures were resolved at submission but never
+    registered as dependencies, so a consumer could be submitted while a
+    slow kwarg producer was still running (InvalidStateError).
+    """
+    backend = await LocalExecutionBackend()
+    flow = await WorkflowEngine.create(backend=backend)
+
+    @flow.function_task
+    async def slow_producer():
+        await asyncio.sleep(0.05)
+        return "value"
+
+    @flow.function_task
+    async def consumer(kw=None):
+        return kw
+
+    result = await asyncio.wait_for(consumer(kw=slow_producer()), timeout=10)
+    assert result == "value"
+    await flow.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_duplicate_future_as_arg_and_kwarg():
+    """The same future passed twice must count as one dependency.
+
+    Without deduplication the dependency count is incremented twice but
+    only decremented once on completion, deadlocking the consumer.
+    """
+    backend = await LocalExecutionBackend()
+    flow = await WorkflowEngine.create(backend=backend)
+
+    @flow.function_task
+    async def producer():
+        return 7
+
+    @flow.function_task
+    async def consumer(pos, kw=None):
+        return pos + kw
+
+    fut = producer()
+    result = await asyncio.wait_for(consumer(fut, kw=fut), timeout=10)
+    assert result == 14
+    await flow.shutdown()

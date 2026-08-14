@@ -740,9 +740,9 @@ class WorkflowEngine:
             "name", ""
         )
 
-        # Detect dependencies
+        # Detect dependencies (futures may be passed positionally or as kwargs)
         comp_deps, input_files_deps, output_files_deps = self._detect_dependencies(
-            comp_desc["args"]
+            list(comp_desc["args"]) + list(comp_desc["kwargs"].values())
         )
 
         comp_desc["metadata"] = {
@@ -907,6 +907,7 @@ class WorkflowEngine:
         dependencies = []
         input_files = []
         output_files = []
+        seen_dep_uids = set()
 
         for possible_dep in possible_dependencies:
             # Flow component dependency
@@ -915,6 +916,11 @@ class WorkflowEngine:
                     possible_dep = possible_dep.task
                 elif hasattr(possible_dep, BLOCK):
                     possible_dep = possible_dep.block
+                # Deduplicate: the same future passed more than once must only
+                # count once, or the dependency count can never reach zero.
+                if possible_dep["uid"] in seen_dep_uids:
+                    continue
+                seen_dep_uids.add(possible_dep["uid"])
                 dependencies.append(possible_dep)
             # Input file dependency
             elif isinstance(possible_dep, InputFile):
