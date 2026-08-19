@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import signal
 import threading
 import time
@@ -300,3 +301,31 @@ class TestSignalIntegration:
 
         # Verify completion
         assert shutdown_completed.is_set()
+
+    def test_engine_creation_on_non_main_thread_loop(self, tmp_path, caplog):
+        """Test that an engine can be created on a loop in a secondary thread."""
+        # Signal handlers cannot be installed off the main thread - the engine is
+        # expected to skip them (with a warning) instead of raising
+        errors = []
+
+        async def create_and_shutdown():
+            engine = await WorkflowEngine.create(dry_run=True, work_dir=str(tmp_path))
+            await engine.shutdown()
+
+        def run_in_thread():
+            loop = asyncio.new_event_loop()
+            try:
+                loop.run_until_complete(create_and_shutdown())
+            except Exception as e:
+                errors.append(e)
+            finally:
+                loop.close()
+
+        thread = threading.Thread(target=run_in_thread, daemon=True)
+        with caplog.at_level(logging.WARNING, logger="radical.asyncflow"):
+            thread.start()
+            thread.join(timeout=60)
+
+        assert not thread.is_alive(), "Engine creation in thread did not complete"
+        assert not errors, f"Engine creation failed off the main thread: {errors[0]!r}"
+        assert "signal handlers not installed" in caplog.text
