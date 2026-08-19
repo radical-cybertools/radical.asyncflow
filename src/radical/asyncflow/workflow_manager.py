@@ -7,6 +7,7 @@ import logging
 import os
 import shlex
 import signal
+import threading
 import time
 import uuid
 from collections import defaultdict, deque
@@ -309,7 +310,18 @@ class WorkflowEngine:
 
     def _setup_signal_handlers(self):
         """Register signal handlers for graceful shutdown on SIGHUP, SIGTERM, and
-        SIGINT."""
+        SIGINT.
+
+        Signal handlers can only be installed on a loop running in the main thread;
+        elsewhere registration is skipped and the engine runs without them.
+        """
+        if threading.current_thread() is not threading.main_thread():
+            logger.warning(
+                "running on a non-main-thread event loop; signal handlers not "
+                "installed - host process must manage shutdown"
+            )
+            return
+
         signals = (signal.SIGHUP, signal.SIGTERM, signal.SIGINT)
         for sig in signals:
             try:
