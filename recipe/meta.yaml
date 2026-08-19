@@ -1,6 +1,6 @@
 {% set name = "radical.asyncflow" %}
 {% set version = "0.5.0" %}
-{% set python_min = python_min | default("3.9") %}
+{% set python_min = python_min | default("3.10") %}
 
 package:
   name: {{ name|lower }}
@@ -43,7 +43,8 @@ about:
   description: |
     RADICAL-AsyncFlow is an asyncio-based workflow scripting library
     for expressing dynamic task graphs in plain Python. HPC execution
-    backends are provided by RHAPSODY (rhapsody-py) and are optional.
+    backends are provided by RHAPSODY (rhapsody-py; conda-forge
+    feedstock planned) and are optional.
   license: MIT
   license_file: LICENSE
   doc_url: https://radical-cybertools.github.io/radical.asyncflow/
