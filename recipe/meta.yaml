@@ -1,0 +1,55 @@
+{% set name = "radical.asyncflow" %}
+{% set version = "0.5.0" %}
+{% set python_min = python_min | default("3.10") %}
+
+package:
+  name: {{ name|lower }}
+  version: {{ version }}
+
+source:
+  url: https://pypi.org/packages/source/r/{{ name }}/radical_asyncflow-{{ version }}.tar.gz
+  sha256: e7a0d203fb0731d21f064ac913ecd4b50876436050be7f91a04771a45ea332c9
+
+build:
+  noarch: python
+  script: {{ PYTHON }} -m pip install . -vv --no-deps --no-build-isolation
+  number: 0
+
+requirements:
+  host:
+    - python {{ python_min }}
+    - setuptools >=61.0
+    - wheel
+    - pip
+  run:
+    - python >={{ python_min }}
+    - pydantic
+    - typeguard
+    - requests
+    - cloudpickle
+
+test:
+  imports:
+    - radical.asyncflow
+  commands:
+    - pip check
+  requires:
+    - python {{ python_min }}
+    - pip
+
+about:
+  home: https://github.com/radical-cybertools/radical.asyncflow
+  summary: A high performance asynchronous workflow scripting library
+  description: |
+    RADICAL-AsyncFlow is an asyncio-based workflow scripting library
+    for expressing dynamic task graphs in plain Python. HPC execution
+    backends are provided by RHAPSODY (rhapsody-py; conda-forge
+    feedstock planned) and are optional.
+  license: MIT
+  license_file: LICENSE
+  doc_url: https://radical-cybertools.github.io/radical.asyncflow/
+  dev_url: https://github.com/radical-cybertools/radical.asyncflow
+
+extra:
+  recipe-maintainers:
+    - andre-merzky
