@@ -752,9 +752,9 @@ class WorkflowEngine:
             "name", ""
         )
 
-        # Detect dependencies
+        # Detect dependencies (futures may be passed positionally or as kwargs)
         comp_deps, input_files_deps, output_files_deps = self._detect_dependencies(
-            comp_desc["args"]
+            list(comp_desc["args"]) + list(comp_desc["kwargs"].values())
         )
 
         comp_desc["metadata"] = {
@@ -784,6 +784,10 @@ class WorkflowEngine:
         # Update dependency tracking
         self._update_dependency_tracking(comp_desc["uid"])
         self._component_change_event.set()
+
+        # Wake the run loop when this component completes, so dependents are
+        # noticed immediately instead of on the next poll interval or timeout.
+        comp_fut.add_done_callback(lambda _: self._component_change_event.set())
 
         # Track block membership: if this component is registered from within a block's
         # execution context, record it so it gets cancelled when the block is cancelled.
@@ -919,6 +923,7 @@ class WorkflowEngine:
         dependencies = []
         input_files = []
         output_files = []
+        seen_dep_uids = set()
 
         for possible_dep in possible_dependencies:
             # Flow component dependency
@@ -927,6 +932,19 @@ class WorkflowEngine:
                     possible_dep = possible_dep.task
                 elif hasattr(possible_dep, BLOCK):
                     possible_dep = possible_dep.block
+                else:
+                    # not created by an asyncflow task/block — dependency
+                    # tracking cannot resolve it
+                    raise TypeError(
+                        "Only futures returned by asyncflow tasks or blocks "
+                        "can be used as dependencies, got a plain "
+                        f"{type(possible_dep).__name__}"
+                    )
+                # Deduplicate: the same future passed more than once must only
+                # count once, or the dependency count can never reach zero.
+                if possible_dep["uid"] in seen_dep_uids:
+                    continue
+                seen_dep_uids.add(possible_dep["uid"])
                 dependencies.append(possible_dep)
             # Input file dependency
             elif isinstance(possible_dep, InputFile):
@@ -1093,7 +1111,8 @@ class WorkflowEngine:
 
         Note:
             - Runs indefinitely until cancelled or shutdown is signaled
-            - Uses sleep intervals to prevent busy-waiting
+            - Event-driven: waits on component change events (registration
+              and completion) instead of a fixed poll interval
             - Handles both implicit and explicit data dependencies
             - Trigger internal shutdown on loop failure
         """
@@ -1309,7 +1328,12 @@ class WorkflowEngine:
                                 task.cancel()
                         raise
                 else:
-                    await asyncio.sleep(0.01)
+                    # There was activity this pass; yield to let backend
+                    # coroutines and callbacks run, then re-check immediately.
+                    # Completion wake-ups arrive via _component_change_event
+                    # (set by each component future's done callback), so no
+                    # fixed poll interval is needed.
+                    await asyncio.sleep(0)
 
             except asyncio.CancelledError:
                 logger.debug("Run component stopped")
