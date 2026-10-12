@@ -72,8 +72,8 @@ async def test_kwarg_future_is_tracked_as_dependency():
 async def test_duplicate_future_as_arg_and_kwarg():
     """The same future passed twice counts as one dependency.
 
-    The dependency count is decremented once per completion, so a duplicate
-    count would deadlock the consumer.
+    The dependency count is decremented once per completion, so a duplicate count would
+    deadlock the consumer.
     """
     backend = await LocalExecutionBackend()
     flow = await WorkflowEngine.create(backend=backend)
