@@ -1,13 +1,8 @@
-"""Scheduler responsiveness: the run loop must react to component completion
-via events, not a fixed poll interval.
+"""Scheduler responsiveness: the run loop reacts to component completion
+immediately.
 
-Regression tests for two latency defects of the former poll-based loop:
-
-- a hardcoded 10ms sleep after every active pass put a ~10ms floor on each
-  task round-trip, and
-- a dependent task behind a dependency running longer than that poll
-  interval was only submitted when the 1s event-wait timed out (~1s stall
-  per dependency edge).
+- A dependent task starts as soon as its dependency resolves.
+- A task round-trip carries no fixed per-pass sleep.
 """
 
 import asyncio
@@ -31,7 +26,7 @@ class TestSchedulerResponsiveness:
 
     @pytest.mark.asyncio
     async def test_dependent_starts_promptly_after_dependency(self, flow):
-        """A chain behind a 50ms task must not stall in the 1s event-wait."""
+        """A dependent starts as soon as its 50ms dependency resolves."""
 
         @flow.function_task
         async def slow():
@@ -47,12 +42,12 @@ class TestSchedulerResponsiveness:
         elapsed = time.perf_counter() - start
 
         assert result == 2
-        # poll-based loop needed ~1.05s here; allow generous CI margin
+        # ~0.05s expected; generous margin for slow CI runners
         assert elapsed < 0.5, f"dependent task stalled: {elapsed:.3f}s"
 
     @pytest.mark.asyncio
-    async def test_sequential_latency_below_poll_interval(self, flow):
-        """Per-task round-trip must beat the former 10ms poll floor."""
+    async def test_sequential_round_trip_latency(self, flow):
+        """A no-op task round-trip carries no fixed per-pass sleep."""
 
         @flow.function_task
         async def noop():
@@ -65,5 +60,5 @@ class TestSchedulerResponsiveness:
             await noop()
         avg = (time.perf_counter() - start) / n
 
-        # poll-based loop could not go below 10ms per task
+        # ~1ms expected; a 10ms per-pass sleep would exceed the bound
         assert avg < 0.008, f"avg task round-trip too slow: {avg * 1000:.1f}ms"

@@ -47,12 +47,8 @@ async def test_detect_task_dependencies():
 
 @pytest.mark.asyncio
 async def test_kwarg_future_is_tracked_as_dependency():
-    """A future passed as kwarg must delay submission until it is resolved.
-
-    Regression test: kwarg futures were resolved at submission but never
-    registered as dependencies, so a consumer could be submitted while a
-    slow kwarg producer was still running (InvalidStateError).
-    """
+    """A future passed as kwarg is a dependency: the consumer is submitted only
+    after it resolves."""
     backend = await LocalExecutionBackend()
     flow = await WorkflowEngine.create(backend=backend)
     try:
@@ -74,10 +70,10 @@ async def test_kwarg_future_is_tracked_as_dependency():
 
 @pytest.mark.asyncio
 async def test_duplicate_future_as_arg_and_kwarg():
-    """The same future passed twice must count as one dependency.
+    """The same future passed twice counts as one dependency.
 
-    Without deduplication the dependency count is incremented twice but only decremented
-    once on completion, deadlocking the consumer.
+    The dependency count is decremented once per completion, so a duplicate
+    count would deadlock the consumer.
     """
     backend = await LocalExecutionBackend()
     flow = await WorkflowEngine.create(backend=backend)
@@ -101,7 +97,10 @@ async def test_duplicate_future_as_arg_and_kwarg():
 @pytest.mark.asyncio
 async def test_plain_future_dependency_rejected():
     """A plain asyncio.Future (not produced by a task or block) fails with a clear
-    TypeError instead of an unhelpful error downstream."""
+    TypeError."""
     engine = await WorkflowEngine.create(backend=NoopExecutionBackend())
-    with pytest.raises(TypeError, match="asyncflow tasks or blocks"):
-        engine._detect_dependencies([asyncio.Future()])
+    try:
+        with pytest.raises(TypeError, match="asyncflow tasks or blocks"):
+            engine._detect_dependencies([asyncio.Future()])
+    finally:
+        await engine.shutdown()

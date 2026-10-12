@@ -79,8 +79,8 @@ class WorkflowEngine:
             poll_timeout: Seconds between safety scans of running components
                 (default: 0.1). See :meth:`create`.
         """
-        self._poll_timeout = self._check_poll_timeout(poll_timeout)
-        self._last_scan = 0.0
+        poll_timeout = self._check_poll_timeout(poll_timeout)
+
         # Get the current running loop - assume it exists
         self.loop = get_event_loop_or_raise("WorkflowEngine")
 
@@ -112,8 +112,11 @@ class WorkflowEngine:
         # Optimization: Track component state changes
         self._ready_queue = deque()
         # uids of components whose futures resolved since the last run-loop
-        # pass; fed by the completion handlers, drained by the run loop
+        # pass; fed by the completion handlers, block/service done callbacks
+        # and the safety scan, drained by the run loop
         self._completed = deque()
+        self._poll_timeout = poll_timeout
+        self._last_scan = 0.0  # 0.0: the first run-loop pass scans
         self._dependents_map = defaultdict(set)
         self._dependency_count = {}
         self._component_change_event = asyncio.Event()
@@ -820,10 +823,10 @@ class WorkflowEngine:
         self._update_dependency_tracking(comp_desc["uid"])
         self._component_change_event.set()
 
-        # Block and service futures can be resolved outside the completion
-        # handlers (user cancels a block, a service_callback sets the result):
-        # report those via a done callback.  Plain tasks are reported by the
-        # handlers directly, which avoids one event-loop callback per task.
+        # Blocks (resolved by _execute_block or a user cancel) and services
+        # (resolved by their service_callback) bypass the completion handlers:
+        # report them via a done callback.  Plain tasks are reported by the
+        # handlers directly.
         if comp_type == BLOCK or comp_desc.get("is_service"):
             comp_fut.add_done_callback(lambda _, u=comp_desc["uid"]: self._mark_done(u))
 
@@ -1155,9 +1158,9 @@ class WorkflowEngine:
 
         Note:
             - Runs indefinitely until cancelled or shutdown is signaled
-            - Event-driven: completion handlers queue resolved components in
-              ``_completed`` and set the change event; the loop drains that
-              queue instead of polling the running set
+            - Event-driven: completion handlers and block/service done
+              callbacks queue resolved uids in ``_completed`` and set the
+              change event; the loop drains that queue
             - A safety scan of the running set every ``poll_timeout``
               catches futures resolved outside the completion handlers
             - Handles both implicit and explicit data dependencies
@@ -1352,7 +1355,7 @@ class WorkflowEngine:
                         self.running.discard(comp_uid)
                         self._notify_dependents(comp_uid)
 
-                if self._ready_queue or self._completed:
+                if self._ready_queue:
                     # More work queued: yield to other coroutines, then continue.
                     await asyncio.sleep(0)
                 else:
@@ -1369,11 +1372,14 @@ class WorkflowEngine:
                         done, pending = await asyncio.wait(
                             [event_task, shutdown_task],
                             return_when=asyncio.FIRST_COMPLETED,
-                            # wake no later than the next safety scan is due
+                            # wake no later than the next safety scan is due;
+                            # with nothing running there is nothing to scan
                             timeout=max(
                                 0.0,
                                 self._last_scan + self._poll_timeout - self.loop.time(),
-                            ),
+                            )
+                            if self.running
+                            else None,
                         )
                         # Cancel any pending tasks to clean up
                         for task in pending:
@@ -1591,7 +1597,6 @@ class WorkflowEngine:
             logger.warning(
                 f'Attempted to handle an already finished task "{task["uid"]}"'
             )
-            self._mark_done(task["uid"])
 
     def handle_task_failure(
         self,
