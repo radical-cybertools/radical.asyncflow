@@ -6,6 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-08-20
+
+### Fixed
+
+- **Engine creation on a non-main-thread event loop** — `WorkflowEngine.create()`
+  no longer crashes when the event loop it runs on is started from a secondary
+  thread. Signal handlers (`SIGHUP`/`SIGTERM`/`SIGINT`) can only be installed
+  from the main thread; `_setup_signal_handlers()` now detects this case and
+  skips registration with a warning instead of raising, leaving shutdown to be
+  managed by the host process.
+
+### Added
+
+- **Conda recipe** — new `recipe/meta.yaml` for a conda-forge `staged-recipes`
+  submission (`noarch: python`). Python floor set to 3.10, matching
+  conda-forge's floor and avoiding a CPython 3.9 bug where
+  `importlib.metadata` doesn't normalize dots in distribution names, which
+  breaks `version("radical.asyncflow")` at import time.
+- **ReadTheDocs configuration** — `.readthedocs.yaml` builds the mkdocs site
+  on Python 3.12, installing the `.[doc]` extra.
+
 ## [0.5.0] - 2026-06-16
 
 ### Added
