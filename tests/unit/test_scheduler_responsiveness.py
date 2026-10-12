@@ -23,7 +23,9 @@ class TestSchedulerResponsiveness:
     @pytest_asyncio.fixture
     async def flow(self):
         backend = await LocalExecutionBackend()
-        flow = await WorkflowEngine.create(backend=backend)
+        # a long poll_timeout keeps the safety scan from masking a missing
+        # completion wake-up
+        flow = await WorkflowEngine.create(backend=backend, poll_timeout=30)
         yield flow
         await flow.shutdown()
 
