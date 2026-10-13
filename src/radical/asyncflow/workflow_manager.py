@@ -52,7 +52,7 @@ def _debug_enabled(environ: Mapping[str, str] = os.environ) -> bool:
 
 
 # Runtime type checks on per-task methods only in debug mode (read at import).
-_hot_typechecked = typeguard.typechecked if _debug_enabled() else (lambda f: f)
+_debug_typechecked = typeguard.typechecked if _debug_enabled() else (lambda f: f)
 
 
 class WorkflowEngine:
@@ -594,6 +594,12 @@ class WorkflowEngine:
                 @wraps(func)
                 def wrapped(*args, **kwargs):
                     try:
+                        if not is_async:
+                            raise TypeError(
+                                f"Function {func.__name__} must be async. "
+                                "For sync functions, wrap them in async def."
+                            )
+
                         # Extract task_description from call-time kwargs
                         task_description_call = kwargs.pop("task_description", {}) or {}
 
@@ -608,12 +614,6 @@ class WorkflowEngine:
                             **task_description_def,
                             **task_description_call,
                         }
-
-                        if not is_async:
-                            raise TypeError(
-                                f"Function {func.__name__} must be async. "
-                                "For sync functions, wrap them in async def."
-                            )
 
                         return self._create_component(
                             func,
@@ -1070,10 +1070,12 @@ class WorkflowEngine:
                 self._dependency_count[dependent_uid] -= 1
                 if self._dependency_count[dependent_uid] == 0:
                     self._ready_queue.append(dependent_uid)
-                    if self._telemetry is None:
-                        continue
                     dep_comp = self.components.get(dependent_uid)
-                    if dep_comp and dep_comp["type"] == TASK:
+                    if (
+                        self._telemetry is not None
+                        and dep_comp
+                        and dep_comp["type"] == TASK
+                    ):
                         dep_desc = dep_comp["description"]
                         self._emit(
                             "asyncflow.TaskResolved",
@@ -1695,7 +1697,7 @@ class WorkflowEngine:
         self._mark_done(task["uid"])
         return result
 
-    @_hot_typechecked
+    @_debug_typechecked
     def task_callbacks(
         self, task: Any, state: str, service_callback: Optional[Callable] = None
     ) -> None:
