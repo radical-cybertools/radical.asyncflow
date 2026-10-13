@@ -320,8 +320,9 @@ def init_default_logger(
         logger.addHandler(struct_handler)
 
     # Logger level = lowest handler level: records below every handler's
-    # level are dropped before a LogRecord is built
-    logger.setLevel(min(h.level for h in logger.handlers))
+    # level are dropped before a LogRecord is built.  A handler at NOTSET (0)
+    # accepts everything; level 1 expresses that without meaning "inherit".
+    logger.setLevel(min(h.level for h in logger.handlers) or 1)
 
     # Capture warnings
     logging.captureWarnings(True)

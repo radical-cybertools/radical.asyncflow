@@ -18,8 +18,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `Submitting <n> tasks/blocks`) are logged at DEBUG instead of INFO.
 - **`init_default_logger`** sets the logger level to the lowest level of its
   handlers instead of `NOTSET`, so records no handler would emit are dropped
-  before they are built. With the root logger (no `logger_name`), DEBUG
-  records of other libraries are dropped too unless a handler accepts them.
+  before they are built. With the root logger (no `logger_name`), records of
+  other libraries below that level are dropped too, unless the library sets a
+  level on its own logger. With `logger_name`, records at the configured
+  level are now emitted (they were filtered by the root logger's level) and
+  propagate to root handlers.
 
 ## [0.5.1] - 2026-08-20
 

@@ -184,8 +184,8 @@ state change; INFO and above show engine lifecycle events and errors.
 
 ### Debug mode
 
-Debug mode adds runtime type checks on the per-task engine methods (via
-`typeguard`). They cost about a third of the per-task overhead, so they are
+Debug mode adds runtime type checks on the per-task engine method
+`task_callbacks` (via `typeguard`). They cost about a third of the per-task overhead, so they are
 off by default. Enable them with an environment variable set before
 `radical.asyncflow` is imported:
 

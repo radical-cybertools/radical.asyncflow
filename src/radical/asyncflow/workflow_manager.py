@@ -17,7 +17,7 @@ from contextvars import ContextVar
 from functools import wraps
 from itertools import count
 from pathlib import Path
-from typing import Any, AsyncIterator, Callable, Optional, Union
+from typing import Any, AsyncIterator, Callable, Mapping, Optional, Union
 
 import typeguard
 
@@ -38,7 +38,7 @@ PROMPT = "prompt"
 logger = logging.getLogger(__name__)
 
 
-def _debug_enabled(environ=os.environ) -> bool:
+def _debug_enabled(environ: Mapping[str, str] = os.environ) -> bool:
     """Debug mode: ``RADICAL_ASYNCFLOW_DEBUG`` if set, else ``RADICAL_DEBUG``.
 
     The specific variable takes precedence, so ``RADICAL_ASYNCFLOW_DEBUG=0``
@@ -609,11 +609,16 @@ class WorkflowEngine:
                             **task_description_call,
                         }
 
+                        if not is_async:
+                            raise TypeError(
+                                f"Function {func.__name__} must be async. "
+                                "For sync functions, wrap them in async def."
+                            )
+
                         return self._create_component(
                             func,
                             args,
                             kwargs,
-                            is_async=is_async,
                             is_service=service,
                             comp_type=comp_type,
                             task_type=task_type,
@@ -644,7 +649,6 @@ class WorkflowEngine:
         args: tuple,
         kwargs: dict,
         *,
-        is_async: bool,
         is_service: bool,
         comp_type: str,
         task_type: Optional[str],
@@ -662,8 +666,6 @@ class WorkflowEngine:
             func (Callable): The decorated async function
             args (tuple): Positional call arguments
             kwargs (dict): Keyword call arguments (``workflow_id`` is consumed)
-            is_async (bool): Whether ``func`` is a coroutine function; only
-                async functions are supported
             is_service (bool): Whether the component is a service
             comp_type (str): Component type (e.g., "task", "block")
             task_type (str): Task type, determines result handling
@@ -675,16 +677,7 @@ class WorkflowEngine:
 
         Returns:
             asyncio.Future: The future tracking the component's execution.
-
-        Raises:
-            TypeError: If ``func`` is not async.
         """
-        if not is_async:
-            raise TypeError(
-                f"Function {func.__name__} must be async. "
-                "For sync functions, wrap them in async def."
-            )
-
         comp_fut = asyncio.Future()
         comp_fut.state = "PENDING"
 

@@ -37,7 +37,6 @@ async def test_create_component_registers_function():
         test_func,
         (1,),
         {},
-        is_async=True,
         is_service=False,
         comp_type=TASK,
         task_type=FUNCTION,
@@ -51,23 +50,20 @@ async def test_create_component_registers_function():
 
 
 @pytest.mark.asyncio
-async def test_create_component_rejects_sync_function():
+async def test_decorated_sync_function_rejected_at_call():
     engine = await WorkflowEngine.create(backend=NoopExecutionBackend())
 
     def test_func(x):
         return x
 
-    with pytest.raises(TypeError, match="must be async"):
-        engine._create_component(
-            test_func,
-            (1,),
-            {},
-            is_async=False,
-            is_service=False,
-            comp_type=TASK,
-            task_type=FUNCTION,
-        )
-    await engine.shutdown()
+    try:
+        decorated = engine.function_task(test_func)
+        with pytest.raises(
+            TypeError, match="Error in decorated function 'test_func'.*must be async"
+        ):
+            decorated(1)
+    finally:
+        await engine.shutdown()
 
 
 @pytest.mark.asyncio
