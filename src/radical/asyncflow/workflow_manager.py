@@ -17,7 +17,7 @@ from contextvars import ContextVar
 from functools import wraps
 from itertools import count
 from pathlib import Path
-from typing import Any, AsyncIterator, Callable, Optional, Union
+from typing import Any, AsyncIterator, Callable, Mapping, Optional, Union
 
 import typeguard
 
@@ -36,6 +36,23 @@ EXECUTABLE = "executable"
 PROMPT = "prompt"
 
 logger = logging.getLogger(__name__)
+
+
+def _debug_enabled(environ: Mapping[str, str] = os.environ) -> bool:
+    """Debug mode: ``RADICAL_ASYNCFLOW_DEBUG`` if set, else ``RADICAL_DEBUG``.
+
+    The specific variable takes precedence, so ``RADICAL_ASYNCFLOW_DEBUG=0``
+    disables debug mode even when ``RADICAL_DEBUG`` is set.  Values ``1``,
+    ``true``, ``yes`` and ``on`` (any case) enable it; anything else disables it.
+    """
+    for name in ("RADICAL_ASYNCFLOW_DEBUG", "RADICAL_DEBUG"):
+        if name in environ:
+            return environ[name].strip().lower() in ("1", "true", "yes", "on")
+    return False
+
+
+# Runtime type checks on per-task methods only in debug mode (read at import).
+_debug_typechecked = typeguard.typechecked if _debug_enabled() else (lambda f: f)
 
 
 class WorkflowEngine:
@@ -572,10 +589,17 @@ class WorkflowEngine:
                         task_description_def = param.default
 
                 setattr(func, "__task_description__", task_description_def)
+                is_async = inspect.iscoroutinefunction(func)
 
                 @wraps(func)
                 def wrapped(*args, **kwargs):
                     try:
+                        if not is_async:
+                            raise TypeError(
+                                f"Function {func.__name__} must be async. "
+                                "For sync functions, wrap them in async def."
+                            )
+
                         # Extract task_description from call-time kwargs
                         task_description_call = kwargs.pop("task_description", {}) or {}
 
@@ -591,8 +615,10 @@ class WorkflowEngine:
                             **task_description_call,
                         }
 
-                        registered_func = self._handle_flow_component_registration(
+                        return self._create_component(
                             func,
+                            args,
+                            kwargs,
                             is_service=service,
                             comp_type=comp_type,
                             task_type=task_type,
@@ -600,8 +626,6 @@ class WorkflowEngine:
                             target_backend=backend,
                             capture_stdio=capture_stdio,
                         )
-
-                        return registered_func(*args, **kwargs)
 
                     except Exception as e:
                         # Add context to any errors that occur
@@ -619,107 +643,90 @@ class WorkflowEngine:
 
         return outer
 
-    def _handle_flow_component_registration(
+    def _create_component(
         self,
         func: Callable,
+        args: tuple,
+        kwargs: dict,
+        *,
         is_service: bool,
         comp_type: str,
         task_type: Optional[str],
         task_backend_specific_kwargs: Optional[dict] = None,
         target_backend: Optional[str] = None,
         capture_stdio: bool = False,
-    ):
-        """Handles registration of async tasks and blocks as workflow components.
+    ) -> asyncio.Future:
+        """Creates a workflow component for one call of a decorated function.
 
-        Creates a decorator that manages component registration for async functions.
-        The decorator creates appropriate asyncio.Future to track execution state.
+        Returns the component's future at once; registration runs in an
+        asyncio task, so the component is registered on the next loop
+        iteration (after awaiting ``func`` for executable and prompt tasks).
 
         Args:
-            func (Callable): Async function to be registered as a workflow component
+            func (Callable): The decorated async function
+            args (tuple): Positional call arguments
+            kwargs (dict): Keyword call arguments (``workflow_id`` is consumed)
             is_service (bool): Whether the component is a service
             comp_type (str): Component type (e.g., "task", "block")
             task_type (str): Task type, determines result handling
             task_backend_specific_kwargs (dict, optional): Backend-specific kwargs.
-            Defaults to None.
+            target_backend (str, optional): Name of the backend to run on.
             capture_stdio (bool): If True, redirect stdout/stderr to files in the
             backend's _work_dir. task["stdout"] and task["stderr"] will be file paths
             instead of decoded strings. Only applies to executable tasks.
 
         Returns:
-            Callable: A decorator that:
-                - Wraps the original async function
-                - Registers it as a workflow component
-                - Returns a future tracking the component's execution
-
-        Note:
-            Only async functions are supported. The decorator handles awaiting
-            async functions
-            and collecting their return values appropriately.
+            asyncio.Future: The future tracking the component's execution.
         """
+        comp_fut = asyncio.Future()
+        comp_fut.state = "PENDING"
 
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            # Create async future - we only support async
-            comp_fut = asyncio.Future()
-            comp_fut.state = "PENDING"
+        # Extract call-time workflow_id before storing kwargs or calling the function
+        explicit_workflow_id = kwargs.pop("workflow_id", None)
 
-            # Extract call-time workflow_id before storing kwargs or calling the function
-            explicit_workflow_id = kwargs.pop("workflow_id", None)
+        comp_desc = {
+            "args": args,
+            "function": func,
+            "kwargs": kwargs,
+            "is_service": is_service,
+            "task_backend_specific_kwargs": task_backend_specific_kwargs or {},
+            "target_backend": target_backend,
+            "capture_stdio": capture_stdio,
+            "_explicit_workflow_id": explicit_workflow_id,
+        }
 
-            comp_desc = {
-                "args": args,
-                "function": func,
-                "kwargs": kwargs,
-                "is_service": is_service,
-                "task_backend_specific_kwargs": task_backend_specific_kwargs or {},
-                "target_backend": target_backend,
-                "capture_stdio": capture_stdio,
-                "_explicit_workflow_id": explicit_workflow_id,
-            }
-
-            # Only handle async functions
-            if asyncio.iscoroutinefunction(func):
-
-                async def async_wrapper():
-                    try:
-                        if task_type == EXECUTABLE:
-                            cmd = await func(*args, **kwargs)
-                            if not cmd or not isinstance(cmd, str):
-                                raise ValueError(
-                                    f"Executable task '{func.__name__}' must return "
-                                    "a non-empty command string"
-                                )
-                            parts = shlex.split(cmd)
-                            if not parts:
-                                raise ValueError(
-                                    f"Executable task '{func.__name__}' must return "
-                                    "a non-empty command string"
-                                )
-                            comp_desc[EXECUTABLE] = parts[0]
-                            comp_desc["arguments"] = parts[1:]
-                        elif task_type == PROMPT:
-                            comp_desc[PROMPT] = await func(*args, **kwargs)
-                        else:
-                            comp_desc[EXECUTABLE] = None
-                        return self._register_component(
-                            comp_fut, comp_type, comp_desc, task_type
+        async def register():
+            try:
+                if task_type == EXECUTABLE:
+                    cmd = await func(*args, **kwargs)
+                    if not cmd or not isinstance(cmd, str):
+                        raise ValueError(
+                            f"Executable task '{func.__name__}' must return "
+                            "a non-empty command string"
                         )
-                    except Exception as e:
-                        if not comp_fut.done():
-                            comp_fut.set_exception(e)
-
-                # FIXME: assign name for this comp (comp uid)
-                asyncio.create_task(async_wrapper())
-            else:
-                # Raise error for non-async functions since we only support async
-                raise TypeError(
-                    f"Function {func.__name__} must be async. "
-                    "For sync functions, wrap them in async def."
+                    parts = shlex.split(cmd)
+                    if not parts:
+                        raise ValueError(
+                            f"Executable task '{func.__name__}' must return "
+                            "a non-empty command string"
+                        )
+                    comp_desc[EXECUTABLE] = parts[0]
+                    comp_desc["arguments"] = parts[1:]
+                elif task_type == PROMPT:
+                    comp_desc[PROMPT] = await func(*args, **kwargs)
+                else:
+                    comp_desc[EXECUTABLE] = None
+                return self._register_component(
+                    comp_fut, comp_type, comp_desc, task_type
                 )
+            except Exception as e:
+                if not comp_fut.done():
+                    comp_fut.set_exception(e)
 
-            return comp_fut
+        # FIXME: assign name for this comp (comp uid)
+        asyncio.create_task(register())
 
-        return wrapper
+        return comp_fut
 
     def _register_component(
         self,
@@ -815,8 +822,10 @@ class WorkflowEngine:
         self.dependencies[comp_desc["uid"]] = comp_deps
 
         logger.debug(
-            f"Registered {comp_type}: '{comp_desc['name']}' "
-            f"with id of {comp_desc['uid']}"
+            "Registered %s: '%s' with id of %s",
+            comp_type,
+            comp_desc["name"],
+            comp_desc["uid"],
         )
 
         # Update dependency tracking
@@ -854,20 +863,25 @@ class WorkflowEngine:
         if comp_type != BLOCK:
             comp_fut.cancel = self._setup_future_cancel_hook(comp_fut, comp_desc["uid"])
 
-        self._emit(
-            "TaskCreated",
-            task_id=comp_desc["uid"],
-            workflow_id=comp_desc.get("workflow_id"),
-            attributes={
-                "executable": comp_desc["_tel_executable"],
-                "task_type": comp_desc["_tel_task_type"],
-                "depends_on": [d["uid"] for d in comp_deps],
-            },
-        )
+        if self._telemetry is not None:
+            self._emit(
+                "TaskCreated",
+                task_id=comp_desc["uid"],
+                workflow_id=comp_desc.get("workflow_id"),
+                attributes={
+                    "executable": comp_desc["_tel_executable"],
+                    "task_type": comp_desc["_tel_task_type"],
+                    "depends_on": [d["uid"] for d in comp_deps],
+                },
+            )
 
         # Emit TaskResolved immediately for tasks with no dependencies.
         # Tasks with deps will emit from _notify_dependents when the count hits 0.
-        if comp_type == TASK and self._dependency_count.get(comp_desc["uid"], -1) == 0:
+        if (
+            self._telemetry is not None
+            and comp_type == TASK
+            and self._dependency_count.get(comp_desc["uid"], -1) == 0
+        ):
             self._emit(
                 "asyncflow.TaskResolved",
                 task_id=comp_desc["uid"],
@@ -1057,7 +1071,11 @@ class WorkflowEngine:
                 if self._dependency_count[dependent_uid] == 0:
                     self._ready_queue.append(dependent_uid)
                     dep_comp = self.components.get(dependent_uid)
-                    if dep_comp and dep_comp["type"] == TASK:
+                    if (
+                        self._telemetry is not None
+                        and dep_comp
+                        and dep_comp["type"] == TASK
+                    ):
                         dep_desc = dep_comp["description"]
                         self._emit(
                             "asyncflow.TaskResolved",
@@ -1241,8 +1259,9 @@ class WorkflowEngine:
                                 "output_files"
                             ):
                                 logger.debug(
-                                    f"Linking implicit file(s): from {dep_desc['name']} "
-                                    f"to {comp_desc['name']}"
+                                    "Linking implicit file(s): from %s to %s",
+                                    dep_desc["name"],
+                                    comp_desc["name"],
                                 )
                                 self.backend.link_implicit_data_deps(
                                     dep_desc, comp_desc
@@ -1252,9 +1271,10 @@ class WorkflowEngine:
                             for output_file in dep_desc["metadata"]["output_files"]:
                                 if output_file in comp_desc["metadata"]["input_files"]:
                                     logger.debug(
-                                        f"Linking explicit file ({output_file}) "
-                                        f"from {dep_desc['name']} "
-                                        f"to {comp_desc['name']}"
+                                        "Linking explicit file (%s) from %s to %s",
+                                        output_file,
+                                        dep_desc["name"],
+                                        comp_desc["name"],
                                     )
                                     data_dep = self.backend.link_explicit_data_deps(
                                         src_task=dep_desc,
@@ -1279,8 +1299,9 @@ class WorkflowEngine:
                                 and input_basename not in dependency_output_files
                             ):
                                 logger.debug(
-                                    f"Staging {input_file} "
-                                    f"to {comp_desc['name']} work dir"
+                                    "Staging %s to %s work dir",
+                                    input_file,
+                                    comp_desc["name"],
                                 )
                                 data_dep = self.backend.link_explicit_data_deps(
                                     src_task=None,
@@ -1308,12 +1329,17 @@ class WorkflowEngine:
                         continue
 
                     to_submit.append(comp_desc)
-                    res_deps = [dep["name"] for dep in dependencies]
-                    msg = f"Ready to submit: {comp_desc['name']}"
-                    msg += f" with resolved dependencies: {res_deps}"
-                    logger.debug(msg)
+                    if logger.isEnabledFor(logging.DEBUG):
+                        logger.debug(
+                            "Ready to submit: %s with resolved dependencies: %s",
+                            comp_desc["name"],
+                            [dep["name"] for dep in dependencies],
+                        )
 
-                    if self.components[comp_uid]["type"] == TASK:
+                    if (
+                        self._telemetry is not None
+                        and self.components[comp_uid]["type"] == TASK
+                    ):
                         self._emit(
                             "TaskQueued",
                             task_id=comp_uid,
@@ -1429,8 +1455,12 @@ class WorkflowEngine:
             tasks = [t for t in objects if t and BLOCK not in t["uid"]]
             blocks = [b for b in objects if b and TASK not in b["uid"]]
 
-            logger.info(f"Submitting {len(objects)} tasks/blocks for execution")
-            logger.debug(f"Submitting: {[b['name'] for b in objects]}")
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(
+                    "Submitting %d tasks/blocks for execution: %s",
+                    len(objects),
+                    [b["name"] for b in objects],
+                )
 
             if tasks:
                 if self._telemetry is not None:
@@ -1667,7 +1697,7 @@ class WorkflowEngine:
         self._mark_done(task["uid"])
         return result
 
-    @typeguard.typechecked
+    @_debug_typechecked
     def task_callbacks(
         self, task: Any, state: str, service_callback: Optional[Callable] = None
     ) -> None:
@@ -1715,7 +1745,7 @@ class WorkflowEngine:
             state not in self.task_states_map.terminal_states
             and state != self.task_states_map.RUNNING
         ):
-            logger.debug(f"Non-relevant task state received: {state}. Skipping state.")
+            logger.debug("Non-relevant task state received: %s. Skipping state.", state)
             return
 
         task_obj = task
@@ -1733,7 +1763,7 @@ class WorkflowEngine:
         comp = self.components[task_dct["uid"]]
         task_fut = comp["future"]
         comp_desc = comp["description"]
-        logger.info(f"{task_dct['uid']} is in {state} state")
+        logger.debug("%s is in %s state", task_dct["uid"], state)
 
         if service_callback:
             # service tasks are marked done by a backend specific
