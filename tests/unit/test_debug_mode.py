@@ -33,8 +33,8 @@ def test_debug_enabled(environ, expected):
 
 @pytest.mark.asyncio
 async def test_task_callbacks_typechecked_in_debug_mode():
-    """The suite runs in debug mode (tests/conftest.py): task_callbacks checks
-    its argument types."""
+    """The suite runs in debug mode (tests/conftest.py): task_callbacks checks its
+    argument types."""
     if workflow_manager._debug_typechecked is not typeguard.typechecked:
         pytest.skip("debug mode disabled when radical.asyncflow was imported")
     engine = await WorkflowEngine.create(backend=NoopExecutionBackend())
