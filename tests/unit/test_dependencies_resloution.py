@@ -138,6 +138,40 @@ class TestFutureResolution:
         assert result == 7
 
     @pytest.mark.asyncio
+    async def test_duplicate_future_args_resolve(self, flow):
+        """A future passed twice is one dependency and must not hang the task."""
+
+        @flow.function_task
+        async def producer():
+            await asyncio.sleep(0.3)  # still pending when consumer registers
+            return 1
+
+        @flow.function_task
+        async def consumer(val1, val2):
+            return val1 + val2
+
+        fut = producer()
+        result = await asyncio.wait_for(consumer(fut, fut), timeout=5)
+        assert result == 2
+
+    @pytest.mark.asyncio
+    async def test_duplicate_future_args_block_consumer(self, flow):
+        """A block receiving the same future twice must not hang."""
+
+        @flow.function_task
+        async def producer():
+            await asyncio.sleep(0.3)  # still pending when block registers
+            return 1
+
+        @flow.block
+        async def consumer_block(val1, val2):
+            return val1 + val2
+
+        fut = producer()
+        result = await asyncio.wait_for(consumer_block(fut, fut), timeout=5)
+        assert result == 2
+
+    @pytest.mark.asyncio
     async def test_extract_dependency_values_directly(self, flow):
         """Test the _extract_dependency_values method directly."""
 

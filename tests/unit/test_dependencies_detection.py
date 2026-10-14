@@ -37,3 +37,20 @@ async def test_detect_task_dependencies():
 
     assert len(task_deps) == 1
     assert task1 in task_deps[0]["args"]
+
+
+@pytest.mark.asyncio
+async def test_detect_duplicate_task_dependency():
+    engine = await WorkflowEngine.create(backend=NoopExecutionBackend())
+
+    @engine.function_task
+    async def task1():
+        return 1
+
+    task = task1()
+    await task
+
+    task_deps, _, _ = engine._detect_dependencies([task, task])
+
+    assert len(task_deps) == 1
+    assert task_deps[0]["uid"] == task.task["uid"]

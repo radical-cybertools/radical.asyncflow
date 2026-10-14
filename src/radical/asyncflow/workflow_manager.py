@@ -911,7 +911,8 @@ class WorkflowEngine:
 
         Returns:
             tuple: A tuple containing three lists:
-                - `dependencies`: A list of flow components that need to be completed.
+                - `dependencies`: A list of flow components that need to be completed,
+                   each listed once even if passed multiple times.
                 - `input_files`: A list of input file names that need to be fetched.
                 - `output_files`: A list of output file names that need to be retrieved
                    from the task folder.
@@ -919,6 +920,7 @@ class WorkflowEngine:
         dependencies = []
         input_files = []
         output_files = []
+        seen_dep_uids = set()
 
         for possible_dep in possible_dependencies:
             # Flow component dependency
@@ -927,6 +929,13 @@ class WorkflowEngine:
                     possible_dep = possible_dep.task
                 elif hasattr(possible_dep, BLOCK):
                     possible_dep = possible_dep.block
+                # A component passed more than once is a single dependency:
+                # counting it twice would keep the dependent's unresolved
+                # count above zero forever, since it is notified only once.
+                if isinstance(possible_dep, dict):
+                    if possible_dep["uid"] in seen_dep_uids:
+                        continue
+                    seen_dep_uids.add(possible_dep["uid"])
                 dependencies.append(possible_dep)
             # Input file dependency
             elif isinstance(possible_dep, InputFile):
