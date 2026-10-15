@@ -69,6 +69,7 @@ import asyncio
 from radical.asyncflow import WorkflowEngine, LocalExecutionBackend
 from concurrent.futures import ThreadPoolExecutor
 
+
 async def main():
     # Create backend and workflow
     backend = await LocalExecutionBackend(ThreadPoolExecutor())
@@ -84,11 +85,12 @@ async def main():
 
     # create the workflow
     t1_fut = task1()
-    t2_result = await task2(t1_fut) # t2 depends on t1 (waits for it)
+    t2_result = await task2(t1_fut)  # t2 depends on t1 (waits for it)
 
     print(t2_result)
     # shutdown the execution backend
     await flow.shutdown()
+
 
 if __name__ == "__main__":
     asyncio.run(main())

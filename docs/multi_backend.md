@@ -44,7 +44,7 @@ from radical.asyncflow import LocalExecutionBackend, WorkflowEngine
 # from rhapsody.backends import DragonVllmInferenceBackend
 
 compute_backend = await LocalExecutionBackend(ThreadPoolExecutor(), name="compute")
-ai_backend      = NoopExecutionBackend(name="ai")  # replace with a real AI backend
+ai_backend = NoopExecutionBackend(name="ai")  # replace with a real AI backend
 
 flow = await WorkflowEngine.create(backend=[compute_backend, ai_backend])
 ```
@@ -74,9 +74,11 @@ Add `backend="<name>"` to any task decorator to route that task to a specific re
 async def preprocess(raw_text):
     return raw_text.strip().lower()
 
+
 @flow.prompt_task(backend="ai")
 async def summarize(preprocessed):
     return f"Summarize this:\n\n{preprocessed}"
+
 
 @flow.function_task(backend="compute")
 async def postprocess(summary):
@@ -100,7 +102,11 @@ import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-from radical.asyncflow import LocalExecutionBackend, NoopExecutionBackend, WorkflowEngine
+from radical.asyncflow import (
+    LocalExecutionBackend,
+    NoopExecutionBackend,
+    WorkflowEngine,
+)
 from radical.asyncflow.logging import init_default_logger
 
 # Replace NoopExecutionBackend with a real AI backend in production:
@@ -112,7 +118,7 @@ async def main():
     init_default_logger(logging.INFO)
 
     compute_backend = await LocalExecutionBackend(ThreadPoolExecutor(), name="compute")
-    ai_backend      = NoopExecutionBackend(name="ai")
+    ai_backend = NoopExecutionBackend(name="ai")
 
     flow = await WorkflowEngine.create(backend=[compute_backend, ai_backend])
 
@@ -139,8 +145,8 @@ async def main():
     async def run_pipeline(doc_id: int, text: str):
         start = time.time()
         preprocessed = preprocess(text)
-        summary      = summarize(preprocessed)
-        result       = await postprocess(summary)
+        summary = summarize(preprocessed)
+        result = await postprocess(summary)
         print(f"doc {doc_id} finished in {time.time() - start:.2f}s")
         return result
 

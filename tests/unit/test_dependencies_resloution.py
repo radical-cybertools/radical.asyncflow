@@ -5,6 +5,7 @@ import pytest
 import pytest_asyncio
 
 from radical.asyncflow import LocalExecutionBackend, WorkflowEngine
+from radical.asyncflow.errors import DependencyFailureError
 
 
 class TestFutureResolution:
@@ -170,6 +171,98 @@ class TestFutureResolution:
         fut = producer()
         result = await asyncio.wait_for(consumer_block(fut, fut), timeout=5)
         assert result == 2
+
+    @pytest.mark.asyncio
+    async def test_pending_kwarg_future_resolves(self, flow):
+        """A future passed as a keyword argument is a dependency."""
+
+        @flow.function_task
+        async def producer():
+            await asyncio.sleep(0.3)  # still pending when consumer registers
+            return 1
+
+        @flow.function_task
+        async def consumer(x=None):
+            return x
+
+        result = await asyncio.wait_for(consumer(x=producer()), timeout=5)
+        assert result == 1
+
+    @pytest.mark.asyncio
+    async def test_failed_kwarg_dependency_raises_dependency_failure(self, flow):
+        """A failed keyword-argument dependency fails the dependent cleanly."""
+
+        @flow.function_task
+        async def failing():
+            raise ValueError("boom")
+
+        @flow.function_task
+        async def consumer(x=None):
+            return x
+
+        with pytest.raises(DependencyFailureError) as exc_info:
+            await asyncio.wait_for(consumer(x=failing()), timeout=5)
+        assert isinstance(exc_info.value.root_cause, ValueError)
+
+    @pytest.mark.asyncio
+    async def test_cancelled_kwarg_dependency_keeps_engine_running(self, flow):
+        """A cancelled keyword-argument dependency cancels the dependent and must not
+        stop the run loop."""
+
+        @flow.function_task
+        async def slow():
+            await asyncio.sleep(10)
+            return "never"
+
+        @flow.function_task
+        async def consumer(x=None):
+            return x
+
+        @flow.function_task
+        async def unrelated():
+            return "ok"
+
+        slow_fut = slow()
+        slow_fut.cancel()
+
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(consumer(x=slow_fut), timeout=5)
+
+        assert await asyncio.wait_for(unrelated(), timeout=5) == "ok"
+        assert not flow._run_task.done()
+
+    @pytest.mark.asyncio
+    async def test_same_future_as_arg_and_kwarg(self, flow):
+        """The same future as both arg and kwarg is one dependency."""
+
+        @flow.function_task
+        async def producer():
+            await asyncio.sleep(0.3)  # still pending when consumer registers
+            return 1
+
+        @flow.function_task
+        async def consumer(val, x=None):
+            return val + x
+
+        fut = producer()
+        result = await asyncio.wait_for(consumer(fut, x=fut), timeout=5)
+        assert result == 2
+
+    @pytest.mark.asyncio
+    async def test_kwarg_future_block_consumer(self, flow):
+        """A block receiving a pending keyword-argument future gets its value."""
+
+        @flow.function_task
+        async def producer():
+            await asyncio.sleep(0.3)  # still pending when block registers
+            return 1
+
+        @flow.block
+        async def consumer_block(x=None):
+            return x
+
+        result = await asyncio.wait_for(consumer_block(x=producer()), timeout=5)
+        assert result == 1
 
     @pytest.mark.asyncio
     async def test_extract_dependency_values_directly(self, flow):

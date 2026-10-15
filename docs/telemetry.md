@@ -21,15 +21,15 @@ backend = await ConcurrentExecutionBackend(ProcessPoolExecutor())
 flow = await WorkflowEngine.create(backend)
 
 telemetry = await flow.start_telemetry(
-    resource_poll_interval=5.0,        # node CPU/memory/GPU every 5 s
-    checkpoint_path="./telemetry/",    # write a JSONL file (optional)
+    resource_poll_interval=5.0,  # node CPU/memory/GPU every 5 s
+    checkpoint_path="./telemetry/",  # write a JSONL file (optional)
 )
 ```
 
 `start_telemetry()` returns a `TelemetryManager`. Stop it explicitly when done, or it stops automatically when the workflow engine shuts down:
 
 ```python
-await flow.shutdown()   # also stops telemetry
+await flow.shutdown()  # also stops telemetry
 # or explicitly:
 await telemetry.stop()
 ```
@@ -72,7 +72,7 @@ If no `workflow_id` is passed, one is auto-generated (`wf-<hex8>`).
 ```python
 # Auto-ID
 async with flow.workflow_scope() as wid:
-    print(wid)   # e.g. "wf-3a1b9c2d"
+    print(wid)  # e.g. "wf-3a1b9c2d"
 ```
 
 `@flow.block`-decorated functions are automatically tagged with the block's UID as the `workflow_id` — no explicit `workflow_scope()` needed inside a block body.
@@ -181,6 +181,7 @@ Use `telemetry.subscribe()` to receive every event in real time. The callback ca
 def on_event(event):
     print(event.event_type, event.task_id)
 
+
 telemetry.subscribe(on_event)
 ```
 
@@ -189,7 +190,7 @@ telemetry.subscribe(on_event)
 ```python
 def on_event(event):
     if event.event_type == "TaskCompleted":
-        print(f"done: {event.task_id}  {event.duration_seconds*1000:.0f} ms")
+        print(f"done: {event.task_id}  {event.duration_seconds * 1000:.0f} ms")
     elif event.event_type == "asyncflow.TaskResolved":
         print(f"resolved: {event.task_id}")
     elif event.event_type == "ResourceUpdate" and event.resource_scope == "per_node":
@@ -201,11 +202,14 @@ def on_event(event):
 ```python
 resolved_at = {}
 
+
 def on_event(event):
     if event.event_type == "asyncflow.TaskResolved":
         resolved_at[event.task_id] = event.event_time
     elif event.event_type == "TaskStarted":
-        dep_wait_ms = (event.event_time - resolved_at.get(event.task_id, event.event_time)) * 1000
+        dep_wait_ms = (
+            event.event_time - resolved_at.get(event.task_id, event.event_time)
+        ) * 1000
         print(f"{event.task_id}: dep_wait={dep_wait_ms:.0f} ms")
 ```
 
@@ -221,7 +225,7 @@ print(summary["tasks"])
 # {'submitted': 200, 'completed': 197, 'failed': 2, 'canceled': 1, 'running': 0}
 
 if summary["duration"]:
-    print(f"mean task time: {summary['duration']['mean_seconds']*1000:.1f} ms")
+    print(f"mean task time: {summary['duration']['mean_seconds'] * 1000:.1f} ms")
 ```
 
 ---
@@ -289,10 +293,12 @@ class PipelineMonitor:
         et = event.event_type
 
         if et == "TaskFailed":
-            self.violations.append({
-                "task_id": event.task_id,
-                "error": event.error_type,
-            })
+            self.violations.append(
+                {
+                    "task_id": event.task_id,
+                    "error": event.error_type,
+                }
+            )
         elif et == "TaskCanceled":
             # Cancellation is intentional — track separately from failures
             pass
@@ -301,6 +307,7 @@ class PipelineMonitor:
                 print(f"[ALERT] quality {event.score:.2%} on {event.dataset}")
         elif et == "myframework.ModelCheckpoint":
             self.checkpoints.append({"step": event.step, "loss": event.loss})
+
 
 monitor = PipelineMonitor(telemetry)
 ```
@@ -314,8 +321,9 @@ monitor = PipelineMonitor(telemetry)
 @flow.function_task
 async def bad_task(data):
     result = process(data)
-    telemetry.emit(...)   # ← do not do this
+    telemetry.emit(...)  # ← do not do this
     return result
+
 
 # ✓ CORRECT — emit after awaiting the task future, in the orchestration layer
 async def run():

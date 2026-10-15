@@ -32,8 +32,7 @@ By following these best practices, you can:
     Name your tasks clearly to improve logs and debugging
     ```python
     @flow.function_task
-    async def fetch_data(url):
-        ...
+    async def fetch_data(url): ...
     ```
 ---
 
@@ -51,13 +50,13 @@ Every future returned by a task or block call exposes a `.state` attribute that 
 
 ```python
 fut = my_task()
-print(fut.state)        # "PENDING" — not yet submitted
+print(fut.state)  # "PENDING" — not yet submitted
 
 await asyncio.sleep(0)
-print(fut.state)        # "RUNNING" or "DONE" depending on backend speed
+print(fut.state)  # "RUNNING" or "DONE" depending on backend speed
 
 await fut
-print(fut.state)        # "DONE", "FAILED", or "CANCELLED"
+print(fut.state)  # "DONE", "FAILED", or "CANCELLED"
 ```
 
 !!! tip
@@ -76,8 +75,9 @@ async def watch(fut):
     await fut
     handle(fut.result())
 
+
 for fut in futs:
-    asyncio.create_task(watch(fut))   # N coroutines for N tasks
+    asyncio.create_task(watch(fut))  # N coroutines for N tasks
 ```
 
 Use `add_done_callback` instead — one callback function handles all completions, zero extra coroutines:
@@ -91,6 +91,7 @@ def on_done(fut):
         print(f"failed: {fut.exception()} — state={fut.state}")
     else:
         print(f"done: {fut.result()} — state={fut.state}")
+
 
 for fut in [task1(), task2(), task3()]:
     fut.add_done_callback(on_done)
@@ -106,31 +107,44 @@ for fut in [task1(), task2(), task3()]:
 ## Use Dependencies Correctly
 
 Tasks can depend on the output of other tasks:
-- Make your dependency graph explicit by passing tasks as arguments.
+
+- Make your dependency graph explicit by passing task futures as arguments, **positional or keyword**.
 - Don’t block unnecessarily: let AsyncFlow schedule dependencies.
 
 !!! tip
     Tasks that don’t depend on each other run in parallel automatically.
 
 ```python
-asyncflow = await WorkflowEngine.create(dry_run=True)
+flow = await WorkflowEngine.create(dry_run=True)
 
+
+@flow.function_task
 async def task_a():
-    asyncio.sleep(2) # (1)!
-
-async def task_a():
-    asyncio.sleep(2) # (2)!
-
-async def task_c(task_a_fut, task_b_fut):
-    asyncio.sleep(2)
+    await asyncio.sleep(2)  # (1)!
+    return "a"
 
 
-result = task_c(task_a(), task_b()) # (3)!
+@flow.function_task
+async def task_b():
+    await asyncio.sleep(2)  # (2)!
+    return "b"
+
+
+@flow.function_task
+async def task_c(a_result, b_result=None):
+    await asyncio.sleep(2)
+    return a_result + b_result
+
+
+result = task_c(task_a(), b_result=task_b())  # (3)!
 ```
 
 1. Task A will run asynchronously (independently)
 2. Task B will run asynchronously (independently)
-3. Task C will wait implicitly for other tasks
+3. Task C will wait implicitly for both tasks, whether they are passed positionally or as keyword arguments
+
+!!! warning
+    Futures nested inside containers (`task_c([task_a(), task_b()])`) are **not** tracked as dependencies. Pass each future as its own argument. See [Task Dependencies](dependencies.md) for the full rules.
 
 ---
 

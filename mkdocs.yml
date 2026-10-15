@@ -107,6 +107,7 @@ nav:
       - Installation: install.md
   - Getting Started:
       - Basic Usage: basic.md
+      - Task Dependencies: dependencies.md
   - Best Practices:
       - Best Practices: best_practice.md
   - Workflows:
