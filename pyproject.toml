@@ -30,7 +30,7 @@ Issues = "https://github.com/radical-cybertools/radical.asyncflow/issues"
 Documentation = "https://radical-cybertools.github.io/radical.asyncflow"
 
 [project.optional-dependencies]
-lint = ["ruff"]
+lint = ["ruff==0.17.0"]  # keep in sync with .pre-commit-config.yaml
 
 # All test deps
 dev = [

@@ -28,7 +28,6 @@ graph TD
 ### Example Code
 
 ```python
-
 import time
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
@@ -36,6 +35,7 @@ from radical.asyncflow import WorkflowEngine, LocalExecutionBackend
 
 backend = await LocalExecutionBackend(ThreadPoolExecutor())
 flow = await WorkflowEngine.create(backend=backend)
+
 
 async def main():
     @flow.function_task
@@ -51,19 +51,20 @@ async def main():
         return time.time()
 
     async def run_wf(wf_id):
-        print(f'Starting workflow {wf_id} at {time.time()}')
+        print(f"Starting workflow {wf_id} at {time.time()}")
         t3 = task3(task1(), task2())
-        await t3 # Blocking operation so the entire workflow will block
-        print(f'Workflow {wf_id} completed at {time.time()}')
+        await t3  # Blocking operation so the entire workflow will block
+        print(f"Workflow {wf_id} completed at {time.time()}")
 
     start_time = time.time()
     await asyncio.gather(*[run_wf(i) for i in range(5)])
     end_time = time.time()
 
-    print(f'\nTotal time running asynchronously is: {end_time - start_time}')
+    print(f"\nTotal time running asynchronously is: {end_time - start_time}")
 
     # We are in an async context, so we have to use await
     await flow.shutdown()
+
 
 asyncio.run(main())
 ```
@@ -123,7 +124,7 @@ If no ID is passed, a short UUID is generated automatically:
 
 ```python
 async with flow.workflow_scope() as wid:
-    print(wid)   # e.g. "wf-3a7f1c2b"
+    print(wid)  # e.g. "wf-3a7f1c2b"
     my_task()
 ```
 

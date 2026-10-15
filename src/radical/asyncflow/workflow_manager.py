@@ -799,9 +799,9 @@ class WorkflowEngine:
                 comp_desc["uid"]
             )
             comp_fut.add_done_callback(
-                lambda _,
-                b_uid=parent_block_uid,
-                tuid=comp_desc["uid"]: self._remove_member(b_uid, tuid)
+                lambda _, b_uid=parent_block_uid, tuid=comp_desc["uid"]: (
+                    self._remove_member(b_uid, tuid)
+                )
             )
 
         # Patch cancel for tasks only; blocks are cancelled via a done_callback
@@ -1256,12 +1256,11 @@ class WorkflowEngine:
                         self._notify_dependents(comp_uid)
                         continue
                     except asyncio.CancelledError:
-                        # Only a cancelled argument future can raise this here:
+                        # Only a cancelled future can raise this here:
                         # _extract_dependency_values never suspends, so the run
                         # task itself cannot be cancelled inside it. Cancel the
                         # dependent instead of letting it stop the run loop.
-                        logger.info(
-                            f"Cancelling {comp_desc['name']}")
+                        logger.info(f"Cancelling {comp_desc['name']}")
                         self.handle_task_cancellation(
                             comp_desc, self.components[comp_uid]["future"]
                         )

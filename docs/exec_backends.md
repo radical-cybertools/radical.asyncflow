@@ -51,7 +51,7 @@ backend = await LocalExecutionBackend(ThreadPoolExecutor())
 # HPC execution with Radical.Pilot (requires RHAPSODY)
 from rhapsody.backends import RadicalExecutionBackend
 
-backend = await RadicalExecutionBackend({'resource': 'local.localhost'})
+backend = await RadicalExecutionBackend({"resource": "local.localhost"})
 ```
 
 !!! success
@@ -70,7 +70,9 @@ from rhapsody.backends import RadicalExecutionBackend
 from radical.asyncflow import WorkflowEngine
 
 # HPC backend configuration
-backend = await RadicalExecutionBackend({'nodes': 1, 'resource': 'local.localhost'}) # (1)!
+backend = await RadicalExecutionBackend(
+    {"nodes": 1, "resource": "local.localhost"}
+)  # (1)!
 flow = await WorkflowEngine.create(backend=backend)
 ```
 
@@ -87,13 +89,15 @@ flow = await WorkflowEngine.create(backend=backend)
 ### Define Executable Tasks for HPC
 
 ```python
-@flow.executable_task # (1)!
+@flow.executable_task  # (1)!
 async def task1(*args):
     return "/bin/date"
+
 
 @flow.executable_task
 async def task2(*args):
     return "/bin/date"
+
 
 @flow.executable_task
 async def task3(*args):
@@ -124,9 +128,11 @@ flow = await WorkflowEngine.create(
     work_dir="/scratch/logs",  # files land under /scratch/logs/my-run/
 )
 
+
 @flow.executable_task(capture_stdio=True)
 async def simulate():
     return "/bin/bash -c './simulate.sh --steps 10000'"
+
 
 stdout_path = await simulate()
 # stdout_path → "/scratch/logs/my-run/task.000001.stdout"
@@ -155,7 +161,7 @@ Both `@flow.executable_task` and `@flow.function_task` can do that by passing `t
 
 ```python
 @flow.function_task
-async def mpi_func(task_description={'ranks': 8, 'type': 'mpi'}):
+async def mpi_func(task_description={"ranks": 8, "type": "mpi"}):
     """
     multi-rank task that executes on N ranks in parallel.
     """
@@ -192,13 +198,13 @@ async def mpi_func(task_description={'ranks': 8, 'type': 'mpi'}):
 
 ```python
 async def run_wf(wf_id):
-    print(f'Starting workflow {wf_id} at {time.time()}')
+    print(f"Starting workflow {wf_id} at {time.time()}")
 
     # Create dependent task execution
-    t3 = task3(task1(), task2()) # (1)!
+    t3 = task3(task1(), task2())  # (1)!
     await t3  # Wait for distributed execution to complete
 
-    print(f'Workflow {wf_id} completed at {time.time()}')
+    print(f"Workflow {wf_id} completed at {time.time()}")
 ```
 
 1. Task3 depends on both task1 and task2 completion, but they execute on HPC nodes
@@ -212,10 +218,10 @@ async def run_wf(wf_id):
 start_time = time.time()
 
 # Execute 5 workflows concurrently across HPC infrastructure
-await asyncio.gather(*[run_wf(i) for i in range(5)]) # (1)!
+await asyncio.gather(*[run_wf(i) for i in range(5)])  # (1)!
 
 end_time = time.time()
-print(f'\nTotal time running asynchronously is: {end_time - start_time}')
+print(f"\nTotal time running asynchronously is: {end_time - start_time}")
 
 # Proper cleanup of HPC resources
 await flow.shutdown()
@@ -260,13 +266,15 @@ await flow.shutdown()
 from rhapsody.backends import RadicalExecutionBackend
 
 # Configure for GPU-accelerated computing
-backend = await RadicalExecutionBackend({
-    'resource': 'ornl.summit',
-    'queue': 'gpu',
-    'nodes': 100,
-    'gpus_per_node': 6,
-    'walltime': 120  # minutes
-})
+backend = await RadicalExecutionBackend(
+    {
+        "resource": "ornl.summit",
+        "queue": "gpu",
+        "nodes": 100,
+        "gpus_per_node": 6,
+        "walltime": 120,  # minutes
+    }
+)
 ```
 
 ### Large-Scale CPU Configuration
@@ -275,13 +283,15 @@ backend = await RadicalExecutionBackend({
 from rhapsody.backends import RadicalExecutionBackend
 
 # Configure for massive CPU parallelism
-backend = await RadicalExecutionBackend({
-    'resource': 'tacc.frontera',
-    'queue': 'normal',
-    'nodes': 1000,
-    'cores_per_node': 56,
-    'walltime': 240  # minutes
-})
+backend = await RadicalExecutionBackend(
+    {
+        "resource": "tacc.frontera",
+        "queue": "normal",
+        "nodes": 1000,
+        "cores_per_node": 56,
+        "walltime": 240,  # minutes
+    }
+)
 ```
 
 !!! warning

@@ -16,6 +16,7 @@ import asyncio
 
 from radical.asyncflow import LocalExecutionBackend, WorkflowEngine
 
+
 async def main():
     backend = await LocalExecutionBackend()
     flow = await WorkflowEngine.create(backend=backend)
@@ -37,6 +38,7 @@ async def main():
 
     print(await result)
     await flow.shutdown()
+
 
 asyncio.run(main())
 ```
@@ -63,17 +65,21 @@ The same future passed more than once is **one** dependency, and every position 
 async def load_number():
     return 21
 
+
 @flow.function_task
 async def add(x, y):
     return x + y
+
 
 @flow.function_task
 async def scale(value, factor=None):
     return value * factor
 
+
 x = load_number()
-total = add(x, x)           # one dependency on `x`, both arguments get its result
-scaled = scale(x, factor=x) # same: positional and keyword uses of `x` are one dependency
+total = add(x, x)  # one dependency on `x`, both arguments get its result
+# same: positional and keyword uses of `x` are one dependency
+scaled = scale(x, factor=x)
 ```
 
 ---

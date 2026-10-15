@@ -53,6 +53,7 @@ async def task1(name: str):
     print(f"[{time.time():.2f}] {name} completed")
     return now
 
+
 @asyncflow.function_task
 async def task2(name: str):
     now = time.time()
@@ -60,6 +61,7 @@ async def task2(name: str):
     await asyncio.sleep(0.5)  # simulate work
     print(f"[{time.time():.2f}] {name} completed")
     return now
+
 
 @asyncflow.function_task
 async def task3(name: str, *args):
@@ -74,9 +76,9 @@ async def task3(name: str, *args):
 async def create_workflow(name):
     now = time.time()
     print(f"[{now:.2f}] {name} started")
-    t1 = task1('task1')
-    t2 = task2('task2')
-    t3 = task3('task3', t1, t2)
+    t1 = task1("task1")
+    t2 = task2("task2")
+    t3 = task3("task3", t1, t2)
     await t3
     print(f"[{time.time():.2f}] {name} completed")
 ```
@@ -87,11 +89,11 @@ async def create_workflow(name):
 ### Define a Composite Workflow Block
 
 ```python
-@asyncflow.block # (1)!
+@asyncflow.block  # (1)!
 async def create_block(name: str, *args):
-    wf1 = await create_workflow('WF1')
-    wf2 = await create_workflow('WF2')
-    wf3 = await create_workflow('WF3')
+    wf1 = await create_workflow("WF1")
+    wf2 = await create_workflow("WF2")
+    wf3 = await create_workflow("WF3")
     print(f"Processing {name} completed at {time.time():.2f}")
 ```
 
@@ -105,7 +107,7 @@ async def create_block(name: str, *args):
 ```python
 start_time = time.time()
 
-await asyncio.gather( # (1)!
+await asyncio.gather(  # (1)!
     create_block("Block A"),
     create_block("Block B"),
     create_block("Block C"),
@@ -114,7 +116,7 @@ await asyncio.gather( # (1)!
 end_time = time.time()
 print(f"\nTotal time running asynchronously is: {end_time - start_time:.2f}s")
 
-await asyncflow.shutdown() # (2)!
+await asyncflow.shutdown()  # (2)!
 ```
 
 1. Run all composite workflow blocks concurrently
@@ -213,9 +215,9 @@ To represent the previous example as a `DAG` then all you need to do is to
 pass the handler (future) of each the dependent block to the depended block as follows:
 
 ```python
-block1 = create_block("Block A") # (1)!
-block2 = create_block("Block B") # (2)!
-block3 = create_block("Block C", block1, block2) # (3)!
+block1 = create_block("Block A")  # (1)!
+block2 = create_block("Block B")  # (2)!
+block3 = create_block("Block C", block1, block2)  # (3)!
 
 await block3
 ```

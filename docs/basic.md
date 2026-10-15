@@ -51,11 +51,13 @@ async def task1(*args):
     await asyncio.sleep(1)
     return time.time()
 
+
 @flow.function_task
 async def task2(*args):
     print(f"Running task2 at {time.time()}")
     await asyncio.sleep(1)
     return time.time()
+
 
 @flow.function_task
 async def task3(t1_result, t2_result):
@@ -93,6 +95,7 @@ async def main():
 
     # Shutdown the workflow engine
     await flow.shutdown()
+
 
 asyncio.run(main())
 ```
