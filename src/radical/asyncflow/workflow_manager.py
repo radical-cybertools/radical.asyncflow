@@ -1261,9 +1261,7 @@ class WorkflowEngine:
                         # task itself cannot be cancelled inside it. Cancel the
                         # dependent instead of letting it stop the run loop.
                         logger.info(
-                            f"Cancelling {comp_desc['name']}: an argument future "
-                            "was cancelled"
-                        )
+                            f"Cancelling {comp_desc['name']}")
                         self.handle_task_cancellation(
                             comp_desc, self.components[comp_uid]["future"]
                         )
