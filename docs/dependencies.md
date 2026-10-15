@@ -150,4 +150,3 @@ Whether files actually need to be **moved** depends on the execution backend:
 - **Shared-filesystem backends** (`LocalExecutionBackend`, `NoopExecutionBackend`, and RHAPSODY's Concurrent, Dragon and Dask backends) run all tasks on one filesystem: a file written by one task is visible to the next at the same path.
 
 With `implicit_data=True` (the default of `WorkflowEngine.create`), AsyncFlow additionally asks backends that support it to link the data of dependencies that declare no output files. On backends that don't support implicit linking, this option has no effect.
-
