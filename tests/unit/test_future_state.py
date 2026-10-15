@@ -68,7 +68,7 @@ async def test_future_state_transitions_to_running():
 
 @pytest.mark.asyncio
 async def test_future_state_transitions_to_failed():
-    """handle_task_failure must set state == 'FAILED' on the future."""
+    """handle_component_failure must set state == 'FAILED' on the future."""
     engine = await _make_engine()
 
     fut = asyncio.Future()
@@ -79,7 +79,7 @@ async def test_future_state_transitions_to_failed():
         "stderr": "boom",
     }
 
-    engine.handle_task_failure(task_desc, fut)
+    engine.handle_component_failure(task_desc, fut)
 
     assert fut.state == "FAILED"
 
@@ -88,7 +88,7 @@ async def test_future_state_transitions_to_failed():
 
 @pytest.mark.asyncio
 async def test_future_state_transitions_to_cancelled():
-    """handle_task_cancellation must set state == 'CANCELLED' on the future."""
+    """handle_component_cancellation must set state == 'CANCELLED' on the future."""
     engine = await _make_engine()
 
     fut = asyncio.Future()
@@ -96,7 +96,7 @@ async def test_future_state_transitions_to_cancelled():
     fut.original_cancel = fut.cancel
     task_desc = {"uid": "task.cancel-test"}
 
-    engine.handle_task_cancellation(task_desc, fut)
+    engine.handle_component_cancellation(task_desc, fut)
 
     assert fut.state == "CANCELLED"
 

@@ -1180,7 +1180,7 @@ class WorkflowEngine:
                                 f"Cancelling {comp_desc['name']} "
                                 "due to cancelled dependencies"
                             )
-                            self.handle_task_cancellation(
+                            self.handle_component_cancellation(
                                 comp_desc, self.components[comp_uid]["future"]
                             )
                         else:  # failed_deps
@@ -1189,7 +1189,7 @@ class WorkflowEngine:
                                     comp_desc, failed_deps
                                 )
                             )
-                            self.handle_task_failure(
+                            self.handle_component_failure(
                                 comp_desc,
                                 self.components[comp_uid]["future"],
                                 chained_exception,
@@ -1280,7 +1280,7 @@ class WorkflowEngine:
                         logger.error(
                             f"Failed to resolve future for {comp_desc['name']}: {e}"
                         )
-                        self.handle_task_failure(
+                        self.handle_component_failure(
                             comp_desc, self.components[comp_uid]["future"], e
                         )
                         self.resolved.add(comp_uid)
@@ -1292,7 +1292,7 @@ class WorkflowEngine:
                         # task itself cannot be cancelled inside it. Cancel the
                         # dependent instead of letting it stop the run loop.
                         logger.info(f"Cancelling {comp_desc['name']}")
-                        self.handle_task_cancellation(
+                        self.handle_component_cancellation(
                             comp_desc, self.components[comp_uid]["future"]
                         )
                         self.resolved.add(comp_uid)
@@ -1541,66 +1541,77 @@ class WorkflowEngine:
             with scope:
                 result = await func(*args, **kwargs)
             if not block_fut.done():
-                block_fut.set_result(result)
-                block_fut.state = "DONE"
+                self.handle_component_success(
+                    {"uid": block_uid, "return_value": result}, block_fut
+                )
         except Exception as e:
             if not block_fut.done():
-                block_fut.set_exception(e)
-                block_fut.state = "FAILED"
+                self.handle_component_failure(block_fut.block, block_fut, e)
+        except asyncio.CancelledError:
+            # The block body raised CancelledError, e.g. by awaiting a member task
+            # that was cancelled. Cancel the block so it and its dependents don't
+            # hang. When the engine itself cancelled the block (block_fut.cancel()
+            # or shutdown), block_fut is already done and this is a no-op.
+            self.handle_component_cancellation(block_fut.block, block_fut)
+            raise
         finally:
             self._workflow_id_ctx.reset(token)
 
-    def handle_task_success(self, task: dict, task_fut: asyncio.Future) -> None:
-        """Handles successful task completion and updates the associated future.
+    def handle_component_success(
+        self, component: dict, component_fut: asyncio.Future
+    ) -> None:
+        """Handles successful completion of a component (task or block).
 
-        Sets the result of the task's future based on whether the task was a function
-        or a shell command. Raises an error if the future is already resolved.
+        Sets the result of the component's future: the function's return value for
+        function tasks and blocks, or stdout for executable and prompt tasks. Logs a
+        warning if the future is already resolved.
 
         Args:
-            task (dict): Completed task descriptor containing
-                - 'uid' (str): Unique task identifier
-                - 'return_value' / 'stdout': Result of the task execution
-            task_fut (asyncio.Future): Future to set the result on.
+            component (dict): Completed component descriptor containing
+                - 'uid' (str): Unique component identifier
+                - 'return_value' / 'stdout': Result of the execution
+            component_fut (asyncio.Future): Future to set the result on.
         """
-        internal_task = self.components[task["uid"]]["description"]
+        internal_component = self.components[component["uid"]]["description"]
 
-        if not task_fut.done():
-            if internal_task[FUNCTION]:
-                task_fut.set_result(task["return_value"])
+        if not component_fut.done():
+            if internal_component[FUNCTION]:
+                component_fut.set_result(component["return_value"])
             else:
-                task_fut.set_result(task["stdout"])
-            task_fut.state = "DONE"
+                component_fut.set_result(component["stdout"])
+            component_fut.state = "DONE"
         else:
             logger.warning(
-                f'Attempted to handle an already finished task "{task["uid"]}"'
+                "Attempted to handle an already finished component "
+                f'"{component["uid"]}"'
             )
 
-    def handle_task_failure(
+    def handle_component_failure(
         self,
-        task: dict,
-        task_fut: asyncio.Future,
+        component: dict,
+        component_fut: asyncio.Future,
         override_error_message: Union[str, Exception] = None,
     ) -> None:
-        """Handles task failure and sets the appropriate exception on the future.
+        """Handles failure of a component (task or block) and sets the exception.
 
-        Marks the given task's future as failed by setting an exception derived from
-        either a provided override error or the task's own recorded error/stderr. Logs
-        a warning if the future is already resolved.
+        Marks the component's future as failed by setting an exception derived from
+        either a provided override error or the component's own recorded
+        error/stderr. Logs a warning if the future is already resolved.
 
         Args:
-            task (dict): Dictionary with task details, including:
-                - 'uid' (str): Unique task identifier
+            component (dict): Dictionary with component details, including:
+                - 'uid' (str): Unique component identifier
                 - 'exception' or 'stderr': Error information from execution
-            task_fut (Union[SyncFuture, AsyncFuture]): Future to mark as failed.
+            component_fut (asyncio.Future): Future to mark as failed.
             override_error_message (Union[str, Exception], optional): Custom
-                error message or exception to set instead of the task's recorded error.
+                error message or exception to set instead of the recorded error.
 
         Returns:
             None
         """
-        if task_fut.done():
+        if component_fut.done():
             logger.warning(
-                f'Attempted to handle an already failed task "{task["uid"]}"'
+                f'Attempted to handle an already failed component "{component["uid"]}"'
             )
             return
 
@@ -1614,10 +1625,10 @@ class WorkflowEngine:
                 # If it's a string, wrap it in RuntimeError
                 exception = RuntimeError(str(override_error_message))
         else:
-            # Use the task's original exception or stderr
+            # Use the component's original exception or stderr
             original_error = (
-                task.get("exception")
-                or task.get("stderr")
+                component.get("exception")
+                or component.get("stderr")
                 or "failed with unknown error"
             )
 
@@ -1628,18 +1639,23 @@ class WorkflowEngine:
                 # If it's a string (stderr) or any other type, wrap it in RuntimeError
                 exception = RuntimeError(str(original_error))
 
-        task_fut.set_exception(exception)
-        task_fut.state = "FAILED"
+        component_fut.set_exception(exception)
+        component_fut.state = "FAILED"
 
-    def handle_task_cancellation(self, task: dict, task_fut: asyncio.Future):
-        """Handle task cancellation."""
-        if task_fut.done():
+    def handle_component_cancellation(
+        self, component: dict, component_fut: asyncio.Future
+    ):
+        """Handle cancellation of a component (task or block)."""
+        if component_fut.done():
             return  # already resolved — idempotent, nothing to do
 
-        # Restore original cancel method
-        task_fut.cancel = task_fut.original_cancel
-        result = task_fut.cancel()
-        task_fut.state = "CANCELLED"
+        # Task futures have a patched cancel() that routes to the backend; restore
+        # the original before cancelling. Block futures were never patched.
+        original_cancel = getattr(component_fut, "original_cancel", None)
+        if original_cancel is not None:
+            component_fut.cancel = original_cancel
+        result = component_fut.cancel()
+        component_fut.state = "CANCELLED"
         return result
 
     @typeguard.typechecked
@@ -1664,10 +1680,10 @@ class WorkflowEngine:
             None
 
         State Transitions:
-            - DONE: Calls handle_task_success
+            - DONE: Calls handle_component_success
             - RUNNING: Marks future as running
             - CANCELED: Cancels the future
-            - FAILED: Calls handle_task_failure
+            - FAILED: Calls handle_component_failure
 
         Logging:
             - Debug: Non-relevant state received
@@ -1723,7 +1739,7 @@ class WorkflowEngine:
         }
 
         if state == self.task_states_map.DONE:
-            self.handle_task_success(task_dct, task_fut)
+            self.handle_component_success(task_dct, task_fut)
             if self._telemetry is not None:
                 now = time.time()
                 start = self._task_start_times.pop(
@@ -1755,7 +1771,7 @@ class WorkflowEngine:
                     attributes=tel_attrs,
                 )
         elif state == self.task_states_map.CANCELED:
-            self.handle_task_cancellation(task_dct, task_fut)
+            self.handle_component_cancellation(task_dct, task_fut)
             if self._telemetry is not None:
                 now = time.time()
                 start = self._task_start_times.pop(
@@ -1771,7 +1787,7 @@ class WorkflowEngine:
                     attributes=tel_attrs,
                 )
         elif state == self.task_states_map.FAILED:
-            self.handle_task_failure(task_dct, task_fut)
+            self.handle_component_failure(task_dct, task_fut)
             if self._telemetry is not None:
                 now = time.time()
                 start = self._task_start_times.pop(
@@ -1824,12 +1840,7 @@ class WorkflowEngine:
         for comp in self.components.values():
             future = comp["future"]
             if not future.done():
-                if comp["type"] == BLOCK:
-                    # Block futures are not patched with original_cancel — cancel directly.
-                    future.cancel()
-                    future.state = "CANCELLED"
-                else:
-                    self.handle_task_cancellation(comp["description"], future)
+                self.handle_component_cancellation(comp["description"], future)
 
         # Cancel internal components task
         if not self._run_task.done():

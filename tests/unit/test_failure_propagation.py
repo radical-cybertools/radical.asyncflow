@@ -193,7 +193,7 @@ async def test_async_dependency_failure_propagation(flow):
 
 
 @pytest.mark.asyncio
-async def test_handle_task_failure_with_dependency_failure(flow):
+async def test_handle_component_failure_with_dependency_failure(flow):
     mock_task = {
         "uid": "task.000001",
         "name": "test_task",
@@ -214,7 +214,7 @@ async def test_handle_task_failure_with_dependency_failure(flow):
         "description": mock_task,
     }
 
-    flow.handle_task_failure(mock_task, mock_future, dep_failure)
+    flow.handle_component_failure(mock_task, mock_future, dep_failure)
 
     assert mock_future.exception() is dep_failure
     assert isinstance(mock_future.exception(), DependencyFailureError)

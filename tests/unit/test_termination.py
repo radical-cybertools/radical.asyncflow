@@ -89,12 +89,14 @@ class TestGracefulShutdown:
         mock_future1.original_cancel = Mock(return_value=True)
         mock_future2.original_cancel = Mock(return_value=True)
 
-        # Create a mock handle_task_cancellation method that calls original_cancel
+        # Create a mock handle_component_cancellation method that calls original_cancel
         def mock_handle_cancellation(task_desc, task_fut):
             if hasattr(task_fut, "original_cancel"):
                 task_fut.original_cancel()
 
-        engine.handle_task_cancellation = Mock(side_effect=mock_handle_cancellation)
+        engine.handle_component_cancellation = Mock(
+            side_effect=mock_handle_cancellation
+        )
 
         engine.components = {
             "task.000001": {
@@ -115,8 +117,8 @@ class TestGracefulShutdown:
         # Assert: Shutdown event is set
         assert engine._shutdown_event.is_set()
 
-        # Verify handle_task_cancellation was called for one task (pending only)
-        assert engine.handle_task_cancellation.call_count == 1
+        # Verify handle_component_cancellation was called for one task (pending only)
+        assert engine.handle_component_cancellation.call_count == 1
 
     @pytest.mark.asyncio
     async def test_signal_handler_triggers_shutdown(self, engine):

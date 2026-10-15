@@ -226,3 +226,145 @@ async def test_nested_block_cancellation_propagates():
     assert deep_comp["future"].cancelled()
 
     await engine.shutdown()
+
+
+# ---------------------------------------------------------------------------
+# CancelledError raised inside a block body
+# ---------------------------------------------------------------------------
+
+
+async def _cancelled_body_block(engine):
+    """Register a block whose body awaits a member task that was cancelled."""
+
+    @engine.function_task
+    async def slow():
+        await asyncio.sleep(10)
+
+    @engine.block
+    async def blk():
+        member = slow()
+        member.cancel()
+        await member  # raises CancelledError inside the block body
+
+    return blk()
+
+
+@pytest.mark.asyncio
+async def test_block_body_cancelled_error_cancels_block():
+    """A CancelledError raised inside a block body cancels the block instead of leaving
+    its future pending forever."""
+    engine = await _make_local_engine()
+
+    block_fut = await _cancelled_body_block(engine)
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(asyncio.shield(block_fut), timeout=5)
+
+    assert block_fut.cancelled()
+    assert block_fut.state == "CANCELLED"
+    assert not engine._run_task.done()
+
+    await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_dependent_of_block_with_cancelled_body_is_cancelled():
+    """A component depending on a block whose body raised CancelledError is cancelled
+    instead of hanging."""
+    engine = await _make_local_engine()
+
+    @engine.function_task
+    async def downstream(x):
+        return x
+
+    block_fut = await _cancelled_body_block(engine)
+    dependent = downstream(block_fut)
+
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(asyncio.shield(dependent), timeout=5)
+    assert dependent.cancelled()
+
+    await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_block_body_cancelled_error_cancels_running_members():
+    """Members still running when the block body raises CancelledError are cancelled, as
+    when the block is cancelled from outside."""
+    engine = await _make_local_engine()
+    members = {}
+
+    @engine.function_task
+    async def slow():
+        await asyncio.sleep(10)
+
+    @engine.block
+    async def blk():
+        members["running"] = slow()
+        await asyncio.sleep(0.2)  # let the running member register and start
+        cancelled = slow()
+        cancelled.cancel()
+        await cancelled
+
+    block_fut = blk()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(asyncio.shield(block_fut), timeout=5)
+
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(asyncio.shield(members["running"]), timeout=5)
+    assert members["running"].cancelled()
+
+    await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_cancelled_inner_block_cancels_outer_block():
+    """An outer block awaiting an inner block whose body raised CancelledError is
+    cancelled too (inner-to-outer propagation)."""
+    engine = await _make_local_engine()
+
+    @engine.function_task
+    async def slow():
+        await asyncio.sleep(10)
+
+    @engine.block
+    async def inner():
+        member = slow()
+        member.cancel()
+        await member
+
+    @engine.block
+    async def outer():
+        await inner()
+
+    outer_fut = outer()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(asyncio.shield(outer_fut), timeout=5)
+    assert outer_fut.cancelled()
+    assert outer_fut.state == "CANCELLED"
+
+    await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_block_success_and_failure_states_unchanged():
+    """Blocks still resolve with DONE + result or FAILED + the original exception."""
+    engine = await _make_local_engine()
+
+    @engine.block
+    async def ok_block():
+        return 42
+
+    @engine.block
+    async def failing_block():
+        raise ValueError("boom")
+
+    ok = ok_block()
+    assert await asyncio.wait_for(ok, timeout=5) == 42
+    assert ok.state == "DONE"
+
+    bad = failing_block()
+    with pytest.raises(ValueError, match="boom"):
+        await asyncio.wait_for(bad, timeout=5)
+    assert bad.state == "FAILED"
+
+    await engine.shutdown()
