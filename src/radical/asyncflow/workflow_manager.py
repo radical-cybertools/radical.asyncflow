@@ -754,7 +754,7 @@ class WorkflowEngine:
 
         # Detect dependencies
         comp_deps, input_files_deps, output_files_deps = self._detect_dependencies(
-            comp_desc["args"]
+            comp_desc["args"], comp_desc["kwargs"]
         )
 
         comp_desc["metadata"] = {
@@ -892,11 +892,13 @@ class WorkflowEngine:
         uid = get_next_uid()
         return f"{prefix}.{uid}"
 
-    def _detect_dependencies(self, possible_dependencies):
+    def _detect_dependencies(
+        self, possible_args_dependencies, possible_kw_dependencies=None
+    ):
         """Detects and categorizes possible dependencies into blocks/tasks, input files,
         and output files.
 
-        This method iterates over a list of possible dependencies and classifies
+        This method iterates over positional and keyword arguments and classifies
         them into three categories:
         - Blocks/Tasks that are instances of `Future` with a `task` or `block`
           attribute (task dependencies).
@@ -906,8 +908,10 @@ class WorkflowEngine:
           (files produced by the task only).
 
         Args:
-            possible_dependencies (list): A list of possible dependencies,
-            which can include blocks, tasks, input files, and output files.
+            possible_args_dependencies (list): Positional arguments that may be
+            dependencies: blocks, tasks, input files, and output files.
+            possible_kw_dependencies (dict, optional): Keyword arguments whose
+            values are scanned the same way as `possible_args_dependencies`.
 
         Returns:
             tuple: A tuple containing three lists:
@@ -922,7 +926,12 @@ class WorkflowEngine:
         output_files = []
         seen_dep_uids = set()
 
-        for possible_dep in possible_dependencies:
+        all_possible_deps = list(possible_args_dependencies)
+
+        if possible_kw_dependencies:
+            all_possible_deps.extend(possible_kw_dependencies.values())
+
+        for possible_dep in all_possible_deps:
             # Flow component dependency
             if isinstance(possible_dep, asyncio.Future):
                 if hasattr(possible_dep, TASK):
@@ -1242,6 +1251,21 @@ class WorkflowEngine:
                         )
                         self.handle_task_failure(
                             comp_desc, self.components[comp_uid]["future"], e
+                        )
+                        self.resolved.add(comp_uid)
+                        self._notify_dependents(comp_uid)
+                        continue
+                    except asyncio.CancelledError:
+                        # Only a cancelled argument future can raise this here:
+                        # _extract_dependency_values never suspends, so the run
+                        # task itself cannot be cancelled inside it. Cancel the
+                        # dependent instead of letting it stop the run loop.
+                        logger.info(
+                            f"Cancelling {comp_desc['name']}: an argument future "
+                            "was cancelled"
+                        )
+                        self.handle_task_cancellation(
+                            comp_desc, self.components[comp_uid]["future"]
                         )
                         self.resolved.add(comp_uid)
                         self._notify_dependents(comp_uid)

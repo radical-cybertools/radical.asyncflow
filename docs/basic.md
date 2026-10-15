@@ -66,8 +66,9 @@ async def task3(t1_result, t2_result):
 
 !!! note
     - `task3` depends on the outputs of `task1` and `task2`.
-    - You express this dependency by calling `task3(task1(), task2())`.
+    - You express this dependency by calling `task3(task1(), task2())`. Futures can be passed as positional (`args`) or keyword arguments (`kwargs`).
     - `task1` and `task2` will be automatically resolved during runtime and their values will be assigned to `task3` accordingly.
+    - See [Task Dependencies](dependencies.md) for exactly what counts as a dependency.
 
 ---
 

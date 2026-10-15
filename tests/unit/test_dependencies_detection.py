@@ -54,3 +54,27 @@ async def test_detect_duplicate_task_dependency():
 
     assert len(task_deps) == 1
     assert task_deps[0]["uid"] == task.task["uid"]
+
+
+@pytest.mark.asyncio
+async def test_detect_kwarg_task_dependencies():
+    engine = await WorkflowEngine.create(backend=NoopExecutionBackend())
+
+    @engine.function_task
+    async def task1():
+        return 1
+
+    @engine.function_task
+    async def task2():
+        return 2
+
+    fa = task1()
+    fb = task2()
+    await fa
+    await fb
+
+    task_deps, _, _ = engine._detect_dependencies([fa], {"x": fb})
+    assert [d["uid"] for d in task_deps] == [fa.task["uid"], fb.task["uid"]]
+
+    task_deps, _, _ = engine._detect_dependencies([fa], {"x": fa})
+    assert [d["uid"] for d in task_deps] == [fa.task["uid"]]

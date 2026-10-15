@@ -6,6 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Futures passed as keyword arguments are now dependencies** — `task(x=other())`
+  previously ignored `other` when building the dependency graph, so the task could
+  start before `other` finished and fail with `InvalidStateError`, a failed `other`
+  surfaced as its raw exception instead of `DependencyFailureError`, and a cancelled
+  `other` stopped the engine's scheduler loop silently. Keyword-argument futures are
+  now tracked exactly like positional ones, and a cancelled argument future cancels
+  the dependent task instead of stopping the scheduler.
+- **Same future passed more than once no longer hangs** (#98) — `task(a, a)` counted
+  `a` as two dependencies but released only one, so the task never ran. A component
+  passed several times is now a single dependency, and every argument still receives
+  its result.
+
+### Added
+
+- **Task Dependencies documentation page** (`docs/dependencies.md`) — how to specify
+  dependencies (positional and keyword arguments) and exactly what counts as one.
+
 ## [0.5.1] - 2026-08-20
 
 ### Fixed
