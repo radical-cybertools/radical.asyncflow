@@ -8,6 +8,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Explicit file dependencies no longer shut the engine down** — an
+  `OutputFile` → `InputFile` match made the engine call
+  `link_explicit_data_deps` on every backend and read a `"target"` from its return
+  value, but only few backends returns one, so on all other backends the
+  resulting `TypeError` shut the whole engine down. The data-linking hooks are now
+  called only on backends that declare the matching capability
+  (`supports_implicit_data_linking` / `supports_explicit_data_linking`, read once
+  when the backend is attached). The built-in backends declare neither, and
+  backends without the attributes are treated the same way. RADICAL-Pilot
+  data linking requires RHAPSODY newer than 0.5.0, which declares the capabilities.
+
 - **Futures passed as keyword arguments are now dependencies** — `task(x=other())`
   previously ignored `other` when building the dependency graph, so the task could
   start before `other` finished and fail with `InvalidStateError`, a failed `other`

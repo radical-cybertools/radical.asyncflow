@@ -33,6 +33,20 @@ RHAPSODY is a dedicated HPC execution layer that provides additional backends, a
 - `DaskExecutionBackend` — parallel computing via [Dask](https://docs.dask.org/en/stable/)
 - `DragonExecutionBackendV3` — high-performance distributed execution
 
+## Data-Linking Capabilities
+
+Each backend declares whether it moves data between tasks, through two class attributes:
+
+| Attribute | When `True`, AsyncFlow calls |
+|---|---|
+| `supports_implicit_data_linking` | `link_implicit_data_deps(src_task, dst_task)` for each dependency that declares no output files (when `implicit_data=True`) |
+| `supports_explicit_data_linking` | `link_explicit_data_deps(...)` for each matching `OutputFile` → `InputFile`, and for external input files. The backend must return a descriptor containing at least `"target"`. |
+
+Both default to `False`, and AsyncFlow skips the corresponding hooks entirely for backends that don't declare them. Only `RadicalExecutionBackend` declares both; the built-in backends and RHAPSODY's other backends share a filesystem and declare neither. A backend object without these attributes is treated as one that does not link data.
+
+!!! note "Custom backends"
+    Leave both attributes `False` if your tasks share a filesystem or your backend moves no files. Set one to `True` only if you implement the matching hook. The two are independent. See [Task Dependencies](dependencies.md#data-file-dependencies) for how file dependencies are declared.
+
 ## Local vs HPC Execution: A Side-by-Side Comparison
 
 ### Local Execution with LocalExecutionBackend

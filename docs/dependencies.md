@@ -124,4 +124,30 @@ except DependencyFailureError as e:
 
 ## Data (file) dependencies
 
-Besides task results, tasks can declare **files** they consume and produce by passing `InputFile` and `OutputFile` objects as arguments. With `implicit_data=True` (the default of `WorkflowEngine.create`), AsyncFlow also asks the execution backend to link data between dependent tasks implicitly. How files are staged is specific to each execution backend; see [Execution Backends & HPC Integration](exec_backends.md).
+Besides task results, tasks can declare **files** they produce and consume by passing `OutputFile` and `InputFile` objects as arguments. When a task's `InputFile` matches the `OutputFile` of one of its dependencies, that is an **explicit file dependency**:
+
+```python
+from radical.asyncflow import InputFile, OutputFile
+
+
+@flow.executable_task
+async def produce(*args):
+    return "/bin/cp /etc/hostname out.txt"
+
+
+@flow.executable_task
+async def consume(*args):
+    return "/bin/cat out.txt"
+
+
+p = produce(OutputFile("out.txt"))
+c = consume(p, InputFile("out.txt"))  # depends on `p` and reads its file
+```
+
+Whether files actually need to be **moved** depends on the execution backend:
+
+- **Backends that link data** run tasks in separate sandboxes, so the file must be linked or staged into the consumer's sandbox. `RadicalExecutionBackend` (RADICAL-Pilot) does this.
+- **Shared-filesystem backends** (`LocalExecutionBackend`, `NoopExecutionBackend`, and RHAPSODY's Concurrent, Dragon and Dask backends) run all tasks on one filesystem: a file written by one task is visible to the next at the same path.
+
+With `implicit_data=True` (the default of `WorkflowEngine.create`), AsyncFlow additionally asks backends that support it to link the data of dependencies that declare no output files. On backends that don't support implicit linking, this option has no effect.
+

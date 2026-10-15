@@ -89,9 +89,16 @@ class WorkflowEngine:
         if not isinstance(backend, list):
             backend = [backend]
         self._backends: dict = {}
+        # backend name -> (supports implicit, supports explicit) data linking
+        self._data_linking: dict[str, tuple[bool, bool]] = {}
         for b in backend:
             self._attach_backend(b)
         self._default_backend_name: str = backend[0].name
+        # The data-linking hooks are called on the default backend, so gate them
+        # by its capabilities. Read once here, not per task.
+        self._links_implicit_data, self._links_explicit_data = self._data_linking[
+            self._default_backend_name
+        ]
 
         # Initialize core attributes
         self.running: set[str] = set()
@@ -154,6 +161,22 @@ class WorkflowEngine:
         backend.is_attached = True
         backend.attached_to.append(self.uid)
         self._backends[backend.name] = backend
+        # Backends predating the capability attributes are treated as non-linking.
+        self._data_linking[backend.name] = (
+            bool(getattr(backend, "supports_implicit_data_linking", False)),
+            bool(getattr(backend, "supports_explicit_data_linking", False)),
+        )
+        implicit, explicit = self._data_linking[backend.name]
+        if not implicit:
+            logger.debug(
+                "Backend {} does not support implicit data linking; "
+                "skipping it for all its tasks".format(backend.name)
+            )
+        if not explicit:
+            logger.debug(
+                "Backend {} does not support explicit data linking; "
+                "skipping it for all its tasks".format(backend.name)
+            )
         backend.register_callback(self.task_callbacks)
 
     async def start_telemetry(
@@ -1180,64 +1203,72 @@ class WorkflowEngine:
                     # Handle data dependencies for tasks
                     comp_desc = self.components[comp_uid]["description"]
                     if self.components[comp_uid]["type"] == TASK:
-                        explicit_files_to_stage = []
+                        # Data linking runs only on backends that declare it;
+                        # implicit and explicit linking are independent.
+                        if self._links_implicit_data and self.implicit_data_mode:
+                            for dep in dependencies:
+                                dep_desc = self.components[dep["uid"]]["description"]
 
-                        for dep in dependencies:
-                            dep_desc = self.components[dep["uid"]]["description"]
-
-                            # Link implicit data dependencies
-                            if self.implicit_data_mode and not dep_desc["metadata"].get(
-                                "output_files"
-                            ):
-                                logger.debug(
-                                    f"Linking implicit file(s): from {dep_desc['name']} "
-                                    f"to {comp_desc['name']}"
-                                )
-                                self.backend.link_implicit_data_deps(
-                                    dep_desc, comp_desc
-                                )
-
-                            # Link explicit data dependencies
-                            for output_file in dep_desc["metadata"]["output_files"]:
-                                if output_file in comp_desc["metadata"]["input_files"]:
+                                # Link implicit data dependencies
+                                if not dep_desc["metadata"].get("output_files"):
                                     logger.debug(
-                                        f"Linking explicit file ({output_file}) "
-                                        f"from {dep_desc['name']} "
-                                        f"to {comp_desc['name']}"
+                                        "Linking implicit file(s): from "
+                                        f"{dep_desc['name']} to {comp_desc['name']}"
+                                    )
+                                    self.backend.link_implicit_data_deps(
+                                        dep_desc, comp_desc
+                                    )
+
+                        if self._links_explicit_data:
+                            explicit_files_to_stage = []
+
+                            for dep in dependencies:
+                                dep_desc = self.components[dep["uid"]]["description"]
+
+                                # Link explicit data dependencies
+                                for output_file in dep_desc["metadata"]["output_files"]:
+                                    if (
+                                        output_file
+                                        in comp_desc["metadata"]["input_files"]
+                                    ):
+                                        logger.debug(
+                                            f"Linking explicit file ({output_file}) "
+                                            f"from {dep_desc['name']} "
+                                            f"to {comp_desc['name']}"
+                                        )
+                                        data_dep = self.backend.link_explicit_data_deps(
+                                            src_task=dep_desc,
+                                            dst_task=comp_desc,
+                                            file_name=output_file,
+                                        )
+                                        explicit_files_to_stage.append(data_dep)
+
+                            # Input staging data dependencies
+                            dependency_output_files = self._get_dependency_output_files(
+                                dependencies
+                            )
+                            staged_targets = {
+                                Path(item["target"]).name
+                                for item in explicit_files_to_stage
+                            }
+
+                            for input_file in comp_desc["metadata"]["input_files"]:
+                                input_basename = Path(input_file).name
+                                if (
+                                    input_basename not in staged_targets
+                                    and input_basename not in dependency_output_files
+                                ):
+                                    logger.debug(
+                                        f"Staging {input_file} "
+                                        f"to {comp_desc['name']} work dir"
                                     )
                                     data_dep = self.backend.link_explicit_data_deps(
-                                        src_task=dep_desc,
+                                        src_task=None,
                                         dst_task=comp_desc,
-                                        file_name=output_file,
+                                        file_name=input_basename,
+                                        file_path=input_file,
                                     )
                                     explicit_files_to_stage.append(data_dep)
-
-                        # Input staging data dependencies
-                        dependency_output_files = self._get_dependency_output_files(
-                            dependencies
-                        )
-                        staged_targets = {
-                            Path(item["target"]).name
-                            for item in explicit_files_to_stage
-                        }
-
-                        for input_file in comp_desc["metadata"]["input_files"]:
-                            input_basename = Path(input_file).name
-                            if (
-                                input_basename not in staged_targets
-                                and input_basename not in dependency_output_files
-                            ):
-                                logger.debug(
-                                    f"Staging {input_file} "
-                                    f"to {comp_desc['name']} work dir"
-                                )
-                                data_dep = self.backend.link_explicit_data_deps(
-                                    src_task=None,
-                                    dst_task=comp_desc,
-                                    file_name=input_basename,
-                                    file_path=input_file,
-                                )
-                                explicit_files_to_stage.append(data_dep)
 
                     try:
                         # Update the component description with resolved values
