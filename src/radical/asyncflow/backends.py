@@ -37,6 +37,10 @@ class NoopExecutionBackend:
             attached to (most recent last).
     """
 
+    # Moves no data, so the engine never calls the data-linking hooks.
+    supports_implicit_data_linking = False
+    supports_explicit_data_linking = False
+
     def __init__(self, name: str = "default"):
         """Initialize the no-op execution backend.
 
@@ -175,6 +179,11 @@ class LocalExecutionBackend:
         attached_to: Ordered list of engine/session UIDs this backend has been
             attached to (most recent last).
     """
+
+    # Tasks share the local filesystem, so there is no data to link between them
+    # and the engine never calls the data-linking hooks.
+    supports_implicit_data_linking = False
+    supports_explicit_data_linking = False
 
     def __init__(self, executor: Executor = None, name: str = "default"):
         if not executor:
