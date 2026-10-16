@@ -8,6 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **A `CancelledError` inside a block body no longer hangs the block** —
+  `execute_block` caught only `Exception`, so when a block body raised
+  `asyncio.CancelledError` (e.g. by awaiting a member task that was cancelled) the
+  block's future was never resolved, and the block and every component depending on
+  it waited forever. The block is now cancelled, like a block cancelled from outside:
+  its still-running members and its dependents are cancelled too.
+
 - **Explicit file dependencies no longer shut the engine down** — an
   `OutputFile` → `InputFile` match made the engine call
   `link_explicit_data_deps` on every backend and read a `"target"` from its return
@@ -30,6 +37,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `a` as two dependencies but released only one, so the task never ran. A component
   passed several times is now a single dependency, and every argument still receives
   its result.
+
+### Changed
+
+- **Component state handlers renamed** — `WorkflowEngine.handle_task_success`,
+  `handle_task_failure` and `handle_task_cancellation` are now
+  `handle_component_success`, `handle_component_failure` and
+  `handle_component_cancellation`. They handle blocks as well as tasks: `execute_block`
+  and `shutdown()` now route block results, failures and cancellations through them, so
+  every component changes state in one place. The old names are removed.
 
 ### Added
 

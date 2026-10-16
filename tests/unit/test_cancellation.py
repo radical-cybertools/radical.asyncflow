@@ -99,8 +99,9 @@ async def test_shutdown_with_running_block_does_not_crash():
 
 
 @pytest.mark.asyncio
-async def test_handle_task_cancellation_is_idempotent():
-    """Calling handle_task_cancellation twice on the same future is a silent no-op."""
+async def test_handle_component_cancellation_is_idempotent():
+    """Calling handle_component_cancellation twice on the same future is a silent no-
+    op."""
     engine = await _make_engine()
 
     fut = asyncio.Future()
@@ -108,9 +109,27 @@ async def test_handle_task_cancellation_is_idempotent():
     fut.original_cancel = fut.cancel
     task_desc = {"uid": "task.idempotent-test"}
 
-    engine.handle_task_cancellation(task_desc, fut)
+    engine.handle_component_cancellation(task_desc, fut)
     assert fut.cancelled()
 
-    engine.handle_task_cancellation(task_desc, fut)  # must not raise
+    engine.handle_component_cancellation(task_desc, fut)  # must not raise
+
+    await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_handle_component_cancellation_on_block_future():
+    """Block futures are never patched with original_cancel; the cancellation handler
+    must still cancel them."""
+    engine = await _make_engine()
+
+    fut = asyncio.Future()
+    fut.state = "RUNNING"
+    assert not hasattr(fut, "original_cancel")
+
+    engine.handle_component_cancellation({"uid": "block.no-original-cancel"}, fut)
+
+    assert fut.cancelled()
+    assert fut.state == "CANCELLED"
 
     await engine.shutdown()

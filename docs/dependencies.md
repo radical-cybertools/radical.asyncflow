@@ -119,6 +119,7 @@ except DependencyFailureError as e:
 ```
 
 - If a dependency is **cancelled**, the dependent task is cancelled as well.
+- If a **block**'s body raises `asyncio.CancelledError` (for example by awaiting a task that was cancelled), the block itself is cancelled: its still-running member tasks are cancelled, and so are the components that depend on it.
 
 ---
 
