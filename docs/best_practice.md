@@ -186,11 +186,32 @@ await flow.shutdown()
 ## Logging & Debugging
 
 Enable detailed logs to diagnose issues:
-```bash
-export RADICAL_LOG_LVL=DEBUG
+```python
+import logging
+from radical.asyncflow.logging import init_default_logger
+
+init_default_logger(logging.DEBUG)
 ```
 
-Logs show task dependencies, execution order, errors.
+DEBUG logs show task registration, dependencies, submission and every task
+state change; INFO and above show engine lifecycle events and errors.
+
+### Debug mode
+
+Debug mode adds runtime type checks on the per-task engine method
+`task_callbacks` (via `typeguard`). They add noticeable per-task overhead,
+so they are off by default. Enable them with an environment variable set
+before `radical.asyncflow` is imported:
+
+```bash
+export RADICAL_ASYNCFLOW_DEBUG=1
+```
+
+`RADICAL_DEBUG` is honoured as well; when both are set,
+`RADICAL_ASYNCFLOW_DEBUG` decides, so `RADICAL_ASYNCFLOW_DEBUG=0` disables
+debug mode in an environment that sets `RADICAL_DEBUG`. The values `1`,
+`true`, `yes` and `on` (any case) enable it; any other value disables it.
+The test suite runs in debug mode.
 
 ---
 

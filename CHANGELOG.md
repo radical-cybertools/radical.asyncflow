@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Per-task overhead** — runtime type checks on the per-task path
+  (`task_callbacks`) run only in debug mode (`RADICAL_ASYNCFLOW_DEBUG` or
+  `RADICAL_DEBUG`, see *Logging & Debugging* in the best-practice guide);
+  per-task log messages format lazily; telemetry event arguments are built
+  only when telemetry is enabled; a decorated call creates its component
+  directly instead of building a wrapper per call.
+- **Log levels** — per-task messages (`<uid> is in <state> state`,
+  `Submitting <n> tasks/blocks`) are logged at DEBUG instead of INFO.
+- **`init_default_logger`** sets the logger level to the lowest level of its
+  handlers instead of `NOTSET`, so records no handler would emit are dropped
+  before they are built. Configuring the root logger, records of other
+  libraries below that level are dropped too.
 
 ## [0.6.0] 2026-10-19
 
