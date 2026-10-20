@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+
+## [0.6.0] 2026-10-19
+
 ### Fixed
 
 - **A `CancelledError` inside a block body no longer hangs the block** —
@@ -24,7 +27,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (`supports_implicit_data_linking` / `supports_explicit_data_linking`, read once
   when the backend is attached). The built-in backends declare neither, and
   backends without the attributes are treated the same way. RADICAL-Pilot
-  data linking requires RHAPSODY newer than 0.5.0, which declares the capabilities.
+  data linking requires RHAPSODY newer than 0.6.0, which declares the capabilities.
 
 - **Futures passed as keyword arguments are now dependencies** — `task(x=other())`
   previously ignored `other` when building the dependency graph, so the task could
