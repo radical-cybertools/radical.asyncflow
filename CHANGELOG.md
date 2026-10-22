@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Telemetry names the backend that ran each task** — with several backends, every
+  task span carried the default backend in its `backend` attribute, even for a task
+  routed elsewhere with `backend=`. So did each task's `TaskCreated`,
+  `asyncflow.TaskResolved`, `TaskStarted`, `TaskCompleted`, `TaskFailed` and
+  `TaskCanceled` events, and the task metrics labelled from them; only `TaskQueued` and
+  `TaskSubmitted` named the right backend. Every task event now names the backend the
+  task is routed to, and the task span takes that name from `TaskCreated`. "The
+  `backend` attribute" in `docs/telemetry.md` says what the attribute means.
 
 ## [0.6.0] 2026-10-19
 
