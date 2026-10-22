@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Shutting down one engine no longer makes another reuse uids** (#85) — component
+  uids came from one module-level counter that every `WorkflowEngine.shutdown()`
+  reset, so once one engine shut down, another engine still running in the same
+  process numbered its next component `task.000001` again. That component replaced
+  the earlier one in `flow.components`, and its future never completed. Each engine
+  now numbers its components with its own counter, from `000001`, and never resets
+  it. Two engines in one process can therefore both have a `task.000001`, so records
+  that span engines need the engine's `uid` as well. The `get_next_uid()` and
+  `reset_uid_counter()` helpers in `radical.asyncflow.utils`, used only by the
+  engine, are removed.
 
 ## [0.6.0] 2026-10-19
 

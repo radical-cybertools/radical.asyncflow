@@ -24,8 +24,6 @@ from .backends import NoopExecutionBackend
 from .backends import LocalExecutionBackend
 from .data import InputFile, OutputFile
 from .errors import DependencyFailureError
-from .utils import get_next_uid
-from .utils import reset_uid_counter
 from .utils import get_event_loop_or_raise
 
 TASK = "task"
@@ -103,6 +101,9 @@ class WorkflowEngine:
         # Initialize core attributes
         self.running: set[str] = set()
         self.components = {}
+        # Numbered per engine and never reset, so no other engine's shutdown can
+        # make this one reuse a uid
+        self._uid_counter = count(1)
         self.resolved = set()
         self.dependencies = {}
         self.dry_run = dry_run
@@ -904,7 +905,7 @@ class WorkflowEngine:
         return patched_cancel
 
     def _assign_uid(self, prefix: str) -> str:
-        """Generates a unique identifier (UID) for a flow component using a counter.
+        """Generates a per-engine unique identifier (UID) for a flow component.
 
         Args:
             prefix (str): The prefix to use for the UID.
@@ -912,8 +913,7 @@ class WorkflowEngine:
         Returns:
             str: A unique identifier like 'task.000001'.
         """
-        uid = get_next_uid()
-        return f"{prefix}.{uid}"
+        return f"{prefix}.{next(self._uid_counter):06d}"
 
     def _detect_dependencies(
         self, possible_args_dependencies, possible_kw_dependencies=None
@@ -1022,8 +1022,6 @@ class WorkflowEngine:
         self.running.clear()
         self._task_submit_times.clear()
         self._task_start_times.clear()
-
-        reset_uid_counter()
 
     def _notify_dependents(self, comp_uid: str):
         """Notify dependents that a component has completed and update ready queue."""
