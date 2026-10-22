@@ -11,7 +11,19 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
     InMemorySpanExporter,
 )
 
-from radical.asyncflow import LocalExecutionBackend, WorkflowEngine
+from radical.asyncflow import (
+    LocalExecutionBackend,
+    NoopExecutionBackend,
+    WorkflowEngine,
+)
+
+
+class _HoldingBackend(NoopExecutionBackend):
+    """Accepts tasks and leaves them running; the test reports their states."""
+
+    async def submit_tasks(self, tasks):
+        for task in tasks:
+            self.tasks[task["uid"]] = task
 
 
 async def _run_on_two_backends():
@@ -89,3 +101,37 @@ async def test_task_events_carry_the_backend_that_ran_the_task():
     }
     for event in task_events:
         assert event.backend == ran_on[event.task_id], (event.event_type, event.task_id)
+
+
+@pytest.mark.asyncio
+async def test_started_and_canceled_events_carry_the_backend_that_ran_the_task():
+    """TaskStarted and TaskCanceled, which the backend reports, name its backend."""
+    compute = NoopExecutionBackend(name="compute")
+    ai = _HoldingBackend(name="ai")
+    engine = await WorkflowEngine.create(backend=[compute, ai])
+    telemetry = await engine.start_telemetry()
+    events = []
+    telemetry.subscribe(events.append)
+
+    @engine.function_task(backend="ai")
+    async def infer():
+        return 1
+
+    fut = infer()
+    for _ in range(100):
+        if ai.tasks:
+            break
+        await asyncio.sleep(0.01)
+    (task,) = ai.tasks.values()
+
+    # Simulate the "ai" backend reporting the task's states
+    engine.task_callbacks(task, "RUNNING")
+    engine.task_callbacks(task, "CANCELED")
+    assert fut.cancelled()
+    await telemetry.stop()
+    await engine.shutdown()
+
+    backends = {e.event_type: e.backend for e in events if e.task_id == task["uid"]}
+    assert backends["TaskStarted"] == "ai"
+    assert backends["TaskCanceled"] == "ai"
+    assert set(backends.values()) == {"ai"}

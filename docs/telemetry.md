@@ -129,7 +129,7 @@ The `asyncflow.workflow_id` attribute is stamped on every task span and every JS
 
 ### The `backend` attribute
 
-A task span's `backend` attribute names the backend AsyncFlow sent the task to: the one named by the task decorator's `backend=` argument or, for a task that names none, the default backend (the first one passed to `WorkflowEngine.create()`). See [Per-Task Backend Routing](multi_backend.md#per-task-backend-routing).
+A task span's `backend` attribute names the backend the task is routed to: the one named by the task decorator's `backend=` argument or, for a task that names none, the default backend (the first one passed to `WorkflowEngine.create()`). See [Per-Task Backend Routing](multi_backend.md#per-task-backend-routing).
 
 ```python
 compute = await LocalExecutionBackend(name="compute")
