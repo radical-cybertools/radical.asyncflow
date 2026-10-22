@@ -171,8 +171,10 @@ events. A task's span carries it as `task_id`; a block's span carries it as
 AsyncFlow reports.
 
 !!! note
-    uids are unique within one engine run. The counter restarts at `000001` after an engine
-    shuts down, so records that span several runs need a run identifier of your own as well.
+    uids are unique across all engines in a process. The counter is shared and never reset, so
+    an engine created after another has shut down continues the numbering. Each new process
+    starts again at `000001`, so records that span several processes need an identifier of your
+    own as well.
 
 To link your own traces instead, see
 [Linking tasks to your own traces](telemetry.md#linking-tasks-to-your-own-traces).
