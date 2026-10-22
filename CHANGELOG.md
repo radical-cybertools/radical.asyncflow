@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **A dependent no longer fails when its dependency has not registered yet** — an
+  executable or prompt task registers only after its body returns, so in
+  `b(a())` with an `a` whose body awaits, `b` registered first. The engine then did
+  not recognise `a`'s future as a dependency and `b` failed with
+  `TypeError: '_asyncio.Future' object is not subscriptable`. A task or block now
+  waits for the components whose futures it receives, positionally or as keyword
+  arguments, to register before it registers itself, then waits for their results as
+  before. A failed or cancelled dependency propagates as `DependencyFailureError` or
+  cancellation, also when the dependency's own registration failed, for example
+  because its body raised or returned no command.
 
 ## [0.6.0] 2026-10-19
 

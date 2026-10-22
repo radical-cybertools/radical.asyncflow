@@ -686,6 +686,14 @@ class WorkflowEngine:
                             comp_desc[PROMPT] = await func(*args, **kwargs)
                         else:
                             comp_desc[EXECUTABLE] = None
+                        unregistered = await self._wait_for_dependency_registration(
+                            args, kwargs
+                        )
+                        if unregistered:
+                            self._fail_unregistered_dependent(
+                                comp_fut, func.__name__, unregistered
+                            )
+                            return comp_fut
                         return self._register_component(
                             comp_fut, comp_type, comp_desc, task_type
                         )
@@ -694,7 +702,11 @@ class WorkflowEngine:
                             comp_fut.set_exception(e)
 
                 # FIXME: assign name for this comp (comp uid)
-                asyncio.create_task(async_wrapper())
+                # Dependents called with this future wait for this task. It is
+                # named after func, the name they report if registration fails.
+                comp_fut._registration = asyncio.create_task(
+                    async_wrapper(), name=func.__name__
+                )
             else:
                 # Raise error for non-async functions since we only support async
                 raise TypeError(
@@ -914,6 +926,69 @@ class WorkflowEngine:
         """
         uid = get_next_uid()
         return f"{prefix}.{uid}"
+
+    async def _wait_for_dependency_registration(self, args, kwargs) -> list:
+        """Waits until the components whose futures are in args and kwargs have
+        registered.
+
+        Executable and prompt tasks register only after their body returns, so a
+        dependent can be called with the future of a component that has not
+        registered yet. `_detect_dependencies` recognises a dependency by the `task`
+        or `block` attribute set at registration, so the dependent must register
+        after its dependencies.
+
+        Args:
+            args (tuple): Positional arguments of the dependent.
+            kwargs (dict): Keyword arguments of the dependent.
+
+        Returns:
+            list: Futures whose component did not register, because its
+                registration failed or was cancelled.
+        """
+        futures = [
+            arg
+            for arg in (*args, *kwargs.values())
+            if isinstance(arg, asyncio.Future) and hasattr(arg, "_registration")
+        ]
+        pending = [fut._registration for fut in futures if not fut._registration.done()]
+        if pending:
+            # Unlike awaiting the tasks, asyncio.wait does not cancel them
+            # when this registration is cancelled.
+            await asyncio.wait(pending)
+        return [
+            fut for fut in futures if not hasattr(fut, TASK) and not hasattr(fut, BLOCK)
+        ]
+
+    def _fail_unregistered_dependent(
+        self, comp_fut: asyncio.Future, name: str, unregistered: list
+    ) -> None:
+        """Cancels or fails a dependent of components that did not register, as `run`
+        does for a dependent of cancelled or failed components.
+
+        Args:
+            comp_fut (asyncio.Future): Future of the dependent, not registered.
+            name (str): Name of the dependent.
+            unregistered (list): Futures of the dependencies that did not register.
+        """
+        if comp_fut.done():
+            return
+
+        # A dependency future that is not done had its registration cancelled.
+        if any(fut.cancelled() or not fut.done() for fut in unregistered):
+            comp_fut.cancel()
+            comp_fut.state = "CANCELLED"
+            return
+
+        comp_fut.set_exception(
+            DependencyFailureError(
+                message=f"Cannot execute '{name}' due to dependency failure",
+                failed_dependencies=[
+                    fut._registration.get_name() for fut in unregistered
+                ],
+                root_cause=unregistered[0].exception(),
+            )
+        )
+        comp_fut.state = "FAILED"
 
     def _detect_dependencies(
         self, possible_args_dependencies, possible_kw_dependencies=None
