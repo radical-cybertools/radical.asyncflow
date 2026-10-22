@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **A component's uid is set when the call returns** — calling a task or block
+  returned its future before the engine assigned the component's uid, so `future.id`
+  did not exist until the next event-loop step. A caller that read it right after the
+  call got an `AttributeError`, and could not key its own records on the uid that
+  telemetry events and spans carry as `task_id`. The uid is now assigned at the call,
+  so uids also follow call order. A call whose registration fails keeps its uid on
+  the future, which carries the exception.
+
+### Added
+
+- **`future.uid`** — the full uid (`"task.000001"`, `"block.000002"`), set when the
+  call returns, beside the suffix in `future.id`. It is the component's key in
+  `flow.components` and the `task_id` of its telemetry events and, for a task, of its
+  span.
+- **Task identity and trace linking documentation** — "Task identity" in
+  `docs/async_workflows.md`, and "Linking tasks to your own traces" in
+  `docs/telemetry.md`: the span that is current when a task is called, in-process or
+  extracted from a W3C `traceparent` carrier, becomes the task span's parent.
 
 ## [0.6.0] 2026-10-19
 
