@@ -1,4 +1,14 @@
 import asyncio
+from itertools import count
+
+# Shared by every engine in the process and never reset, so a uid names one component
+# across engines: upper layers identify tasks by uid alone
+_uid_counter = count(1)
+
+
+def get_next_uid():
+    """Return the next unique component ID."""
+    return f"{next(_uid_counter):06d}"
 
 
 def get_event_loop_or_raise(
