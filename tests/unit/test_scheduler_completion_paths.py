@@ -1,22 +1,20 @@
 """Scheduler completion paths: every way a component future can resolve
 releases its dependents promptly, also while the run loop is kept busy.
 
-Completions reported through the engine's handlers wake the run loop
-directly; futures resolved elsewhere are picked up by the safety scan every
-``poll_timeout``.  Event-path tests use a long ``poll_timeout`` so that the
-scan cannot mask a missing wake-up; the scan-path test uses a short one.
+Each path releases dependents through the engine's ``_on_done``.  Nothing
+polls: a path that skipped it would leave its dependents waiting forever,
+so every wait in these tests is bounded.
 """
 
 import asyncio
-import math
+import queue
+import threading
+import time
 
 import pytest
 import pytest_asyncio
 
 from radical.asyncflow import NoopExecutionBackend, WorkflowEngine
-
-LONG = 30  # poll_timeout that keeps the safety scan out of the picture
-SHORT = 0.05
 
 
 class _Backend(NoopExecutionBackend):
@@ -58,15 +56,43 @@ class _Backend(NoopExecutionBackend):
         await super().submit_tasks(rest)
 
 
+class _ThreadBackend(NoopExecutionBackend):
+    """Completes each task ``delay`` seconds after submission, calling the engine
+    callback directly from a worker thread, as Dragon's monitor thread does for
+    cancellations made on the Dragon side."""
+
+    def __init__(self, delay):
+        super().__init__()
+        self.delay = delay
+        self.queue = queue.Queue()
+        threading.Thread(target=self._work, daemon=True).start()
+
+    def _work(self):
+        while True:
+            task = self.queue.get()
+            if task is None:
+                return
+            time.sleep(self.delay)
+            task["return_value"] = task["name"]
+            self._callback_func(task, "DONE")
+
+    async def submit_tasks(self, tasks):
+        for t in tasks:
+            self.queue.put(t)
+
+    async def shutdown(self):
+        self.queue.put(None)
+
+
 @pytest_asyncio.fixture
 async def make_flow():
     """Factory: engine on a ``_Backend`` with a stream of short tasks keeping
     the run loop busy; everything is stopped and shut down on teardown."""
     made = []
 
-    async def _make(poll_timeout):
+    async def _make():
         backend = _Backend()
-        flow = await WorkflowEngine.create(backend=backend, poll_timeout=poll_timeout)
+        flow = await WorkflowEngine.create(backend=backend)
         stop = asyncio.Event()
 
         @flow.function_task
@@ -112,7 +138,7 @@ async def _resolves_within(fut, limit):
 class TestCompletionPaths:
     @pytest.mark.asyncio
     async def test_block_cancelled_by_user(self, make_flow):
-        flow, _ = await make_flow(LONG)
+        flow, _ = await make_flow()
 
         @flow.block
         async def blk():
@@ -130,7 +156,7 @@ class TestCompletionPaths:
 
     @pytest.mark.asyncio
     async def test_task_cancelled_during_submit(self, make_flow):
-        flow, backend = await make_flow(LONG)
+        flow, backend = await make_flow()
         backend.slow = 0.1
 
         @flow.function_task
@@ -148,8 +174,37 @@ class TestCompletionPaths:
         await _resolves_within(d, 0.5)
 
     @pytest.mark.asyncio
+    async def test_pending_task_cancelled_before_its_dependencies_finish(
+        self, make_flow
+    ):
+        """Cancelling a task that still waits for its own dependencies releases its
+        dependents at once, also those registered after the cancel."""
+        flow, _ = await make_flow()
+
+        @flow.function_task
+        async def park():
+            return 1
+
+        @flow.function_task
+        async def mid(x):
+            return 2
+
+        @flow.function_task
+        async def leaf(x):
+            return 3
+
+        m = mid(park())  # park never finishes, so m stays pending
+        before = leaf(m)
+        await _until(lambda: hasattr(before, "task"))
+        m.cancel()
+        after = leaf(m)
+        await _resolves_within(before, 0.5)
+        await _resolves_within(after, 0.5)
+        assert before.cancelled() and after.cancelled()
+
+    @pytest.mark.asyncio
     async def test_service_resolved_by_service_callback(self, make_flow):
-        flow, _ = await make_flow(LONG)
+        flow, _ = await make_flow()
 
         @flow.function_task(service=True)
         async def svc():
@@ -163,28 +218,8 @@ class TestCompletionPaths:
         await _resolves_within(d, 0.5)
 
     @pytest.mark.asyncio
-    async def test_future_resolved_outside_engine(self, make_flow):
-        flow, _ = await make_flow(SHORT)
-
-        @flow.function_task
-        async def park():
-            return 1
-
-        @flow.function_task
-        async def dep(x):
-            return 2
-
-        p = park()
-        d = dep(p)
-        await _until(lambda: hasattr(p, "task") and p.task["uid"] in flow.running)
-        # bypasses every engine handler: only the safety scan sees it
-        asyncio.Future.set_result(p, 7)
-        await _resolves_within(d, 0.5)
-        assert d.done() and not d.cancelled() and d.exception() is None
-
-    @pytest.mark.asyncio
     async def test_running_set_drains(self, make_flow):
-        flow, _ = await make_flow(LONG)
+        flow, _ = await make_flow()
 
         @flow.function_task
         async def ok():
@@ -206,30 +241,76 @@ class TestCompletionPaths:
         await _until(lambda: len(flow.running) <= 1)
 
 
-class TestPollTimeout:
-    @pytest.mark.asyncio
-    async def test_default_and_custom(self):
-        flow = await WorkflowEngine.create(dry_run=True)
-        assert flow._poll_timeout == 0.1
-        await flow.shutdown()
-
-        flow = await WorkflowEngine.create(dry_run=True, poll_timeout=0.5)
-        assert flow._poll_timeout == 0.5
-        await flow.shutdown()
+class TestBackendThread:
+    """Backend callbacks from another thread are handled on the loop thread."""
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("value", [0, -1.0, math.nan, math.inf])
-    async def test_invalid_value(self, value):
-        with pytest.raises(ValueError, match="poll_timeout"):
-            await WorkflowEngine.create(dry_run=True, poll_timeout=value)
+    async def test_handled_on_loop_thread(self):
+        flow = await WorkflowEngine.create(backend=_ThreadBackend(delay=0.02))
+        handled_on = []
+        handle_success = flow.handle_component_success
+
+        def record(component, fut):
+            handled_on.append(threading.get_ident())
+            return handle_success(component, fut)
+
+        flow.handle_component_success = record
+        try:
+
+            @flow.function_task
+            async def first():
+                return 1
+
+            @flow.function_task
+            async def second(x):
+                return 2
+
+            d = second(first())
+            await _resolves_within(d, 0.5)
+            assert d.result() == "second"
+            assert handled_on and set(handled_on) == {threading.get_ident()}
+        finally:
+            await flow.shutdown()
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("value", ["0.1", None])
-    async def test_invalid_type(self, value):
-        with pytest.raises(TypeError):
-            await WorkflowEngine.create(dry_run=True, poll_timeout=value)
+    async def test_chain_has_no_poll_delay(self):
+        """Each edge costs the task's 10 ms, not a wait for a periodic wake-up."""
+        flow = await WorkflowEngine.create(backend=_ThreadBackend(delay=0.01))
+        try:
 
+            @flow.function_task
+            async def step(*x):
+                return None
+
+            start = time.perf_counter()
+            x = step()
+            for _ in range(9):
+                x = step(x)
+            await asyncio.wait_for(x, 5)
+            elapsed = time.perf_counter() - start
+            # ~0.1 s expected for 10 x 10 ms; generous margin for slow runners
+            assert elapsed < 0.5, f"10-step chain took {elapsed:.3f}s"
+        finally:
+            await flow.shutdown()
+
+
+class TestIdle:
     @pytest.mark.asyncio
-    async def test_keyword_only(self):
-        with pytest.raises(TypeError, match="positional"):
-            await WorkflowEngine.create(None, True, True, None, None, 0.1)
+    async def test_idle_loop_does_not_poll(self):
+        """With tasks in flight and nothing ready, the run loop stays asleep."""
+        flow = await WorkflowEngine.create(backend=_Backend())
+        try:
+
+            @flow.function_task
+            async def park():
+                return 1
+
+            futs = [park() for _ in range(100)]
+            await _until(lambda: len(flow.running) == 100 and flow._wakeup)
+            wakeup = flow._wakeup
+            await asyncio.sleep(0.3)
+            # any periodic wake-up would have resolved and replaced this future
+            assert flow._wakeup is wakeup and not wakeup.done()
+            assert not any(f.done() for f in futs)
+        finally:
+            await flow.shutdown()
