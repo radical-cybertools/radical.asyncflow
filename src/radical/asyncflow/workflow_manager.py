@@ -696,7 +696,10 @@ class WorkflowEngine:
                         if not comp_fut.done():
                             comp_fut.set_exception(e)
 
-                # FIXME: assign name for this comp (comp uid)
+                # Assign the uid here so callers can read it before registration runs
+                comp_desc["uid"] = self._assign_uid(prefix=comp_type)
+                comp_fut.id = comp_desc["uid"].split(f"{comp_type}.")[1]
+                comp_fut.uid = comp_desc["uid"]
                 asyncio.create_task(async_wrapper())
             else:
                 # Raise error for non-async functions since we only support async
@@ -719,13 +722,14 @@ class WorkflowEngine:
         """Registers a workflow component with shared registration logic.
 
         Handles the core registration process for both tasks and blocks.
-        Assigns identifiers, sets up metadata, detects dependencies, and manages
-        component storage.
+        Sets up metadata, detects dependencies, and manages component storage.
+        The caller assigns the uid and sets it on the future beforehand.
 
         Args:
             comp_fut (asyncio.Future): Future object for tracking component execution
             comp_type (str): Type of component ('task' or 'block')
             comp_desc (dict): Component description containing:
+                - uid: The component uid, assigned by the caller
                 - function: The callable to execute
                 - args: Function arguments
                 - kwargs: Function keyword arguments
@@ -750,7 +754,6 @@ class WorkflowEngine:
 
         # make sure not to specify both func and executable at the same time
         comp_desc["name"] = comp_desc["function"].__name__
-        comp_desc["uid"] = self._assign_uid(prefix=comp_type)
         # call-time workflow_id takes precedence over the ContextVar
         comp_desc["workflow_id"] = (
             comp_desc.pop("_explicit_workflow_id", None) or self._workflow_id_ctx.get()
@@ -789,8 +792,7 @@ class WorkflowEngine:
             "output_files": output_files_deps,
         }
 
-        # Setup future
-        comp_fut.id = comp_desc["uid"].split(f"{comp_type}.")[1]
+        # Setup future (wrapper already set comp_fut.id and comp_fut.uid)
         setattr(comp_fut, comp_type, comp_desc)
 
         # Store component that will be sent to the backend

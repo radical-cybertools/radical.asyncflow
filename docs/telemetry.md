@@ -149,6 +149,43 @@ Every lifecycle event of the task, from `TaskCreated` to `TaskCompleted`, `TaskF
 
 ---
 
+## Linking tasks to your own traces
+
+The OTel span that is current when your code calls a task becomes the parent of that task's span, and the task span joins its trace. This holds for a span from your own `TracerProvider`, even one in a separate trace from AsyncFlow's session. Put the identities of your own layer, such as an agent's thread, node and tool-call id, on that span:
+
+```python
+from opentelemetry.sdk.trace import TracerProvider
+
+provider = TracerProvider()  # add your own span processors
+tracer = provider.get_tracer("my-agent")
+
+with tracer.start_as_current_span(
+    "tool_call",
+    attributes={"thread_id": "t1", "node": "simulate", "tool_call_id": "call_2"},
+):
+    fut = simulate(2)  # the task span is a child of "tool_call"
+result = await fut
+```
+
+Only the call has to run inside the span: AsyncFlow captures the current context when the task is called, so the future can be awaited after the span ends.
+
+A context extracted from a W3C `traceparent` carrier, as a remote or resumed caller would hold it, works the same way. Attach it before the call:
+
+```python
+from opentelemetry import context
+from opentelemetry.propagate import extract
+
+token = context.attach(extract(carrier))  # carrier = {"traceparent": "00-..."}
+try:
+    fut = simulate(3)
+finally:
+    context.detach(token)
+```
+
+To see your spans and AsyncFlow's together, export both to the same backend (see [Forwarding to an external backend](#forwarding-to-an-external-backend)). To link records rather than spans, key them on [`future.uid`](async_workflows.md#task-identity), which is the task span's `task_id`.
+
+---
+
 ## AsyncFlow-specific events
 
 AsyncFlow emits one event that RHAPSODY core does not:
