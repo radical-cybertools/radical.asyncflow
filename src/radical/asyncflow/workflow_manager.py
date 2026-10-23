@@ -25,7 +25,6 @@ from .backends import LocalExecutionBackend
 from .data import InputFile, OutputFile
 from .errors import DependencyFailureError
 from .utils import get_next_uid
-from .utils import reset_uid_counter
 from .utils import get_event_loop_or_raise
 
 TASK = "task"
@@ -1027,8 +1026,6 @@ class WorkflowEngine:
         self.running.clear()
         self._task_submit_times.clear()
         self._task_start_times.clear()
-
-        reset_uid_counter()
 
     def _notify_dependents(self, comp_uid: str):
         """Notify dependents that a component has completed and update ready queue."""
