@@ -86,3 +86,92 @@ async def test_clear_internal_records_resets_timing_dicts():
     assert len(engine._task_start_times) == 0
 
     await engine.shutdown()
+
+
+# ---------------------------------------------------------------------------
+# Component uids stay unique across engines and shutdowns (#85)
+# ---------------------------------------------------------------------------
+
+
+async def _shut_down_an_engine():
+    """Shut down a throwaway engine, as earlier code in the process may have.
+
+    A counter that resets on shutdown would restart at 000001 here, so the tests below
+    catch a reset whatever number of uids earlier tests used.
+    """
+    engine = await WorkflowEngine.create(dry_run=True)
+    await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_shutdown_of_one_engine_does_not_reset_another_engines_uids():
+    """Shutting down e2 must not make the still-running e1 reuse a uid.
+
+    A reused uid overwrites e1's earlier component record and the new task never
+    completes, so the timeout turns a regression into a failure instead of a hang.
+    """
+    await _shut_down_an_engine()
+    e1 = await WorkflowEngine.create(dry_run=True)
+    e2 = await WorkflowEngine.create(dry_run=True)
+
+    @e1.function_task
+    async def work():
+        return 1
+
+    first = work()
+    await asyncio.wait_for(first, timeout=5)
+
+    await e2.shutdown()
+
+    second = work()
+    try:
+        await asyncio.wait_for(second, timeout=5)
+    except asyncio.TimeoutError:
+        pytest.fail(
+            f"e1 reused {second.task['uid']} after e2.shutdown() and the task hung"
+        )
+
+    assert second.task["uid"] != first.task["uid"]
+    assert set(e1.components) == {first.task["uid"], second.task["uid"]}
+
+    await e1.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_uids_are_unique_across_engines_and_shutdowns():
+    """Layers above AsyncFlow identify tasks by uid alone, so no two components in a
+    process may share one: not on two live engines, and not on an engine created
+    after another has shut down."""
+    await _shut_down_an_engine()
+    e1 = await WorkflowEngine.create(dry_run=True)
+    e2 = await WorkflowEngine.create(dry_run=True)
+
+    @e1.function_task
+    async def t1():
+        return 1
+
+    @e1.block
+    async def b1():
+        return 2
+
+    @e2.function_task
+    async def t2():
+        return 3
+
+    await asyncio.wait_for(asyncio.gather(t1(), b1(), t2()), timeout=5)
+    uids = [*e1.components, *e2.components]
+    await e2.shutdown()
+
+    e3 = await WorkflowEngine.create(dry_run=True)
+
+    @e3.function_task
+    async def t3():
+        return 4
+
+    await asyncio.wait_for(t3(), timeout=5)
+    uids += [*e3.components]
+
+    assert len(set(uids)) == len(uids) == 4, uids
+
+    await e1.shutdown()
+    await e3.shutdown()

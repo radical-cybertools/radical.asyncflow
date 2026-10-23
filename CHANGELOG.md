@@ -23,6 +23,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `TaskSubmitted` named the right backend. Every task event now names the backend the
   task is routed to, and the task span takes that name from `TaskCreated`. "The
   `backend` attribute" in `docs/telemetry.md` says what the attribute means.
+- **Shutting down one engine no longer makes another reuse uids** (#85) — component
+  uids came from one module-level counter that every `WorkflowEngine.shutdown()`
+  reset, so once one engine shut down, another engine still running in the same
+  process numbered its next component `task.000001` again. That component replaced
+  the earlier one in `flow.components`, and its future never completed. The counter
+  is no longer reset, so a uid names one component across all engines in a process,
+  and an engine created after another has shut down continues the numbering instead
+  of starting again from `000001`. The `reset_uid_counter()` helper in
+  `radical.asyncflow.utils` is removed.
 - **A dependent no longer fails when its dependency has not registered yet** — an
   executable or prompt task registers only after its body returns, so in
   `b(a())` with an `a` whose body awaits, `b` registered first. The engine then did
