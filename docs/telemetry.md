@@ -127,6 +127,26 @@ Trace (one per session)
 
 The `asyncflow.workflow_id` attribute is stamped on every task span and every JSONL lifecycle event inside a scope. This makes per-workflow Gantt views, performance comparison across workflow types, and span filtering all possible without any post-processing join.
 
+### The `backend` attribute
+
+A task span's `backend` attribute names the backend the task is routed to: the one named by the task decorator's `backend=` argument or, for a task that names none, the default backend (the first one passed to `WorkflowEngine.create()`). See [Per-Task Backend Routing](multi_backend.md#per-task-backend-routing).
+
+```python
+compute = await LocalExecutionBackend(name="compute")
+ai = await LocalExecutionBackend(name="ai")
+flow = await WorkflowEngine.create(backend=[compute, ai])  # "compute" is the default
+
+
+@flow.function_task(backend="ai")
+async def infer(x): ...  # task span: backend="ai"
+
+
+@flow.function_task
+async def report(x): ...  # task span: backend="compute"
+```
+
+Every lifecycle event of the task, from `TaskCreated` to `TaskCompleted`, `TaskFailed` or `TaskCanceled`, carries the same name in its `backend` field. The task metrics (`tasks_submitted`, `tasks_completed`, `task_duration_seconds` and the others) take their `backend` label from these events, so they split by backend the same way. The session span's `backend` is `"rhapsody"`. Workflow and block spans have no `backend` attribute, because they run in AsyncFlow itself.
+
 ---
 
 ## Linking tasks to your own traces

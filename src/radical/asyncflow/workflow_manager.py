@@ -283,10 +283,13 @@ class WorkflowEngine:
     ) -> None:
         """Emit a telemetry event by name.
 
-        No-op when telemetry is disabled.
+        The event names the backend the task is routed to (its ``backend=``, else the
+        default backend) unless ``backend`` is given. No-op when telemetry is disabled.
         """
         if self._telemetry is None:
             return
+        if backend is None and task_id in self.components:
+            backend = self.components[task_id]["description"].get("target_backend")
         if "event_time" not in kwargs:
             kwargs["event_time"] = time.time()
         if workflow_id is not None:
@@ -1308,7 +1311,6 @@ class WorkflowEngine:
                         self._emit(
                             "TaskQueued",
                             task_id=comp_uid,
-                            backend=comp_desc.get("target_backend"),
                             workflow_id=comp_desc.get("workflow_id"),
                             attributes={
                                 "executable": comp_desc["_tel_executable"],
@@ -1417,7 +1419,6 @@ class WorkflowEngine:
                         self._emit(
                             "TaskSubmitted",
                             task_id=t["uid"],
-                            backend=t.get("target_backend"),
                             workflow_id=t.get("workflow_id"),
                             event_time=now,
                             attributes={
