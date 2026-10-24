@@ -4,7 +4,6 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
-import math
 import os
 import shlex
 import signal
@@ -55,6 +54,44 @@ def _debug_enabled(environ: Mapping[str, str] = os.environ) -> bool:
 _debug_typechecked = typeguard.typechecked if _debug_enabled() else (lambda f: f)
 
 
+class _ThreadSafeFuture:
+    """A component future as handed to a backend's ``service_callback``.
+
+    A service callback may resolve the future from a thread of its own (the
+    RADICAL-Pilot backend waits for the service in a daemon thread).  asyncio
+    futures are not thread-safe, and resolving one off the loop thread would not
+    wake the run loop, which sleeps until woken: ``set_result`` and
+    ``set_exception`` called from another thread are moved onto the loop thread.
+    Everything else is the future itself.
+    """
+
+    __slots__ = ("_fut", "_loop", "_loop_thread_id")
+
+    def __init__(self, fut: asyncio.Future, loop, loop_thread_id: int) -> None:
+        self._fut = fut
+        self._loop = loop
+        self._loop_thread_id = loop_thread_id
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._fut, name)
+
+    def set_result(self, result: Any) -> None:
+        self._resolve(self._fut.set_result, result)
+
+    def set_exception(self, exception: BaseException) -> None:
+        self._resolve(self._fut.set_exception, exception)
+
+    def _resolve(self, setter: Callable[[Any], None], value: Any) -> None:
+        if threading.get_ident() == self._loop_thread_id:
+            setter(value)
+        else:
+            self._loop.call_soon_threadsafe(self._resolve_pending, setter, value)
+
+    def _resolve_pending(self, setter: Callable[[Any], None], value: Any) -> None:
+        if not self._fut.done():  # it may have been resolved in the meantime
+            setter(value)
+
+
 class WorkflowEngine:
     """An asynchronous workflow manager that uses asyncio event loops and coroutines to
     manage and execute workflow components (blocks and/or tasks) within Directed Acyclic
@@ -79,8 +116,6 @@ class WorkflowEngine:
         implicit_data: bool = True,
         uid: Optional[str] = None,
         work_dir: Optional[str] = None,
-        *,
-        poll_timeout: float = 0.1,
     ) -> None:
         """Initialize the WorkflowEngine (sync part only).
 
@@ -93,11 +128,7 @@ class WorkflowEngine:
             uid: Optional unique identifier for this engine. Defaults to
                 ``asyncflow.session.{hex8}`` (UUID-based).
             work_dir: Working directory for output files (default: cwd)
-            poll_timeout: Seconds between safety scans of running components
-                (default: 0.1). See :meth:`create`.
         """
-        poll_timeout = self._check_poll_timeout(poll_timeout)
-
         # Get the current running loop - assume it exists
         self.loop = get_event_loop_or_raise("WorkflowEngine")
 
@@ -135,15 +166,13 @@ class WorkflowEngine:
 
         # Optimization: Track component state changes
         self._ready_queue = deque()
-        # uids of components whose futures resolved since the last run-loop
-        # pass; fed by the completion handlers, block/service done callbacks
-        # and the safety scan, drained by the run loop
-        self._completed = deque()
-        self._poll_timeout = poll_timeout
-        self._last_scan = 0.0  # 0.0: the first run-loop pass scans
         self._dependents_map = defaultdict(set)
         self._dependency_count = {}
-        self._component_change_event = asyncio.Event()
+        # The idle run loop awaits this future; _kick() resolves it when a
+        # component becomes ready.  None while the run loop is busy.
+        self._wakeup: Optional[asyncio.Future] = None
+        # Backend callbacks arriving on other threads are moved to this one.
+        self._loop_thread_id = threading.get_ident()
 
         # Block task registry: uid -> asyncio.Task for running execute_block coroutines
         self._block_asyncio_tasks: dict[str, asyncio.Task] = {}
@@ -415,8 +444,6 @@ class WorkflowEngine:
         implicit_data: bool = True,
         uid: Optional[str] = None,
         work_dir: Optional[str] = None,
-        *,
-        poll_timeout: float = 0.1,
     ) -> "WorkflowEngine":
         """Factory method to create and initialize a WorkflowEngine.
 
@@ -428,26 +455,13 @@ class WorkflowEngine:
             uid: Optional unique identifier for this engine. Defaults to
                 ``asyncflow.session.{hex8}`` (UUID-based).
             work_dir: Working directory for output files (default: cwd)
-            poll_timeout: Seconds between safety scans of running components
-                (default: 0.1).  Completions reported through the backend
-                callbacks wake the scheduler immediately; the scan catches
-                futures resolved outside them (e.g. from a backend thread),
-                so this is the maximum delay for noticing those.  Each scan
-                costs time proportional to the number of running
-                components; lower values trade idle CPU for that delay.
-                Must be finite and > 0.
 
         Returns:
             WorkflowEngine: Fully initialized workflow engine
 
-        Raises:
-            ValueError: If ``poll_timeout`` is not finite and > 0.
-
         Example:
             engine = await WorkflowEngine.create(dry_run=True)
         """
-        cls._check_poll_timeout(poll_timeout)
-
         # Setup and validate backend first
         validated_backend = await cls._setup_execution_backend(backend, dry_run)
 
@@ -458,22 +472,12 @@ class WorkflowEngine:
             implicit_data=implicit_data,
             uid=uid,
             work_dir=work_dir,
-            poll_timeout=poll_timeout,
         )
 
         # Initialize async components
         await instance._start_async_components()
 
         return instance
-
-    @staticmethod
-    def _check_poll_timeout(poll_timeout: float) -> float:
-        """Return ``poll_timeout`` if finite and > 0, else raise ValueError."""
-        if not (math.isfinite(poll_timeout) and poll_timeout > 0):
-            raise ValueError(
-                f"poll_timeout must be finite and > 0, got {poll_timeout!r}"
-            )
-        return poll_timeout
 
     @staticmethod
     async def _setup_execution_backend(backend, dry_run: bool):
@@ -507,18 +511,18 @@ class WorkflowEngine:
         for comp in comps:
             logger.debug(f"Started {comp} component")
 
-    def _update_dependency_tracking(self, comp_uid: str):
-        """Update dependency tracking structures for a component."""
-        dependencies = self.dependencies[comp_uid]
+    def _update_dependency_tracking(self, comp_uid: str) -> bool:
+        """Update dependency tracking structures for a component.
 
-        # Count unresolved dependencies
+        Returns:
+            bool: True if the component is ready (appended to the ready queue).
+        """
+        # A dependency is unresolved while its future is pending; _on_done
+        # releases the dependents registered here when it resolves.
         unresolved_count = 0
-        for dep in dependencies:
+        for dep in self.dependencies[comp_uid]:
             dep_uid = dep["uid"]
-            if (
-                dep_uid not in self.resolved
-                or not self.components[dep_uid]["future"].done()
-            ):
+            if not self.components[dep_uid]["future"].done():
                 unresolved_count += 1
                 # Track reverse dependencies
                 self._dependents_map[dep_uid].add(comp_uid)
@@ -528,6 +532,8 @@ class WorkflowEngine:
         # If no dependencies, add to ready queue
         if unresolved_count == 0:
             self._ready_queue.append(comp_uid)
+            return True
+        return False
 
     def _register_decorator(self, comp_type: str, task_type: Optional[str] = None):
         """Create a decorator factory for registering workflow components.
@@ -851,15 +857,15 @@ class WorkflowEngine:
             comp_desc["uid"],
         )
 
-        # Update dependency tracking
-        self._update_dependency_tracking(comp_desc["uid"])
-        self._component_change_event.set()
+        # Update dependency tracking; wake the run loop only if it is ready
+        if self._update_dependency_tracking(comp_desc["uid"]):
+            self._kick()
 
         # Block and service futures can resolve outside the completion handlers
         # (a user cancels a block; a service_callback sets the result): report
         # them via a done callback.  Plain tasks are reported by the handlers.
         if comp_type == BLOCK or comp_desc.get("is_service"):
-            comp_fut.add_done_callback(lambda _, u=comp_desc["uid"]: self._mark_done(u))
+            comp_fut.add_done_callback(lambda _, u=comp_desc["uid"]: self._on_done(u))
 
         # Track block membership: if this component is registered from within a block's
         # execution context, record it so it gets cancelled when the block is cancelled.
@@ -957,7 +963,7 @@ class WorkflowEngine:
                 result = fut.original_cancel(*args, **kwargs)
                 if result:
                     fut.state = "CANCELLED"
-                    self._mark_done(uid)
+                    self._on_done(uid)
                 return result
 
         return patched_cancel
@@ -1084,18 +1090,36 @@ class WorkflowEngine:
 
         reset_uid_counter()
 
-    def _mark_done(self, comp_uid: str) -> None:
-        """Queue a resolved component for the run loop and wake it."""
-        self._completed.append(comp_uid)
-        self._component_change_event.set()
+    def _kick(self) -> None:
+        """Wake the run loop if it is idle; a no-op while it is busy."""
+        wakeup = self._wakeup
+        if wakeup is not None and not wakeup.done():
+            wakeup.set_result(None)
 
-    def _notify_dependents(self, comp_uid: str):
-        """Notify dependents that a component has completed and update ready queue."""
-        for dependent_uid in self._dependents_map[comp_uid]:
+    def _on_done(self, comp_uid: str) -> None:
+        """Release the dependents of a resolved component right away.
+
+        Called by the completion handlers, the local cancel path, and the done callbacks
+        of blocks and services.  Idempotent: dependents are released on the first call
+        only.
+        """
+        self.running.discard(comp_uid)
+        if self._notify_dependents(comp_uid):
+            self._kick()
+
+    def _notify_dependents(self, comp_uid: str) -> bool:
+        """Notify dependents that a component has completed and update ready queue.
+
+        Returns:
+            bool: True if any dependent became ready.
+        """
+        became_ready = False
+        for dependent_uid in self._dependents_map.pop(comp_uid, ()):
             if dependent_uid in self._dependency_count:
                 self._dependency_count[dependent_uid] -= 1
                 if self._dependency_count[dependent_uid] == 0:
                     self._ready_queue.append(dependent_uid)
+                    became_ready = True
                     dep_comp = self.components.get(dependent_uid)
                     if (
                         self._telemetry is not None
@@ -1114,9 +1138,8 @@ class WorkflowEngine:
                         )
 
         # Clean up
-        del self._dependents_map[comp_uid]
-        if comp_uid in self._dependency_count:
-            del self._dependency_count[comp_uid]
+        self._dependency_count.pop(comp_uid, None)
+        return became_ready
 
     def _remove_member(self, block_uid: str, task_uid: str) -> None:
         """Remove a completed task from its parent block's member set."""
@@ -1202,11 +1225,10 @@ class WorkflowEngine:
 
         Note:
             - Runs indefinitely until cancelled or shutdown is signaled
-            - Event-driven: completion handlers and block/service done
-              callbacks queue resolved uids in ``_completed`` and set the
-              change event; the loop drains that queue
-            - A safety scan of the running set every ``poll_timeout``
-              catches futures resolved outside the completion handlers
+            - Completion handlers release dependents directly (``_on_done``)
+              and wake the loop only when a component became ready
+            - When the ready queue is empty the loop sleeps on a single
+              future: no timeout, no polling
             - Handles both implicit and explicit data dependencies
             - Trigger internal shutdown on loop failure
         """
@@ -1267,9 +1289,8 @@ class WorkflowEngine:
                                 chained_exception,
                             )
 
-                        # Common cleanup
+                        # Common cleanup (the handlers released the dependents)
                         self.resolved.add(comp_uid)
-                        self._notify_dependents(comp_uid)
                         continue
 
                     # Handle data dependencies for tasks
@@ -1359,7 +1380,6 @@ class WorkflowEngine:
                             comp_desc, self.components[comp_uid]["future"], e
                         )
                         self.resolved.add(comp_uid)
-                        self._notify_dependents(comp_uid)
                         continue
                     except asyncio.CancelledError:
                         # Only a cancelled future can raise this here:
@@ -1371,7 +1391,6 @@ class WorkflowEngine:
                             comp_desc, self.components[comp_uid]["future"]
                         )
                         self.resolved.add(comp_uid)
-                        self._notify_dependents(comp_uid)
                         continue
 
                     to_submit.append(comp_desc)
@@ -1402,69 +1421,23 @@ class WorkflowEngine:
                     await self.submit(to_submit)
                     for comp_desc in to_submit:
                         comp_uid = comp_desc["uid"]
-                        self.running.add(comp_uid)
                         self.resolved.add(comp_uid)
-
-                # Safety scan: every poll_timeout, busy or idle, pick up running
-                # components whose futures resolved without a _mark_done call
-                # (e.g. set from a backend thread).
-                now = self.loop.time()
-                if now - self._last_scan >= self._poll_timeout:
-                    self._last_scan = now
-                    for comp_uid in list(self.running):
-                        if self.components[comp_uid]["future"].done():
-                            self._completed.append(comp_uid)
-
-                # Notify dependents of components resolved since the last pass.
-                # Only running components count: the others were resolved and
-                # notified by this loop directly.  Duplicates are skipped.
-                while self._completed:
-                    comp_uid = self._completed.popleft()
-                    if (
-                        comp_uid in self.running
-                        and self.components[comp_uid]["future"].done()
-                    ):
-                        self.running.discard(comp_uid)
-                        self._notify_dependents(comp_uid)
+                        # A backend may complete a task inside submit_tasks;
+                        # its handler has already released the dependents.
+                        if not self.components[comp_uid]["future"].done():
+                            self.running.add(comp_uid)
 
                 if self._ready_queue:
                     # More work queued: yield to other coroutines, then continue.
                     await asyncio.sleep(0)
                 else:
+                    # Idle: sleep until _kick() (a component became ready) or
+                    # shutdown.  No timeout and nothing to poll.
+                    self._wakeup = self.loop.create_future()
                     try:
-                        # Create tasks for event waiting
-                        event_task = asyncio.create_task(
-                            self._component_change_event.wait(),
-                            name="component-event-task",
-                        )
-                        shutdown_task = asyncio.create_task(
-                            self._shutdown_event.wait(), name="shutdown-event-task"
-                        )
-
-                        done, pending = await asyncio.wait(
-                            [event_task, shutdown_task],
-                            return_when=asyncio.FIRST_COMPLETED,
-                            # wake no later than the next safety scan is due;
-                            # with nothing running there is nothing to scan
-                            timeout=max(
-                                0.0,
-                                self._last_scan + self._poll_timeout - self.loop.time(),
-                            )
-                            if self.running
-                            else None,
-                        )
-                        # Cancel any pending tasks to clean up
-                        for task in pending:
-                            task.cancel()
-                        # Clear component change event if it was set
-                        if event_task in done:
-                            self._component_change_event.clear()
-                    except asyncio.CancelledError:
-                        # If we get cancelled, make sure to clean up our tasks
-                        for task in [event_task, shutdown_task]:
-                            if not task.done():
-                                task.cancel()
-                        raise
+                        await self._wakeup
+                    finally:
+                        self._wakeup = None
 
             except asyncio.CancelledError:
                 logger.debug("Run component stopped")
@@ -1661,8 +1634,9 @@ class WorkflowEngine:
         """Handles successful completion of a component (task or block).
 
         Sets the result of the component's future: the function's return value for
-        function tasks and blocks, or stdout for executable and prompt tasks. Logs a
-        warning if the future is already resolved.
+        function tasks and blocks, or stdout for executable and prompt tasks. If the
+        future is already resolved (e.g. outside the engine), logs a warning and
+        releases the component's dependents.
 
         Args:
             component (dict): Completed component descriptor containing
@@ -1678,12 +1652,15 @@ class WorkflowEngine:
             else:
                 component_fut.set_result(component["stdout"])
             component_fut.state = "DONE"
-            self._mark_done(component["uid"])
+            self._on_done(component["uid"])
         else:
+            # Resolved outside the engine (e.g. set_result on the future):
+            # release its dependents now that the backend reported it.
             logger.warning(
                 "Attempted to handle an already finished component "
                 f'"{component["uid"]}"'
             )
+            self._on_done(component["uid"])
 
     def handle_component_failure(
         self,
@@ -1695,7 +1672,8 @@ class WorkflowEngine:
 
         Marks the component's future as failed by setting an exception derived from
         either a provided override error or the component's own recorded
-        error/stderr. Logs a warning if the future is already resolved.
+        error/stderr. If the future is already resolved (e.g. outside the engine),
+        logs a warning and releases the component's dependents.
 
         Args:
             component (dict): Dictionary with component details, including:
@@ -1712,6 +1690,7 @@ class WorkflowEngine:
             logger.warning(
                 f'Attempted to handle an already failed component "{component["uid"]}"'
             )
+            self._on_done(component["uid"])  # it may have been resolved outside
             return
 
         # Determine the appropriate exception to set
@@ -1740,14 +1719,17 @@ class WorkflowEngine:
 
         component_fut.set_exception(exception)
         component_fut.state = "FAILED"
-        self._mark_done(component["uid"])
+        self._on_done(component["uid"])
 
     def handle_component_cancellation(
         self, component: dict, component_fut: asyncio.Future
     ):
         """Handle cancellation of a component (task or block)."""
         if component_fut.done():
-            return  # already resolved — idempotent, nothing to do
+            # Already resolved, maybe outside the engine: release its dependents
+            # (idempotent).
+            self._on_done(component["uid"])
+            return
 
         # Task futures have a patched cancel() that routes to the backend; restore
         # the original before cancelling. Block futures were never patched.
@@ -1756,7 +1738,7 @@ class WorkflowEngine:
             component_fut.cancel = original_cancel
         result = component_fut.cancel()
         component_fut.state = "CANCELLED"
-        self._mark_done(component["uid"])
+        self._on_done(component["uid"])
         return result
 
     @_debug_typechecked
@@ -1775,7 +1757,8 @@ class WorkflowEngine:
             state (str): New state of the task.
             service_callback (Optional[Callable], optional): Callback function
                 for service tasks. Must be daemon-threaded to avoid blocking.
-                Defaults to None.
+                It receives the component future, which it may resolve from
+                its own thread. Defaults to None.
 
         Returns:
             None
@@ -1803,6 +1786,15 @@ class WorkflowEngine:
                             future.set_exception(e)
                     threading.Thread(target=wait_and_set, daemon=True).start()
         """
+        if threading.get_ident() != self._loop_thread_id:
+            # asyncio futures are not thread-safe, and a callback from another
+            # thread would not wake the loop: finish on the loop thread, which
+            # call_soon_threadsafe also wakes up immediately.
+            self.loop.call_soon_threadsafe(
+                self.task_callbacks, task, state, service_callback
+            )
+            return
+
         if (
             state not in self.task_states_map.terminal_states
             and state != self.task_states_map.RUNNING
@@ -1829,8 +1821,13 @@ class WorkflowEngine:
 
         if service_callback:
             # service tasks are marked done by a backend specific
-            # mechanism that are provided during the callbacks only
-            service_callback(task_fut, task_obj, state)
+            # mechanism that are provided during the callbacks only;
+            # it may resolve the future from another thread
+            service_callback(
+                _ThreadSafeFuture(task_fut, self.loop, self._loop_thread_id),
+                task_obj,
+                state,
+            )
 
         uid = task_dct["uid"]
 
@@ -1936,6 +1933,7 @@ class WorkflowEngine:
         logger.info("Initiating shutdown")
         # Signal components to exit
         self._shutdown_event.set()
+        self._kick()
 
         # cancel workflow futures (tasks and blocks)
         for comp in self.components.values():
