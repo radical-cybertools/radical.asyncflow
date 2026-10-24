@@ -3,7 +3,9 @@ releases its dependents promptly, also while the run loop is kept busy.
 
 Each path releases dependents through the engine's ``_on_done``.  Nothing
 polls: a path that skipped it would leave its dependents waiting forever,
-so every wait in these tests is bounded.
+so every wait in these tests is bounded.  A task future resolved outside the
+engine is the exception: its dependents are released when the backend reports
+the task.
 """
 
 import asyncio
@@ -20,7 +22,7 @@ from radical.asyncflow import NoopExecutionBackend, WorkflowEngine
 class _Backend(NoopExecutionBackend):
     """Noop backend with task kinds selected by name prefix.
 
-    - ``park*``: accepted, never reported (stays running)
+    - ``park*``: accepted, never reported (stays running); kept in ``parked``
     - ``svc*``: reported RUNNING with a service_callback resolving the future
     - ``fail*``: reported FAILED
     - a submit containing a ``park_slow*`` task sets ``slow_started`` and
@@ -31,6 +33,7 @@ class _Backend(NoopExecutionBackend):
         super().__init__()
         self.slow = 0.0
         self.slow_started = asyncio.Event()
+        self.parked = {}  # uid -> task
 
     async def submit_tasks(self, tasks):
         if self.slow and any(t["name"].startswith("park_slow") for t in tasks):
@@ -39,6 +42,7 @@ class _Backend(NoopExecutionBackend):
         rest = []
         for t in tasks:
             if t["name"].startswith("park"):
+                self.parked[t["uid"]] = t
                 continue
             if t["name"].startswith("svc"):
 
@@ -82,6 +86,36 @@ class _ThreadBackend(NoopExecutionBackend):
 
     async def shutdown(self):
         self.queue.put(None)
+
+
+class _ServiceThreadBackend(NoopExecutionBackend):
+    """Reports each service RUNNING with a service_callback that resolves the future
+    from a daemon thread ``delay`` seconds later, as the RADICAL-Pilot backend's
+    service_ready_callback does; other tasks complete at once."""
+
+    def __init__(self, delay, outcome="result"):
+        super().__init__()
+        self.delay = delay
+        self.outcome = outcome
+
+    def _service_ready(self, fut, task, state):
+        def wait_and_set():
+            time.sleep(self.delay)
+            if self.outcome == "result":
+                fut.set_result("ready")
+            else:
+                fut.set_exception(RuntimeError("service failed to start"))
+
+        threading.Thread(target=wait_and_set, daemon=True).start()
+
+    async def submit_tasks(self, tasks):
+        rest = []
+        for t in tasks:
+            if t.get("is_service"):
+                self._callback_func(t, "RUNNING", service_callback=self._service_ready)
+            else:
+                rest.append(t)
+        await super().submit_tasks(rest)
 
 
 @pytest_asyncio.fixture
@@ -218,6 +252,32 @@ class TestCompletionPaths:
         await _resolves_within(d, 0.5)
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("state", ["DONE", "FAILED", "CANCELED"])
+    async def test_task_resolved_outside_engine(self, make_flow, state):
+        """A running task's future resolved outside the engine releases its dependents
+        when the backend reports the task, whatever the report."""
+        flow, backend = await make_flow()
+
+        @flow.function_task
+        async def park():
+            return 1
+
+        @flow.function_task
+        async def dep(x):
+            return 2
+
+        p = park()
+        d = dep(p)
+        await _until(lambda: hasattr(p, "task") and p.task["uid"] in backend.parked)
+        p.set_result("set outside the engine")
+        task = backend.parked.pop(p.task["uid"])
+        task["exception"] = RuntimeError("late")  # read for FAILED only
+        backend._callback_func(task, state)
+        await _resolves_within(d, 0.5)
+        assert d.exception() is None
+        assert p.task["uid"] not in flow.running
+
+    @pytest.mark.asyncio
     async def test_running_set_drains(self, make_flow):
         flow, _ = await make_flow()
 
@@ -290,6 +350,42 @@ class TestBackendThread:
             elapsed = time.perf_counter() - start
             # ~0.1 s expected for 10 x 10 ms; generous margin for slow runners
             assert elapsed < 0.5, f"10-step chain took {elapsed:.3f}s"
+        finally:
+            await flow.shutdown()
+
+
+class TestServiceThread:
+    """A service_callback may resolve the service future from its own thread."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("outcome", ["result", "exception"])
+    async def test_resolved_from_callback_thread(self, outcome):
+        """The engine is otherwise idle, so nothing else wakes the run loop: a future
+        resolved off the loop thread would wait for the timeout."""
+        flow = await WorkflowEngine.create(
+            backend=_ServiceThreadBackend(delay=0.02, outcome=outcome)
+        )
+        try:
+
+            @flow.function_task(service=True)
+            async def svc():
+                return 1
+
+            @flow.function_task
+            async def dep(x):
+                return 2
+
+            start = time.perf_counter()
+            s = svc()
+            d = dep(s)
+            await _resolves_within(d, 2.0)
+            elapsed = time.perf_counter() - start
+            # ~0.02 s expected; a missed wake-up shows up as the 2 s timeout
+            assert elapsed < 1.0, f"service seen after {elapsed:.3f}s"
+            if outcome == "result":
+                assert s.result() == "ready"
+            else:
+                assert isinstance(s.exception(), RuntimeError)
         finally:
             await flow.shutdown()
 

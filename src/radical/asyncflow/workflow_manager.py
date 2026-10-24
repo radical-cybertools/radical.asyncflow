@@ -54,6 +54,44 @@ def _debug_enabled(environ: Mapping[str, str] = os.environ) -> bool:
 _debug_typechecked = typeguard.typechecked if _debug_enabled() else (lambda f: f)
 
 
+class _ThreadSafeFuture:
+    """A component future as handed to a backend's ``service_callback``.
+
+    A service callback may resolve the future from a thread of its own (the
+    RADICAL-Pilot backend waits for the service in a daemon thread).  asyncio
+    futures are not thread-safe, and resolving one off the loop thread would not
+    wake the run loop, which sleeps until woken: ``set_result`` and
+    ``set_exception`` called from another thread are moved onto the loop thread.
+    Everything else is the future itself.
+    """
+
+    __slots__ = ("_fut", "_loop", "_loop_thread_id")
+
+    def __init__(self, fut: asyncio.Future, loop, loop_thread_id: int) -> None:
+        self._fut = fut
+        self._loop = loop
+        self._loop_thread_id = loop_thread_id
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._fut, name)
+
+    def set_result(self, result: Any) -> None:
+        self._resolve(self._fut.set_result, result)
+
+    def set_exception(self, exception: BaseException) -> None:
+        self._resolve(self._fut.set_exception, exception)
+
+    def _resolve(self, setter: Callable[[Any], None], value: Any) -> None:
+        if threading.get_ident() == self._loop_thread_id:
+            setter(value)
+        else:
+            self._loop.call_soon_threadsafe(self._resolve_pending, setter, value)
+
+    def _resolve_pending(self, setter: Callable[[Any], None], value: Any) -> None:
+        if not self._fut.done():  # it may have been resolved in the meantime
+            setter(value)
+
+
 class WorkflowEngine:
     """An asynchronous workflow manager that uses asyncio event loops and coroutines to
     manage and execute workflow components (blocks and/or tasks) within Directed Acyclic
@@ -1596,8 +1634,9 @@ class WorkflowEngine:
         """Handles successful completion of a component (task or block).
 
         Sets the result of the component's future: the function's return value for
-        function tasks and blocks, or stdout for executable and prompt tasks. Logs a
-        warning if the future is already resolved.
+        function tasks and blocks, or stdout for executable and prompt tasks. If the
+        future is already resolved (e.g. outside the engine), logs a warning and
+        releases the component's dependents.
 
         Args:
             component (dict): Completed component descriptor containing
@@ -1615,10 +1654,13 @@ class WorkflowEngine:
             component_fut.state = "DONE"
             self._on_done(component["uid"])
         else:
+            # Resolved outside the engine (e.g. set_result on the future):
+            # release its dependents now that the backend reported it.
             logger.warning(
                 "Attempted to handle an already finished component "
                 f'"{component["uid"]}"'
             )
+            self._on_done(component["uid"])
 
     def handle_component_failure(
         self,
@@ -1630,7 +1672,8 @@ class WorkflowEngine:
 
         Marks the component's future as failed by setting an exception derived from
         either a provided override error or the component's own recorded
-        error/stderr. Logs a warning if the future is already resolved.
+        error/stderr. If the future is already resolved (e.g. outside the engine),
+        logs a warning and releases the component's dependents.
 
         Args:
             component (dict): Dictionary with component details, including:
@@ -1647,6 +1690,7 @@ class WorkflowEngine:
             logger.warning(
                 f'Attempted to handle an already failed component "{component["uid"]}"'
             )
+            self._on_done(component["uid"])  # it may have been resolved outside
             return
 
         # Determine the appropriate exception to set
@@ -1682,7 +1726,10 @@ class WorkflowEngine:
     ):
         """Handle cancellation of a component (task or block)."""
         if component_fut.done():
-            return  # already resolved — idempotent, nothing to do
+            # Already resolved, maybe outside the engine: release its dependents
+            # (idempotent).
+            self._on_done(component["uid"])
+            return
 
         # Task futures have a patched cancel() that routes to the backend; restore
         # the original before cancelling. Block futures were never patched.
@@ -1710,7 +1757,8 @@ class WorkflowEngine:
             state (str): New state of the task.
             service_callback (Optional[Callable], optional): Callback function
                 for service tasks. Must be daemon-threaded to avoid blocking.
-                Defaults to None.
+                It receives the component future, which it may resolve from
+                its own thread. Defaults to None.
 
         Returns:
             None
@@ -1773,8 +1821,13 @@ class WorkflowEngine:
 
         if service_callback:
             # service tasks are marked done by a backend specific
-            # mechanism that are provided during the callbacks only
-            service_callback(task_fut, task_obj, state)
+            # mechanism that are provided during the callbacks only;
+            # it may resolve the future from another thread
+            service_callback(
+                _ThreadSafeFuture(task_fut, self.loop, self._loop_thread_id),
+                task_obj,
+                state,
+            )
 
         uid = task_dct["uid"]
 
