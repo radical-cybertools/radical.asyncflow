@@ -91,6 +91,7 @@ scaled = scale(x, factor=x)
 | Plain values (`42`, `"text"`, objects) | No | Passed through unchanged. |
 | Futures **nested inside containers**: `f([a, b])`, `f(cfg={"x": a})` | **No** | The task does not wait for them and receives the raw future objects. Pass each future as its own argument instead. |
 | Plain `asyncio` futures or tasks, **not** returned by a task or block | **Rejected** | The call raises a `TypeError` naming the argument. Await the future and pass its result, or await it inside a block and pass the block's future. |
+| Futures returned by a task or block of **another** engine | **Rejected** | The call raises a `TypeError` naming the argument, whether or not that task or block has registered or finished. This engine never runs the other engine's component, so it cannot wait for it. Await the future and pass its result, or await it inside a block and pass the block's future. |
 | Futures awaited **inside** a task body | No | They don't order scheduling; awaiting just blocks that task while it runs. |
 
 !!! warning

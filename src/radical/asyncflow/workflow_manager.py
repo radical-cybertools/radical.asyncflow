@@ -646,11 +646,14 @@ class WorkflowEngine:
 
         @wraps(func)
         def wrapper(*args, **kwargs):
-            self._reject_plain_futures(func, args, kwargs)
+            self._reject_foreign_futures(func, args, kwargs)
 
             # Create async future - we only support async
             comp_fut = asyncio.Future()
             comp_fut.state = "PENDING"
+            # Marks the future as a dependency for this engine only, also before
+            # it registers (see `_reject_foreign_futures`).
+            comp_fut._engine = self
 
             # Extract call-time workflow_id before storing kwargs or calling the function
             explicit_workflow_id = kwargs.pop("workflow_id", None)
@@ -989,13 +992,14 @@ class WorkflowEngine:
         uid = get_next_uid()
         return f"{prefix}.{uid}"
 
-    def _reject_plain_futures(self, func: Callable, args, kwargs) -> None:
+    def _reject_foreign_futures(self, func: Callable, args, kwargs) -> None:
         """Raises TypeError for an asyncio future in args or kwargs that is not the
-        future of a task or block.
+        future of a task or block of this engine.
 
         Only those are dependencies (see `_detect_dependencies`): a plain Future or
-        Task has no component to wait for. The future of a task or block always has
-        `_registration`, and its `task` or `block` attribute once registered.
+        Task has no component to wait for, and the component of another engine's
+        future is never resolved by this engine. `wrapper` sets `_engine` on the
+        future of a task or block when it is created, before it registers.
 
         Args:
             func (Callable): The decorated function, to name a positional argument.
@@ -1003,15 +1007,14 @@ class WorkflowEngine:
             kwargs (dict): Keyword arguments of the call.
 
         Raises:
-            TypeError: If an argument is a plain asyncio Future or Task.
+            TypeError: If an argument is a plain asyncio Future or Task, or the
+                future of a task or block of another engine.
         """
         for key, arg in (*enumerate(args), *kwargs.items()):
-            if (
-                not isinstance(arg, asyncio.Future)
-                or hasattr(arg, "_registration")
-                or hasattr(arg, TASK)
-                or hasattr(arg, BLOCK)
-            ):
+            if not isinstance(arg, asyncio.Future):
+                continue
+            engine = getattr(arg, "_engine", None)
+            if engine is self:
                 continue
             if isinstance(key, int):
                 # Name a positional argument after its parameter, if it has one.
@@ -1027,11 +1030,20 @@ class WorkflowEngine:
                 )
             else:
                 name = f"argument '{key}'"
-            kind = "Task" if isinstance(arg, asyncio.Task) else "Future"
+            if engine is None:
+                kind = "Task" if isinstance(arg, asyncio.Task) else "Future"
+                problem = (
+                    f"is a plain asyncio {kind}, not the future of a task or block; "
+                    "only those are dependencies"
+                )
+            else:
+                problem = (
+                    f"is the future of {arg.uid} of another WorkflowEngine; only the "
+                    "futures of this engine's tasks and blocks are dependencies"
+                )
             raise TypeError(
-                f"{name} is a plain asyncio {kind}, not the future of a task or block; "
-                "only those are dependencies. Await it and pass its result, or await "
-                "it in a block and pass the block's future."
+                f"{name} {problem}. Await it and pass its result, or await it in a "
+                "block and pass the block's future."
             )
 
     def _unregistered_dependencies(self, args, kwargs) -> list:

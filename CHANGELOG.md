@@ -58,6 +58,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   a `TypeError` that names the argument: await the future and pass its result, or
   await it in a block and pass the block's future. "What does not count as a
   dependency" in `docs/dependencies.md` says so.
+- **A future of another engine passed to a task or block is rejected with a clear
+  error** — calling a task or block of one `WorkflowEngine` with the future of a task
+  or block of another, for example `f2_task(fa)` with `fa = f1_task()`, made the
+  engine count `fa` as a dependency it never resolves, so `f2_task` never ran and
+  awaiting it hung, even after `fa` had finished. Only the futures of the engine's own
+  tasks and blocks are dependencies, so the call now raises a `TypeError` that names
+  the argument, as for a plain `asyncio` future. "What does not count as a
+  dependency" in `docs/dependencies.md` says so.
 
 ### Added
 
