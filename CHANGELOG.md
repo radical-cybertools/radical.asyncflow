@@ -42,6 +42,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   before. A failed or cancelled dependency propagates as `DependencyFailureError` or
   cancellation, also when the dependency's own registration failed, for example
   because its body raised or returned no command.
+- **A registration that fails part way no longer leaves the component half
+  registered** — when registering a task or block failed after the engine had stored
+  it, for example on a plain `asyncio` task passed as an argument, its future carried
+  the exception but kept `future.task` (or `future.block`), and the component stayed
+  in `flow.components`. A dependent called with that future registered against it and
+  waited forever. The engine now undoes everything it stored for the component, so a
+  dependent fails with `DependencyFailureError`, as for any other registration that
+  fails.
 
 ### Added
 
