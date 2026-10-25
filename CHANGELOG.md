@@ -42,6 +42,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   before. A failed or cancelled dependency propagates as `DependencyFailureError` or
   cancellation, also when the dependency's own registration failed, for example
   because its body raised or returned no command.
+- **`shutdown()` cancels components that have not registered yet** — it cancelled
+  only registered components, so an executable or prompt task whose body was still
+  running, or a dependent waiting for its dependencies to register, kept a pending
+  future, and awaiting it, or any future depending on it, hung after shutdown. A body
+  that finished after shutdown then registered into the shut-down engine. Shutdown
+  now cancels their registration and their futures, so awaiting them raises
+  `CancelledError`, and a body that outlives shutdown, or a call made after it, does
+  not register.
 
 ### Added
 

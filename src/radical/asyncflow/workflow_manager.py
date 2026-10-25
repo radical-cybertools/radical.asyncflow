@@ -118,6 +118,9 @@ class WorkflowEngine:
         self._block_asyncio_tasks: dict[str, asyncio.Task] = {}
         # Block member registry: block_uid -> set of component UIDs registered within it
         self._block_members: dict[str, set[str]] = {}
+        # Futures of components whose registration task has not finished, which
+        # self.components does not hold yet; shutdown cancels them
+        self._pending_registrations: set[asyncio.Future] = set()
 
         self.task_states_map = self.backend.get_task_states_map()
 
@@ -700,6 +703,13 @@ class WorkflowEngine:
                                     comp_fut, func.__name__, unregistered
                                 )
                                 return
+                        # A body that outlives shutdown, or a call made after it,
+                        # does not register into the shut-down engine.
+                        if self._shutdown_event.is_set():
+                            if not comp_fut.done():
+                                comp_fut.cancel()
+                                comp_fut.state = "CANCELLED"
+                            return
                         self._register_component(
                             comp_fut, comp_type, comp_desc, task_type
                         )
@@ -721,6 +731,10 @@ class WorkflowEngine:
                 # registration fails, and dropped once registration succeeds.
                 comp_fut._registration = asyncio.create_task(
                     async_wrapper(), name=func.__name__
+                )
+                self._pending_registrations.add(comp_fut)
+                comp_fut._registration.add_done_callback(
+                    lambda _: self._pending_registrations.discard(comp_fut)
                 )
             else:
                 # Raise error for non-async functions since we only support async
@@ -1915,7 +1929,8 @@ class WorkflowEngine:
             submitting workflows.
             3. Waits for the cancellation and completion of these tasks,
             with a timeout of 5 seconds.
-            4. Cancel workflow tasks.
+            4. Cancel workflow tasks, including those that have not
+            registered yet.
             5. Logs a warning if the tasks do not complete within the timeout
             period.
             6. Shuts down the backend using an executor to avoid blocking the
@@ -1943,6 +1958,16 @@ class WorkflowEngine:
             future = comp["future"]
             if not future.done():
                 self.handle_component_cancellation(comp["description"], future)
+
+        # cancel the futures of components that have not registered yet: an
+        # executable or prompt task whose body is still running, or a dependent
+        # waiting for its dependencies to register
+        for future in self._pending_registrations:
+            if future._registration is not None:
+                future._registration.cancel()
+            if not future.done():
+                future.cancel()
+                future.state = "CANCELLED"
 
         # Cancel internal components task
         if not self._run_task.done():

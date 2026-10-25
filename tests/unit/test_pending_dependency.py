@@ -213,3 +213,55 @@ async def test_dependent_waits_for_every_registration(flow):
     with pytest.raises(asyncio.CancelledError):
         await asyncio.wait_for(fb, timeout=5)
     assert fb.cancelled()
+
+
+@pytest.mark.asyncio
+async def test_shutdown_cancels_pending_registrations():
+    engine = await WorkflowEngine.create(backend=NoopExecutionBackend())
+    started = asyncio.Event()
+
+    @engine.executable_task
+    async def slow():
+        started.set()
+        await asyncio.sleep(60)  # still running at shutdown, so slow never registers
+        return "echo hi"
+
+    b = _identity(engine.function_task)
+
+    fa = slow()
+    fb = b(fa)  # waits for slow's registration
+    await asyncio.wait_for(started.wait(), timeout=5)
+    await engine.shutdown()
+
+    for fut in (fa, fb):
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(fut, timeout=5)
+        assert fut.cancelled()
+
+
+@pytest.mark.asyncio
+async def test_body_finishing_after_shutdown_does_not_register():
+    engine = await WorkflowEngine.create(backend=NoopExecutionBackend())
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    @engine.executable_task
+    async def late():
+        started.set()
+        while not release.is_set():
+            try:
+                await release.wait()
+            except asyncio.CancelledError:
+                pass  # ignores shutdown's cancellation and finishes after it
+        return "echo hi"
+
+    fut = late()
+    registration = fut._registration
+    await asyncio.wait_for(started.wait(), timeout=5)
+    await engine.shutdown()
+    release.set()
+    await asyncio.wait([registration], timeout=5)
+
+    assert registration.done()
+    assert fut.cancelled()
+    assert fut.uid not in engine.components
