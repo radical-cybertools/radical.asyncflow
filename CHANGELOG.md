@@ -50,6 +50,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   waited forever. The engine now undoes everything it stored for the component, so a
   dependent fails with `DependencyFailureError`, as for any other registration that
   fails.
+- **A plain `asyncio` future passed to a task or block is rejected with a clear
+  error** — calling a task or block with a plain `asyncio` Future or Task, for example
+  `a(asyncio.ensure_future(coro()))` or `a(x=loop.create_future())`, made `a` fail
+  with `TypeError: '_asyncio.Task' object is not subscriptable`. Only the futures
+  returned by the engine's tasks and blocks are dependencies, so the call now raises
+  a `TypeError` that names the argument: await the future and pass its result, or
+  await it in a block and pass the block's future. "What does not count as a
+  dependency" in `docs/dependencies.md` says so.
 
 ### Added
 

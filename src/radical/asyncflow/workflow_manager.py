@@ -646,6 +646,8 @@ class WorkflowEngine:
 
         @wraps(func)
         def wrapper(*args, **kwargs):
+            self._reject_plain_futures(func, args, kwargs)
+
             # Create async future - we only support async
             comp_fut = asyncio.Future()
             comp_fut.state = "PENDING"
@@ -986,6 +988,51 @@ class WorkflowEngine:
         """
         uid = get_next_uid()
         return f"{prefix}.{uid}"
+
+    def _reject_plain_futures(self, func: Callable, args, kwargs) -> None:
+        """Raises TypeError for an asyncio future in args or kwargs that is not the
+        future of a task or block.
+
+        Only those are dependencies (see `_detect_dependencies`): a plain Future or
+        Task has no component to wait for. The future of a task or block always has
+        `_registration`, and its `task` or `block` attribute once registered.
+
+        Args:
+            func (Callable): The decorated function, to name a positional argument.
+            args (tuple): Positional arguments of the call.
+            kwargs (dict): Keyword arguments of the call.
+
+        Raises:
+            TypeError: If an argument is a plain asyncio Future or Task.
+        """
+        for key, arg in (*enumerate(args), *kwargs.items()):
+            if (
+                not isinstance(arg, asyncio.Future)
+                or hasattr(arg, "_registration")
+                or hasattr(arg, TASK)
+                or hasattr(arg, BLOCK)
+            ):
+                continue
+            if isinstance(key, int):
+                # Name a positional argument after its parameter, if it has one.
+                params = [
+                    p.name
+                    for p in inspect.signature(func).parameters.values()
+                    if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
+                ]
+                name = (
+                    f"argument '{params[key]}'"
+                    if key < len(params)
+                    else f"positional argument {key + 1}"
+                )
+            else:
+                name = f"argument '{key}'"
+            kind = "Task" if isinstance(arg, asyncio.Task) else "Future"
+            raise TypeError(
+                f"{name} is a plain asyncio {kind}, not the future of a task or block; "
+                "only those are dependencies. Await it and pass its result, or await "
+                "it in a block and pass the block's future."
+            )
 
     def _unregistered_dependencies(self, args, kwargs) -> list:
         """Returns the futures in args and kwargs whose component has not registered.
