@@ -127,6 +127,63 @@ Trace (one per session)
 
 The `asyncflow.workflow_id` attribute is stamped on every task span and every JSONL lifecycle event inside a scope. This makes per-workflow Gantt views, performance comparison across workflow types, and span filtering all possible without any post-processing join.
 
+### The `backend` attribute
+
+A task span's `backend` attribute names the backend the task is routed to: the one named by the task decorator's `backend=` argument or, for a task that names none, the default backend (the first one passed to `WorkflowEngine.create()`). See [Per-Task Backend Routing](multi_backend.md#per-task-backend-routing).
+
+```python
+compute = await LocalExecutionBackend(name="compute")
+ai = await LocalExecutionBackend(name="ai")
+flow = await WorkflowEngine.create(backend=[compute, ai])  # "compute" is the default
+
+
+@flow.function_task(backend="ai")
+async def infer(x): ...  # task span: backend="ai"
+
+
+@flow.function_task
+async def report(x): ...  # task span: backend="compute"
+```
+
+Every lifecycle event of the task, from `TaskCreated` to `TaskCompleted`, `TaskFailed` or `TaskCanceled`, carries the same name in its `backend` field. The task metrics (`tasks_submitted`, `tasks_completed`, `task_duration_seconds` and the others) take their `backend` label from these events, so they split by backend the same way. The session span's `backend` is `"rhapsody"`. Workflow and block spans have no `backend` attribute, because they run in AsyncFlow itself.
+
+---
+
+## Linking tasks to your own traces
+
+The OTel span that is current when your code calls a task becomes the parent of that task's span, and the task span joins its trace. This holds for a span from your own `TracerProvider`, even one in a separate trace from AsyncFlow's session. Put the identities of your own layer, such as an agent's thread, node and tool-call id, on that span:
+
+```python
+from opentelemetry.sdk.trace import TracerProvider
+
+provider = TracerProvider()  # add your own span processors
+tracer = provider.get_tracer("my-agent")
+
+with tracer.start_as_current_span(
+    "tool_call",
+    attributes={"thread_id": "t1", "node": "simulate", "tool_call_id": "call_2"},
+):
+    fut = simulate(2)  # the task span is a child of "tool_call"
+result = await fut
+```
+
+Only the call has to run inside the span: AsyncFlow captures the current context when the task is called, so the future can be awaited after the span ends.
+
+A context extracted from a W3C `traceparent` carrier, as a remote or resumed caller would hold it, works the same way. Attach it before the call:
+
+```python
+from opentelemetry import context
+from opentelemetry.propagate import extract
+
+token = context.attach(extract(carrier))  # carrier = {"traceparent": "00-..."}
+try:
+    fut = simulate(3)
+finally:
+    context.detach(token)
+```
+
+To see your spans and AsyncFlow's together, export both to the same backend (see [Forwarding to an external backend](#forwarding-to-an-external-backend)). To link records rather than spans, key them on [`future.uid`](async_workflows.md#task-identity), which is the task span's `task_id`.
+
 ---
 
 ## AsyncFlow-specific events
