@@ -163,3 +163,53 @@ async def test_failed_registration_propagates(flow, command):
     assert exc_info.value.failed_dependencies == ["a"]
     assert isinstance(fa.exception(), ValueError)
     assert exc_info.value.root_cause is fa.exception()
+
+
+@pytest.mark.asyncio
+async def test_cancelled_registration_propagates(flow):
+    @flow.executable_task
+    async def a():
+        await asyncio.sleep(0.01)
+        return "echo hi"
+
+    b = _identity(flow.function_task)
+
+    fa = a()
+    fb = b(fa)
+    fa._registration.cancel()  # a never registers, and its future stays pending
+
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(fb, timeout=5)
+    assert fb.cancelled()
+    assert not fa.done()
+
+
+@pytest.mark.asyncio
+async def test_dependent_waits_for_every_registration(flow):
+    @flow.executable_task
+    async def fails():
+        await asyncio.sleep(0.01)
+        return ""  # not a command, so fails never registers
+
+    @flow.executable_task
+    async def slow():
+        await asyncio.sleep(5)
+        return "echo hi"
+
+    @flow.function_task
+    async def both(x, y):
+        return x, y
+
+    fx = fails()
+    fy = slow()
+    fb = both(fx, fy)
+
+    await asyncio.wait([fx], timeout=5)
+    assert isinstance(fx.exception(), ValueError)
+    assert not fb.done()  # still waiting for slow's registration
+
+    # A cancelled dependency takes precedence over the failed one, as in run.
+    fy._registration.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(fb, timeout=5)
+    assert fb.cancelled()
