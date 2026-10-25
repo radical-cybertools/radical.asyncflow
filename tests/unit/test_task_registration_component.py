@@ -73,7 +73,13 @@ async def test_register_component_adds_task_entry():
     async def dummy():
         return "yo"
 
-    comp_desc = {"function": dummy, "args": (), "kwargs": {}, "executable": None}
+    comp_desc = {
+        "uid": engine._assign_uid(prefix=TASK),
+        "function": dummy,
+        "args": (),
+        "kwargs": {},
+        "executable": None,
+    }
 
     engine._register_component(
         comp_fut=asyncio.Future(), comp_type=TASK, comp_desc=comp_desc
@@ -95,6 +101,7 @@ async def test_register_component_adds_block_entry():
 
     async def dummy_block():
         comp_desc = {
+            "uid": engine._assign_uid(prefix=TASK),
             "function": dummy_task,
             "args": (),
             "kwargs": {},
@@ -107,7 +114,13 @@ async def test_register_component_adds_block_entry():
 
         return await task_future
 
-    comp_desc = {"function": dummy_block, "args": (), "kwargs": {}, "executable": None}
+    comp_desc = {
+        "uid": engine._assign_uid(prefix=BLOCK),
+        "function": dummy_block,
+        "args": (),
+        "kwargs": {},
+        "executable": None,
+    }
 
     block_future = engine._register_component(
         comp_fut=asyncio.Future(), comp_type=BLOCK, comp_desc=comp_desc

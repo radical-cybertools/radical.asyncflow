@@ -148,3 +148,33 @@ result = my_task(workflow_id="run-007")
 Workflow IDs flow through to the telemetry system when enabled, making it possible to filter
 OTel spans and RHAPSODY JSONL events by workflow. They are also available on the component
 description as `comp["description"]["workflow_id"]` for custom introspection.
+
+---
+
+## Task identity
+
+Calling a task or block returns a future that already carries the component's identity. Both
+attributes are set when the call returns, before the component is registered or run:
+
+- `future.uid` is the full uid, such as `"task.000001"` or `"block.000002"`.
+- `future.id` is its numeric suffix, such as `"000001"`.
+
+```python
+fut = my_task()
+records[fut.uid] = "my own record"  # readable before any await
+await fut
+```
+
+`future.uid` is the component's key in `flow.components` and the `task_id` of its telemetry
+events. A task's span carries it as `task_id`; a block's span carries it as
+`asyncflow.workflow_id`. Use it to link your own records, such as an agent's tool calls, to what
+AsyncFlow reports.
+
+!!! note
+    uids are unique across all engines in a process. The counter is shared and never reset, so
+    an engine created after another has shut down continues the numbering. Each new process
+    starts again at `000001`, so records that span several processes need an identifier of your
+    own as well.
+
+To link your own traces instead, see
+[Linking tasks to your own traces](telemetry.md#linking-tasks-to-your-own-traces).
