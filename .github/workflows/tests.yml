@@ -108,3 +108,21 @@ jobs:
           python-version: '3.12'
       - name: Run pre-commit
         uses: pre-commit/action@v3.0.1
+
+  unit-eager:
+    name: unit (3.12, eager task factory)
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install Packages
+        run: python -m pip install --upgrade pip tox
+      - name: Run Unit Tests with asyncio.eager_task_factory
+        run: tox -e py312 -- -vv --eager-tasks
