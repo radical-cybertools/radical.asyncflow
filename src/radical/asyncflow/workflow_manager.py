@@ -26,7 +26,6 @@ from .backends import LocalExecutionBackend
 from .data import InputFile, OutputFile
 from .errors import DependencyFailureError
 from .utils import get_next_uid
-from .utils import reset_uid_counter
 from .utils import get_event_loop_or_raise
 
 TASK = "task"
@@ -314,10 +313,13 @@ class WorkflowEngine:
     ) -> None:
         """Emit a telemetry event by name.
 
-        No-op when telemetry is disabled.
+        The event names the backend the task is routed to (its ``backend=``, else the
+        default backend) unless ``backend`` is given. No-op when telemetry is disabled.
         """
         if self._telemetry is None:
             return
+        if backend is None and task_id in self.components:
+            backend = self.components[task_id]["description"].get("target_backend")
         if "event_time" not in kwargs:
             kwargs["event_time"] = time.time()
         if workflow_id is not None:
@@ -746,7 +748,10 @@ class WorkflowEngine:
                 if not comp_fut.done():
                     comp_fut.set_exception(e)
 
-        # FIXME: assign name for this comp (comp uid)
+        # Assign the uid here so callers can read it before registration runs
+        comp_desc["uid"] = self._assign_uid(prefix=comp_type)
+        comp_fut.id = comp_desc["uid"].split(f"{comp_type}.")[1]
+        comp_fut.uid = comp_desc["uid"]
         asyncio.create_task(register())
 
         return comp_fut
@@ -761,13 +766,14 @@ class WorkflowEngine:
         """Registers a workflow component with shared registration logic.
 
         Handles the core registration process for both tasks and blocks.
-        Assigns identifiers, sets up metadata, detects dependencies, and manages
-        component storage.
+        Sets up metadata, detects dependencies, and manages component storage.
+        The caller assigns the uid and sets it on the future beforehand.
 
         Args:
             comp_fut (asyncio.Future): Future object for tracking component execution
             comp_type (str): Type of component ('task' or 'block')
             comp_desc (dict): Component description containing:
+                - uid: The component uid, assigned by the caller
                 - function: The callable to execute
                 - args: Function arguments
                 - kwargs: Function keyword arguments
@@ -792,7 +798,6 @@ class WorkflowEngine:
 
         # make sure not to specify both func and executable at the same time
         comp_desc["name"] = comp_desc["function"].__name__
-        comp_desc["uid"] = self._assign_uid(prefix=comp_type)
         # call-time workflow_id takes precedence over the ContextVar
         comp_desc["workflow_id"] = (
             comp_desc.pop("_explicit_workflow_id", None) or self._workflow_id_ctx.get()
@@ -831,8 +836,7 @@ class WorkflowEngine:
             "output_files": output_files_deps,
         }
 
-        # Setup future
-        comp_fut.id = comp_desc["uid"].split(f"{comp_type}.")[1]
+        # Setup future (wrapper already set comp_fut.id and comp_fut.uid)
         setattr(comp_fut, comp_type, comp_desc)
 
         # Store component that will be sent to the backend
@@ -1081,8 +1085,6 @@ class WorkflowEngine:
         self.running.clear()
         self._task_submit_times.clear()
         self._task_start_times.clear()
-
-        reset_uid_counter()
 
     def _mark_done(self, comp_uid: str) -> None:
         """Queue a resolved component for the run loop and wake it."""
@@ -1389,7 +1391,6 @@ class WorkflowEngine:
                         self._emit(
                             "TaskQueued",
                             task_id=comp_uid,
-                            backend=comp_desc.get("target_backend"),
                             workflow_id=comp_desc.get("workflow_id"),
                             attributes={
                                 "executable": comp_desc["_tel_executable"],
@@ -1516,7 +1517,6 @@ class WorkflowEngine:
                         self._emit(
                             "TaskSubmitted",
                             task_id=t["uid"],
-                            backend=t.get("target_backend"),
                             workflow_id=t.get("workflow_id"),
                             event_time=now,
                             attributes={

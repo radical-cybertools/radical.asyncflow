@@ -21,6 +21,44 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   before they are built. Configuring the root logger, records of other
   libraries below that level are dropped too.
 
+### Fixed
+
+- **A component's uid is set when the call returns** — calling a task or block
+  returned its future before the engine assigned the component's uid, so `future.id`
+  did not exist until the next event-loop step. A caller that read it right after the
+  call got an `AttributeError`, and could not key its own records on the uid that
+  telemetry events and spans carry as `task_id`. The uid is now assigned at the call,
+  so uids also follow call order. A call whose registration fails keeps its uid on
+  the future, which carries the exception.
+- **Telemetry names the backend that ran each task** — with several backends, every
+  task span carried the default backend in its `backend` attribute, even for a task
+  routed elsewhere with `backend=`. So did each task's `TaskCreated`,
+  `asyncflow.TaskResolved`, `TaskStarted`, `TaskCompleted`, `TaskFailed` and
+  `TaskCanceled` events, and the task metrics labelled from them; only `TaskQueued` and
+  `TaskSubmitted` named the right backend. Every task event now names the backend the
+  task is routed to, and the task span takes that name from `TaskCreated`. "The
+  `backend` attribute" in `docs/telemetry.md` says what the attribute means.
+- **Shutting down one engine no longer makes another reuse uids** (#85) — component
+  uids came from one module-level counter that every `WorkflowEngine.shutdown()`
+  reset, so once one engine shut down, another engine still running in the same
+  process numbered its next component `task.000001` again. That component replaced
+  the earlier one in `flow.components`, and its future never completed. The counter
+  is no longer reset, so a uid names one component across all engines in a process,
+  and an engine created after another has shut down continues the numbering instead
+  of starting again from `000001`. The `reset_uid_counter()` helper in
+  `radical.asyncflow.utils` is removed.
+
+### Added
+
+- **`future.uid`** — the full uid (`"task.000001"`, `"block.000002"`), set when the
+  call returns, beside the suffix in `future.id`. It is the component's key in
+  `flow.components` and the `task_id` of its telemetry events and, for a task, of its
+  span.
+- **Task identity and trace linking documentation** — "Task identity" in
+  `docs/async_workflows.md`, and "Linking tasks to your own traces" in
+  `docs/telemetry.md`: the span that is current when a task is called, in-process or
+  extracted from a W3C `traceparent` carrier, becomes the task span's parent.
+
 ## [0.6.0] 2026-10-19
 
 ### Fixed
