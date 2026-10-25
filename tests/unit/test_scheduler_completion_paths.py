@@ -146,8 +146,11 @@ async def make_flow():
 
     for flow, stop, load_task in made:
         stop.set()
-        await load_task
-        await flow.shutdown()
+        try:
+            # bounded too: a missed wake-up stalls the load stream
+            await asyncio.wait_for(load_task, 5)
+        finally:
+            await flow.shutdown()
 
 
 async def _until(cond, limit=5.0):
@@ -203,7 +206,7 @@ class TestCompletionPaths:
 
         x = park_slow()
         d = dep(x)
-        await backend.slow_started.wait()
+        await asyncio.wait_for(backend.slow_started.wait(), 5)
         x.cancel()
         await _resolves_within(d, 0.5)
 
@@ -296,7 +299,7 @@ class TestCompletionPaths:
         futs = []
         for _ in range(20):
             futs += [after(ok()), after(fail_one())]
-        await asyncio.gather(*futs, return_exceptions=True)
+        await asyncio.wait_for(asyncio.gather(*futs, return_exceptions=True), 5)
         # only the load stream's current tick may still be in flight
         await _until(lambda: len(flow.running) <= 1)
 
@@ -388,6 +391,32 @@ class TestServiceThread:
                 assert isinstance(s.exception(), RuntimeError)
         finally:
             await flow.shutdown()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("setter", ["set_result", "set_exception"])
+    async def test_resolved_after_future_is_done(self, setter):
+        """A callback thread that resolves the future after it is done (cancelled at
+        shutdown, say) changes nothing: the late call is dropped on the loop thread, not
+        raised there as InvalidStateError."""
+        # imported here, so that the module's other tests run on older engines too
+        from radical.asyncflow.workflow_manager import _ThreadSafeFuture
+
+        loop = asyncio.get_running_loop()
+        errors = []
+        loop.set_exception_handler(lambda _, context: errors.append(context))
+        try:
+            fut = loop.create_future()
+            wrapped = _ThreadSafeFuture(fut, loop, threading.get_ident())
+            fut.cancel()
+            value = "late" if setter == "set_result" else RuntimeError("late")
+            thread = threading.Thread(target=getattr(wrapped, setter), args=(value,))
+            thread.start()
+            thread.join()
+            await asyncio.sleep(0.05)  # let the call moved onto the loop thread run
+            assert fut.cancelled()
+            assert not errors
+        finally:
+            loop.set_exception_handler(None)
 
 
 class TestIdle:

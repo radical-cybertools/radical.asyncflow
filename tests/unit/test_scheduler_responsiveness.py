@@ -36,7 +36,8 @@ class TestSchedulerResponsiveness:
             return dep + 1
 
         start = time.perf_counter()
-        result = await fast(slow())
+        # bounded: nothing polls, so a missed wake-up would hang here
+        result = await asyncio.wait_for(fast(slow()), 5)
         elapsed = time.perf_counter() - start
 
         assert result == 2
@@ -51,11 +52,15 @@ class TestSchedulerResponsiveness:
         async def noop():
             return None
 
+        async def round_trips(n):
+            for _ in range(n):
+                await noop()
+
+        # bounded: nothing polls, so a missed wake-up would hang here
         n = 20
-        await noop()  # warmup
+        await asyncio.wait_for(round_trips(1), 5)  # warmup
         start = time.perf_counter()
-        for _ in range(n):
-            await noop()
+        await asyncio.wait_for(round_trips(n), 5)
         avg = (time.perf_counter() - start) / n
 
         # ~1ms expected; a 10ms per-pass sleep would exceed the bound

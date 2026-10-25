@@ -60,8 +60,10 @@ class _ThreadSafeFuture:
     RADICAL-Pilot backend waits for the service in a daemon thread).  asyncio
     futures are not thread-safe, and resolving one off the loop thread would not
     wake the run loop, which sleeps until woken: ``set_result`` and
-    ``set_exception`` called from another thread are moved onto the loop thread.
-    Everything else is the future itself.
+    ``set_exception`` called from another thread are moved onto the loop thread,
+    and dropped there if the future has been resolved in the meantime (cancelled
+    at shutdown, say).  Other attribute reads go to the future itself; its other
+    methods, ``cancel`` included, are not thread-safe.
     """
 
     __slots__ = ("_fut", "_loop", "_loop_thread_id")
@@ -1933,7 +1935,6 @@ class WorkflowEngine:
         logger.info("Initiating shutdown")
         # Signal components to exit
         self._shutdown_event.set()
-        self._kick()
 
         # cancel workflow futures (tasks and blocks)
         for comp in self.components.values():
