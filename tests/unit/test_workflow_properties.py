@@ -467,6 +467,17 @@ def work_dir(tmp_path_factory):
         shutdown_ms=None,
     )
 )
+# A dependent cancelled while it waits for a dependency that then fails to register
+@example(
+    wf=Workflow(
+        [
+            Node([], EXECUTABLE, fault="empty_command", delay=1),
+            Node([(0, "pos")], FUNCTION, fault="cancel_before"),
+        ],
+        completion=0,
+        shutdown_ms=None,
+    )
+)
 # Shutdown while an executable body runs and its dependent waits for it to register
 @example(
     wf=Workflow(

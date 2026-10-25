@@ -21,7 +21,7 @@ from tests.harness import (
 )
 
 try:
-    from hypothesis import HealthCheck, settings
+    from hypothesis import HealthCheck, Phase, settings
 except ImportError:  # the property tests are then skipped
     pass
 else:
@@ -32,6 +32,8 @@ else:
     }
     settings.register_profile("ci", max_examples=150, print_blob=True, **_common)
     settings.register_profile("nightly", max_examples=2000, **_common)
+    # Only the @example cases, for coverage that does not change from run to run
+    settings.register_profile("explicit", phases=[Phase.explicit], **_common)
     settings.load_profile(os.environ.get("HYPOTHESIS_PROFILE", "ci"))
 
 _previous_policy = pytest.StashKey()

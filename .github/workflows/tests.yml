@@ -149,6 +149,10 @@ jobs:
           python -m pip install --upgrade pip -e '.[dev]' diff-cover
           'rhapsody-py[telemetry]'
       - name: Run Tests with Coverage
+        env:
+          # Only the explicit examples of the property tests: random ones would
+          # cover a line in some runs only.
+          HYPOTHESIS_PROFILE: explicit
         run: python -m pytest tests/unit tests/integration --cov=radical.asyncflow --cov-report=xml
       - name: Check Coverage of the Changed Lines
         run: >-
