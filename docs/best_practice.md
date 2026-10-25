@@ -174,6 +174,7 @@ result = await task_c(task_a(), task_b())
 Always shut down the flow explicitly when finished:
 - Releases resources (e.g., thread pools, processes).
 - Ensures a clean exit.
+- Cancels every task and block that has not finished, including a task whose decorated function is still running and a dependent still waiting for its dependencies: awaiting their futures raises `asyncio.CancelledError`. A task or block called after `shutdown()` is cancelled instead of run.
 
 At the end of your async main:
 

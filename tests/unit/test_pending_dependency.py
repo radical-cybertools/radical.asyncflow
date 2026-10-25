@@ -321,3 +321,71 @@ async def test_registration_failing_inside_a_block_leaves_no_membership(
         return not any(fm.uid in members for members in flow._block_members.values())
 
     assert await asyncio.wait_for(blk(), timeout=5) is True
+
+
+@pytest.mark.asyncio
+async def test_shutdown_cancels_pending_registrations():
+    engine = await WorkflowEngine.create(backend=NoopExecutionBackend())
+    started = asyncio.Event()
+
+    @engine.executable_task
+    async def slow():
+        started.set()
+        await asyncio.sleep(60)  # still running at shutdown, so slow never registers
+        return "echo hi"
+
+    b = _identity(engine.function_task)
+
+    fa = slow()
+    fb = b(fa)  # waits for slow's registration
+    await asyncio.wait_for(started.wait(), timeout=5)
+    await engine.shutdown()
+
+    for fut in (fa, fb):
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(fut, timeout=5)
+        assert fut.cancelled()
+
+
+@pytest.mark.asyncio
+async def test_body_finishing_after_shutdown_does_not_register():
+    engine = await WorkflowEngine.create(backend=NoopExecutionBackend())
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    @engine.executable_task
+    async def late():
+        started.set()
+        while not release.is_set():
+            try:
+                await release.wait()
+            except asyncio.CancelledError:
+                pass  # ignores shutdown's cancellation and finishes after it
+        return "echo hi"
+
+    fut = late()
+    registration = fut._registration
+    await asyncio.wait_for(started.wait(), timeout=5)
+    await engine.shutdown()
+    release.set()
+    await asyncio.wait([registration], timeout=5)
+
+    assert registration.done()
+    assert fut.cancelled()
+    assert fut.uid not in engine.components
+
+
+@pytest.mark.asyncio
+async def test_call_after_shutdown_does_not_register():
+    engine = await WorkflowEngine.create(backend=NoopExecutionBackend())
+
+    @engine.function_task
+    async def f():
+        return 1
+
+    await engine.shutdown()
+    fut = f()  # the run loop has stopped, so a registered fut would never finish
+
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(fut, timeout=5)
+    assert fut.uid not in engine.components
