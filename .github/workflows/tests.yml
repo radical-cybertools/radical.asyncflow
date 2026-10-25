@@ -126,3 +126,34 @@ jobs:
         run: python -m pip install --upgrade pip tox
       - name: Run Unit Tests with asyncio.eager_task_factory
         run: tox -e py312 -- -vv --eager-tasks
+
+  diff-cover:
+    name: coverage of the lines a PR adds to src/
+    if: github.event_name == 'pull_request'
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install Packages
+        # RHAPSODY telemetry, so that the telemetry tests run and cover their lines
+        run: >-
+          python -m pip install --upgrade pip -e '.[dev]' diff-cover
+          'rhapsody-py[telemetry]'
+      - name: Run Tests with Coverage
+        run: python -m pytest tests/unit tests/integration --cov=radical.asyncflow --cov-report=xml
+      - name: Check Coverage of the Changed Lines
+        run: >-
+          diff-cover coverage.xml --compare-branch="origin/$GITHUB_BASE_REF"
+          --include 'src/**' --fail-under=100 --format markdown:diff-cover.md
+      - name: Report
+        if: always()
+        run: if [ -f diff-cover.md ]; then cat diff-cover.md >> "$GITHUB_STEP_SUMMARY"; fi
