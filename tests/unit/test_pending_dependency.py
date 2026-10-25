@@ -265,3 +265,19 @@ async def test_body_finishing_after_shutdown_does_not_register():
     assert registration.done()
     assert fut.cancelled()
     assert fut.uid not in engine.components
+
+
+@pytest.mark.asyncio
+async def test_call_after_shutdown_does_not_register():
+    engine = await WorkflowEngine.create(backend=NoopExecutionBackend())
+
+    @engine.function_task
+    async def f():
+        return 1
+
+    await engine.shutdown()
+    fut = f()  # the run loop has stopped, so a registered fut would never finish
+
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(fut, timeout=5)
+    assert fut.uid not in engine.components

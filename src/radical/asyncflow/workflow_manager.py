@@ -721,20 +721,22 @@ class WorkflowEngine:
                     except Exception as e:
                         if not comp_fut.done():
                             comp_fut.set_exception(e)
+                    finally:
+                        self._pending_registrations.discard(comp_fut)
 
                 # Assign the uid here so callers can read it before registration runs
                 comp_desc["uid"] = self._assign_uid(prefix=comp_type)
                 comp_fut.id = comp_desc["uid"].split(f"{comp_type}.")[1]
                 comp_fut.uid = comp_desc["uid"]
+                # Tracked until registration finishes, so shutdown can cancel it.
+                # Added before create_task: with an eager task factory the
+                # registration can finish, and discard comp_fut, inside it.
+                self._pending_registrations.add(comp_fut)
                 # Dependents called with this future before it registers wait for
                 # this task. It is named after func, the name they report if
                 # registration fails, and dropped once registration succeeds.
                 comp_fut._registration = asyncio.create_task(
                     async_wrapper(), name=func.__name__
-                )
-                self._pending_registrations.add(comp_fut)
-                comp_fut._registration.add_done_callback(
-                    lambda _: self._pending_registrations.discard(comp_fut)
                 )
             else:
                 # Raise error for non-async functions since we only support async
@@ -1962,12 +1964,15 @@ class WorkflowEngine:
         # cancel the futures of components that have not registered yet: an
         # executable or prompt task whose body is still running, or a dependent
         # waiting for its dependencies to register
-        for future in self._pending_registrations:
-            if future._registration is not None:
-                future._registration.cancel()
+        for future in list(self._pending_registrations):
+            registration = getattr(future, "_registration", None)
+            if registration is not None:
+                registration.cancel()
             if not future.done():
                 future.cancel()
                 future.state = "CANCELLED"
+        # A registration cancelled before it started never runs its finally
+        self._pending_registrations.clear()
 
         # Cancel internal components task
         if not self._run_task.done():
