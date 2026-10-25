@@ -230,10 +230,11 @@ def _fail_step_for(flow, monkeypatch, step, fut):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("component", ["function_task", "block"])
 @pytest.mark.parametrize("step", ["_update_dependency_tracking", "_emit"])
 @pytest.mark.parametrize("late", [False, True], ids=["called-before", "called-after"])
 async def test_registration_failing_after_storing_leaves_no_trace(
-    flow, monkeypatch, step, late
+    flow, monkeypatch, component, step, late
 ):
     """A component whose registration fails after it was stored is not registered.
 
@@ -241,7 +242,7 @@ async def test_registration_failing_after_storing_leaves_no_trace(
     for a completion that never came.
     """
 
-    @flow.function_task
+    @getattr(flow, component)
     async def a():
         return 1
 
@@ -258,7 +259,7 @@ async def test_registration_failing_after_storing_leaves_no_trace(
     assert exc_info.value.failed_dependencies == ["a"]
     assert isinstance(fa.exception(), RuntimeError)
     assert exc_info.value.root_cause is fa.exception()
-    assert not hasattr(fa, "task")
+    assert not hasattr(fa, "task") and not hasattr(fa, "block")
     assert not hasattr(fa, "original_cancel")
     for records in (
         flow.components,
@@ -295,3 +296,28 @@ async def test_registration_failing_after_storing_untracks_dependencies(
     finally:
         release.set()
     assert await asyncio.wait_for(fu, timeout=5) is None
+
+
+@pytest.mark.asyncio
+async def test_registration_failing_inside_a_block_leaves_no_membership(
+    flow, monkeypatch
+):
+    """Undoing a registration inside a block also removes it from the block's members.
+
+    Otherwise cancelling the block would try to cancel a component that does not exist.
+    """
+
+    @flow.function_task
+    async def member():
+        return 1
+
+    @flow.block
+    async def blk():
+        fm = member()
+        _fail_step_for(flow, monkeypatch, "_emit", fm)
+        with pytest.raises(RuntimeError):
+            await fm
+        # Checked while blk runs: its members are dropped once it finishes.
+        return not any(fm.uid in members for members in flow._block_members.values())
+
+    assert await asyncio.wait_for(blk(), timeout=5) is True

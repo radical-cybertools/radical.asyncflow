@@ -44,12 +44,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   because its body raised or returned no command.
 - **A registration that fails part way no longer leaves the component half
   registered** — when registering a task or block failed after the engine had stored
-  it, for example on a plain `asyncio` task passed as an argument, its future carried
+  it, for example in dependency tracking or in a telemetry hook, its future carried
   the exception but kept `future.task` (or `future.block`), and the component stayed
   in `flow.components`. A dependent called with that future registered against it and
   waited forever. The engine now undoes everything it stored for the component, so a
   dependent fails with `DependencyFailureError`, as for any other registration that
-  fails.
+  fails. Telemetry events already emitted for the component stay.
 - **A plain `asyncio` future passed to a task or block is rejected with a clear
   error** — calling a task or block with a plain `asyncio` Future or Task, for example
   `a(asyncio.ensure_future(coro()))` or `a(x=loop.create_future())`, made `a` fail

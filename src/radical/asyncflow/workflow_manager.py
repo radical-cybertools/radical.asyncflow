@@ -646,7 +646,7 @@ class WorkflowEngine:
 
         @wraps(func)
         def wrapper(*args, **kwargs):
-            self._reject_foreign_futures(func, args, kwargs)
+            has_futures = self._reject_foreign_futures(func, args, kwargs)
 
             # Create async future - we only support async
             comp_fut = asyncio.Future()
@@ -694,8 +694,13 @@ class WorkflowEngine:
                         else:
                             comp_desc[EXECUTABLE] = None
                         # Awaits only for futures of unregistered components, so the
-                        # common case adds no coroutine to registration.
-                        unregistered = self._unregistered_dependencies(args, kwargs)
+                        # common case adds no coroutine to registration. A call with
+                        # no future of this engine has none, so skip the scan.
+                        unregistered = (
+                            self._unregistered_dependencies(args, kwargs)
+                            if has_futures
+                            else None
+                        )
                         if unregistered:
                             unregistered = await self._wait_for_registration(
                                 unregistered
@@ -992,7 +997,7 @@ class WorkflowEngine:
         uid = get_next_uid()
         return f"{prefix}.{uid}"
 
-    def _reject_foreign_futures(self, func: Callable, args, kwargs) -> None:
+    def _reject_foreign_futures(self, func: Callable, args, kwargs) -> bool:
         """Raises TypeError for an asyncio future in args or kwargs that is not the
         future of a task or block of this engine.
 
@@ -1006,45 +1011,69 @@ class WorkflowEngine:
             args (tuple): Positional arguments of the call.
             kwargs (dict): Keyword arguments of the call.
 
+        Returns:
+            bool: Whether an argument is the future of a task or block of this
+                engine, so that registration scans the arguments again only then.
+
         Raises:
             TypeError: If an argument is a plain asyncio Future or Task, or the
                 future of a task or block of another engine.
         """
-        for key, arg in (*enumerate(args), *kwargs.items()):
-            if not isinstance(arg, asyncio.Future):
-                continue
-            engine = getattr(arg, "_engine", None)
-            if engine is self:
-                continue
-            if isinstance(key, int):
-                # Name a positional argument after its parameter, if it has one.
-                params = [
-                    p.name
-                    for p in inspect.signature(func).parameters.values()
-                    if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
-                ]
-                name = (
-                    f"argument '{params[key]}'"
-                    if key < len(params)
-                    else f"positional argument {key + 1}"
-                )
-            else:
-                name = f"argument '{key}'"
-            if engine is None:
-                kind = "Task" if isinstance(arg, asyncio.Task) else "Future"
-                problem = (
-                    f"is a plain asyncio {kind}, not the future of a task or block; "
-                    "only those are dependencies"
-                )
-            else:
-                problem = (
-                    f"is the future of {arg.uid} of another WorkflowEngine; only the "
-                    "futures of this engine's tasks and blocks are dependencies"
-                )
-            raise TypeError(
-                f"{name} {problem}. Await it and pass its result, or await it in a "
-                "block and pass the block's future."
+        # Runs on every call: two plain loops, the message only on a rejection.
+        has_futures = False
+        for key, arg in enumerate(args):
+            if isinstance(arg, asyncio.Future):
+                if getattr(arg, "_engine", None) is not self:
+                    raise self._foreign_future_error(func, key, arg)
+                has_futures = True
+        for key, arg in kwargs.items():
+            if isinstance(arg, asyncio.Future):
+                if getattr(arg, "_engine", None) is not self:
+                    raise self._foreign_future_error(func, key, arg)
+                has_futures = True
+        return has_futures
+
+    @staticmethod
+    def _foreign_future_error(func: Callable, key, arg: asyncio.Future) -> TypeError:
+        """Builds the TypeError that `_reject_foreign_futures` raises.
+
+        Args:
+            func (Callable): The decorated function, to name a positional argument.
+            key (Union[int, str]): Position or keyword of the argument.
+            arg (asyncio.Future): The rejected future.
+
+        Returns:
+            TypeError: Names the argument, says what it is and what to pass instead.
+        """
+        if isinstance(key, int):
+            # Name a positional argument after its parameter, if it has one.
+            params = [
+                p.name
+                for p in inspect.signature(func).parameters.values()
+                if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
+            ]
+            name = (
+                f"argument '{params[key]}'"
+                if key < len(params)
+                else f"positional argument {key + 1}"
             )
+        else:
+            name = f"argument '{key}'"
+        if getattr(arg, "_engine", None) is None:
+            kind = "Task" if isinstance(arg, asyncio.Task) else "Future"
+            problem = (
+                f"is a plain asyncio {kind}, not the future of a task or block; "
+                "only those are dependencies"
+            )
+        else:
+            problem = (
+                f"is the future of {arg.uid} of another WorkflowEngine; only the "
+                "futures of this engine's tasks and blocks are dependencies"
+            )
+        return TypeError(
+            f"{name} {problem}. Await it and pass its result, or await it in a "
+            "block and pass the block's future."
+        )
 
     def _unregistered_dependencies(self, args, kwargs) -> list:
         """Returns the futures in args and kwargs whose component has not registered.
