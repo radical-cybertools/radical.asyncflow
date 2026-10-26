@@ -119,8 +119,8 @@ async def test_handle_component_cancellation_is_idempotent():
 
 @pytest.mark.asyncio
 async def test_handle_component_cancellation_on_block_future():
-    """Block futures are never patched with original_cancel; the cancellation handler
-    must still cancel them."""
+    """A future without original_cancel, one the engine did not create, must still be
+    cancelled by the cancellation handler."""
     engine = await _make_engine()
 
     fut = asyncio.Future()

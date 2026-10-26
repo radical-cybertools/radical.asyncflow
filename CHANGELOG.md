@@ -32,6 +32,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   and an engine created after another has shut down continues the numbering instead
   of starting again from `000001`. The `reset_uid_counter()` helper in
   `radical.asyncflow.utils` is removed.
+- **`future.state` matches how the future ended** — three cases left `state` out of
+  step with the outcome. A task or block cancelled with `cancel()` before it
+  registered stayed `"PENDING"`, and so did a running block for the done callbacks
+  added before the cancellation. A task whose registration failed, for example an
+  executable task that returned an empty command, stayed `"PENDING"` with the
+  exception set. Under `asyncio.eager_task_factory`, a block that finished without
+  suspending ended `"RUNNING"` instead of `"DONE"` or `"FAILED"`. Each now ends
+  `"CANCELLED"`, `"FAILED"` or `"DONE"`, set before its done callbacks run.
 
 ### Added
 
