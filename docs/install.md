@@ -109,7 +109,7 @@ tox -e py312 -- --eager-tasks   # unit tests under asyncio.eager_task_factory (3
 tox -e stress                   # scale tests and 2,000 random workflows, as nightly
 ```
 
-Every test also checks what it leaves behind: ERROR log records, such as asyncio's "Future exception was never retrieved", and futures or records an engine keeps after `shutdown()`. These checks warn by default. Set `ASYNCFLOW_INVARIANTS=strict` to make them fail the test, or `off` to skip them.
+Every test also checks what it leaves behind: ERROR log records, such as asyncio's "Future exception was never retrieved", and futures or records an engine keeps after `shutdown()`. A test that leaves any of these fails. Set `ASYNCFLOW_INVARIANTS=warn` (or pass `--engine-invariants=warn`) to report them as warnings instead, or `off` to skip the checks; a test marked `no_engine_invariants` is not checked.
 
 `benchmarks/engine_overhead.py compare --base PYTHON --head PYTHON` compares the per-task cost and the memory of two installed versions, each in its own virtual environment.
 
