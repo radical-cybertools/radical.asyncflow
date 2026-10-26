@@ -34,18 +34,26 @@ async def test_foreign_engine_future_is_rejected(
 ):
     f1, f2 = flows
 
+    @f1.executable_task
+    async def gate():
+        await asyncio.sleep(0.01)  # gate registers after consumer is called
+        return "true"
+
     @getattr(f1, producer_type)
-    async def producer():
+    async def producer(*_):
         return 42
 
     @getattr(f2, consumer_type)
     async def consumer(x):
         return x
 
-    arg = producer()
     if registered:
+        arg = producer()
         assert await asyncio.wait_for(arg, timeout=5) == 42
     else:
+        # producer waits for gate to register. Without a pending dependency it would
+        # register inside the call with an eager task factory.
+        arg = producer(gate())
         assert not hasattr(arg, "task") and not hasattr(arg, "block")
 
     # Without the check, consumer waits for a component f2 never resolves.
