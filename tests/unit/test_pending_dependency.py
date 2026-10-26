@@ -7,6 +7,7 @@ the future is recognisable as a dependency.
 
 import asyncio
 import sys
+import threading
 
 import pytest
 import pytest_asyncio
@@ -214,6 +215,121 @@ async def test_dependent_waits_for_every_registration(flow):
     with pytest.raises(asyncio.CancelledError):
         await asyncio.wait_for(fb, timeout=5)
     assert fb.cancelled()
+
+
+def _fail_step_for(flow, monkeypatch, step, name):
+    """Makes the engine method `step` raise, instead of running, for `name`'s component.
+
+    Install it before the call: with an eager task factory a function task or block
+    registers inside the call, before its future, and so its uid, is returned.
+    """
+    original = getattr(flow, step)
+
+    def fail_for_name(*args, **kwargs):
+        # Both steps take the uid, positionally or as task_id.
+        comp = flow.components.get(kwargs.get("task_id") or args[0])
+        if comp and comp["description"]["name"] == name:
+            raise RuntimeError(f"{step} failed")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(flow, step, fail_for_name)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("component", ["function_task", "block"])
+@pytest.mark.parametrize("step", ["_update_dependency_tracking", "_emit"])
+@pytest.mark.parametrize("late", [False, True], ids=["called-before", "called-after"])
+async def test_registration_failing_after_storing_leaves_no_trace(
+    flow, monkeypatch, component, step, late
+):
+    """A component whose registration fails after it was stored is not registered.
+
+    Its future kept the task attribute, so a dependent registered against it and waited
+    for a completion that never came.
+    """
+
+    @getattr(flow, component)
+    async def a():
+        return 1
+
+    b = _identity(flow.function_task)
+
+    _fail_step_for(flow, monkeypatch, step, "a")
+    # With an eager task factory a registers, and fails, inside the call, so b is
+    # called after the failure in both cases.
+    fa = a()
+    if late:
+        await asyncio.wait([fa], timeout=5)
+    fb = b(fa)
+
+    with pytest.raises(DependencyFailureError) as exc_info:
+        await asyncio.wait_for(fb, timeout=5)
+    assert exc_info.value.failed_dependencies == ["a"]
+    assert isinstance(fa.exception(), RuntimeError)
+    assert exc_info.value.root_cause is fa.exception()
+    assert not hasattr(fa, "task") and not hasattr(fa, "block")
+    assert not hasattr(fa, "original_cancel")
+    for records in (
+        flow.components,
+        flow.dependencies,
+        flow._dependency_count,
+        flow._ready_queue,
+    ):
+        assert fa.uid not in records
+    # The run loop still runs tasks: it did not meet a's uid in the ready queue.
+    assert await asyncio.wait_for(b(2), timeout=5) == 2
+
+
+@pytest.mark.asyncio
+async def test_registration_failing_after_storing_untracks_dependencies(
+    flow, monkeypatch
+):
+    """Undoing a registration also undoes the tracking of its pending dependencies."""
+    release = threading.Event()
+
+    @flow.function_task
+    async def upstream():
+        release.wait(timeout=5)
+
+    a = _identity(flow.function_task)
+
+    _fail_step_for(flow, monkeypatch, "_emit", "consumer")
+    fu = upstream()
+    fa = a(fu)
+    try:
+        await asyncio.wait([fa], timeout=5)
+        assert isinstance(fa.exception(), RuntimeError)
+        assert fa.uid not in flow._dependency_count
+        assert not any(fa.uid in deps for deps in flow._dependents_map.values())
+    finally:
+        release.set()
+    assert await asyncio.wait_for(fu, timeout=5) is None
+
+
+@pytest.mark.asyncio
+async def test_registration_failing_inside_a_block_leaves_no_membership(
+    flow, monkeypatch
+):
+    """Undoing a registration inside a block also removes it from the block's members.
+
+    Otherwise cancelling the block would try to cancel a component that does not exist.
+    """
+
+    @flow.function_task
+    async def member():
+        return 1
+
+    _fail_step_for(flow, monkeypatch, "_emit", "member")
+
+    @flow.block
+    async def blk():
+        fm = member()
+        with pytest.raises(RuntimeError):
+            await fm
+        # Checked while blk runs: its members are dropped once it finishes.
+        return not any(fm.uid in members for members in flow._block_members.values())
+
+    assert await asyncio.wait_for(blk(), timeout=5) is True
 
 
 @pytest.mark.asyncio
