@@ -705,8 +705,8 @@ class WorkflowEngine:
                         )
                         # Dependents now recognise comp_fut by its task/block
                         # attribute; let the finished task be freed. Assign, not
-                        # del: an eager task factory gets here before wrapper
-                        # sets the attribute.
+                        # del: under an eager task factory this runs inside
+                        # create_task, before wrapper could set the attribute.
                         comp_fut._registration = None
                     except Exception as e:
                         if not comp_fut.done():
@@ -719,9 +719,11 @@ class WorkflowEngine:
                 # Dependents called with this future before it registers wait for
                 # this task. It is named after func, the name they report if
                 # registration fails, and dropped once registration succeeds.
-                comp_fut._registration = asyncio.create_task(
-                    async_wrapper(), name=func.__name__
-                )
+                registration = asyncio.create_task(async_wrapper(), name=func.__name__)
+                # An eager task factory can register the component inside
+                # create_task: then keep the None that async_wrapper set.
+                if not hasattr(comp_fut, comp_type):
+                    comp_fut._registration = registration
             else:
                 # Raise error for non-async functions since we only support async
                 raise TypeError(
@@ -994,7 +996,8 @@ class WorkflowEngine:
         self, comp_fut: asyncio.Future, name: str, unregistered: list
     ) -> None:
         """Cancels or fails a dependent of components that did not register, as `run`
-        does for a dependent of cancelled or failed components.
+        does for a dependent of cancelled or failed components, through
+        `handle_component_cancellation` and `handle_component_failure`.
 
         Args:
             comp_fut (asyncio.Future): Future of the dependent, not registered.
@@ -1004,22 +1007,23 @@ class WorkflowEngine:
         if comp_fut.done():
             return
 
+        component = {"uid": comp_fut.uid}
         # A dependency future that is not done had its registration cancelled.
         if any(fut.cancelled() or not fut.done() for fut in unregistered):
-            comp_fut.cancel()
-            comp_fut.state = "CANCELLED"
+            self.handle_component_cancellation(component, comp_fut)
             return
 
-        comp_fut.set_exception(
+        self.handle_component_failure(
+            component,
+            comp_fut,
             DependencyFailureError(
                 message=f"Cannot execute '{name}' due to dependency failure",
                 failed_dependencies=[
                     fut._registration.get_name() for fut in unregistered
                 ],
                 root_cause=unregistered[0].exception(),
-            )
+            ),
         )
-        comp_fut.state = "FAILED"
 
     def _detect_dependencies(
         self, possible_args_dependencies, possible_kw_dependencies=None
