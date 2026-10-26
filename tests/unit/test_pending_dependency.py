@@ -6,6 +6,7 @@ the future is recognisable as a dependency.
 """
 
 import asyncio
+import sys
 
 import pytest
 import pytest_asyncio
@@ -281,3 +282,79 @@ async def test_call_after_shutdown_does_not_register():
     with pytest.raises(asyncio.CancelledError):
         await asyncio.wait_for(fut, timeout=5)
     assert fut.uid not in engine.components
+
+
+@pytest.mark.parametrize("outcome", ["failed", "cancelled"])
+async def test_dependent_state_goes_through_component_handlers(
+    flow, monkeypatch, outcome
+):
+    """A dependent of an unregistered component changes state through the handlers.
+
+    Every other component does, so a second path would drift from them.
+    """
+    calls = []
+    for name in ("handle_component_failure", "handle_component_cancellation"):
+        original = getattr(flow, name)
+
+        def record(component, fut, *args, _original=original, _name=name):
+            calls.append((_name, component["uid"], fut))
+            return _original(component, fut, *args)
+
+        monkeypatch.setattr(flow, name, record)
+
+    @flow.executable_task
+    async def a():
+        await asyncio.sleep(0.01)
+        return ""  # not a command, so a never registers
+
+    b = _identity(flow.function_task)
+
+    fa = a()
+    fb = b(fa)
+    if outcome == "cancelled":
+        fa._registration.cancel()  # a's future stays pending
+
+    await asyncio.wait([fb], timeout=5)
+    if outcome == "failed":
+        assert isinstance(fa.exception(), ValueError)
+        assert ("handle_component_failure", fb.uid, fb) in calls
+        assert fb.state == "FAILED"
+    else:
+        assert ("handle_component_cancellation", fb.uid, fb) in calls
+        assert fb.state == "CANCELLED"
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(
+    sys.version_info < (3, 12), reason="asyncio.eager_task_factory is new in 3.12"
+)
+async def test_registration_task_dropped_under_eager_task_factory():
+    """A component registered inside the call keeps no registration task."""
+    loop = asyncio.get_running_loop()
+    loop.set_task_factory(asyncio.eager_task_factory)
+    try:
+        engine = await WorkflowEngine.create(dry_run=True)
+
+        @engine.function_task
+        async def a():
+            return 1
+
+        @engine.executable_task
+        async def bad():
+            return ""  # not a command: registration fails inside the call
+
+        b = _identity(engine.function_task)
+
+        fa = a()
+        assert hasattr(fa, "task")  # registered inside the call
+        assert fa._registration is None
+
+        fbad = bad()
+        assert fbad._registration.done()  # kept: its dependents read its name
+        with pytest.raises(DependencyFailureError) as exc_info:
+            await asyncio.wait_for(b(fbad), timeout=5)
+        assert exc_info.value.failed_dependencies == ["bad"]
+        assert await asyncio.wait_for(b(fa), timeout=5) == "Dummy Output"
+        await engine.shutdown()
+    finally:
+        loop.set_task_factory(None)
