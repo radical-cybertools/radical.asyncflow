@@ -216,17 +216,22 @@ async def test_dependent_waits_for_every_registration(flow):
     assert fb.cancelled()
 
 
-def _fail_step_for(flow, monkeypatch, step, fut):
-    """Makes the engine method `step` raise, instead of running, for fut's component."""
+def _fail_step_for(flow, monkeypatch, step, name):
+    """Makes the engine method `step` raise, instead of running, for `name`'s component.
+
+    Install it before the call: with an eager task factory a function task or block
+    registers inside the call, before its future, and so its uid, is returned.
+    """
     original = getattr(flow, step)
 
-    def fail_for_fut(*args, **kwargs):
+    def fail_for_name(*args, **kwargs):
         # Both steps take the uid, positionally or as task_id.
-        if fut.uid in (*args, *kwargs.values()):
+        comp = flow.components.get(kwargs.get("task_id") or args[0])
+        if comp and comp["description"]["name"] == name:
             raise RuntimeError(f"{step} failed")
         return original(*args, **kwargs)
 
-    monkeypatch.setattr(flow, step, fail_for_fut)
+    monkeypatch.setattr(flow, step, fail_for_name)
 
 
 @pytest.mark.asyncio
@@ -248,8 +253,10 @@ async def test_registration_failing_after_storing_leaves_no_trace(
 
     b = _identity(flow.function_task)
 
+    _fail_step_for(flow, monkeypatch, step, "a")
+    # With an eager task factory a registers, and fails, inside the call, so b is
+    # called after the failure in both cases.
     fa = a()
-    _fail_step_for(flow, monkeypatch, step, fa)
     if late:
         await asyncio.wait([fa], timeout=5)
     fb = b(fa)
@@ -285,9 +292,9 @@ async def test_registration_failing_after_storing_untracks_dependencies(
 
     a = _identity(flow.function_task)
 
+    _fail_step_for(flow, monkeypatch, "_emit", "consumer")
     fu = upstream()
     fa = a(fu)
-    _fail_step_for(flow, monkeypatch, "_emit", fa)
     try:
         await asyncio.wait([fa], timeout=5)
         assert isinstance(fa.exception(), RuntimeError)
@@ -311,10 +318,11 @@ async def test_registration_failing_inside_a_block_leaves_no_membership(
     async def member():
         return 1
 
+    _fail_step_for(flow, monkeypatch, "_emit", "member")
+
     @flow.block
     async def blk():
         fm = member()
-        _fail_step_for(flow, monkeypatch, "_emit", fm)
         with pytest.raises(RuntimeError):
             await fm
         # Checked while blk runs: its members are dropped once it finishes.
