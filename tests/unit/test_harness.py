@@ -3,11 +3,9 @@
 import asyncio
 import logging
 
-import pytest
-
 from radical.asyncflow import WorkflowEngine
 from tests.harness import (
-    EAGER_TASKS_SUPPORTED,
+    EAGER_TASK_FAILURES,
     eager_task_failure,
     engine_violations,
     log_violations,
@@ -32,14 +30,13 @@ def test_asyncio_run_has_the_chosen_task_factory(pytestconfig):
     assert asyncio.run(factory()) is expected
 
 
-@pytest.mark.skipif(not EAGER_TASKS_SUPPORTED, reason="needs Python 3.12")
-def test_eager_task_failures_match_parametrized_ids():
-    base = (
-        "tests/unit/test_foreign_engine_future.py"
-        "::test_foreign_engine_future_is_rejected"
+def test_eager_task_failures_match_node_ids(monkeypatch):
+    monkeypatch.setitem(EAGER_TASK_FAILURES, r"test_x\.py::test_y\[.*-pending\]", "why")
+    assert eager_task_failure("tests/unit/test_x.py::test_y[keyword-pending]") == "why"
+    assert not eager_task_failure("tests/unit/test_x.py::test_y[keyword-registered]")
+    assert eager_task_failure(
+        "tests/unit/test_future_state.py::test_block_future_state_transitions_to_failed"
     )
-    assert eager_task_failure(f"{base}[keyword-pending-block-block]")
-    assert not eager_task_failure(f"{base}[keyword-registered-block-block]")
     assert not eager_task_failure("tests/unit/test_async.py::test_async_flow")
 
 

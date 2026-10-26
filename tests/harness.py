@@ -21,10 +21,6 @@ _BLOCK_STATE = (
     "engine: _submit_blocks sets block_fut.state = 'RUNNING' after create_task, "
     "which has already run a block that does not suspend to the end"
 )
-_STARTS_IN_CALL = (
-    "test assumes a task does not start inside the call: the component it expects "
-    "to be pending, or to fail registering, has already registered"
-)
 # Tests that fail under an eager task factory, and why, by node id regex. They are
 # strict expected failures with --eager-tasks: once fixed they XPASS, which fails, and
 # leave the list.
@@ -34,14 +30,6 @@ EAGER_TASK_FAILURES = {
     ),
     r"test_future_state\.py::test_block_future_state_transitions_to_failed": (
         _BLOCK_STATE
-    ),
-    r"test_foreign_engine_future\.py::test_foreign_engine_future_is_rejected"
-    r"\[.*-pending-.*\]": _STARTS_IN_CALL,
-    r"test_pending_dependency\.py::test_registration_failing_after_storing_.*": (
-        _STARTS_IN_CALL
-    ),
-    r"test_pending_dependency\.py::test_registration_failing_inside_a_block_.*": (
-        _STARTS_IN_CALL
     ),
 }
 
