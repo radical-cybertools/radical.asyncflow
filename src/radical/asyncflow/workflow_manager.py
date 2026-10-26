@@ -706,9 +706,9 @@ class WorkflowEngine:
                         # A body that outlives shutdown, or a call made after it,
                         # does not register into the shut-down engine.
                         if self._shutdown_event.is_set():
-                            if not comp_fut.done():
-                                comp_fut.cancel()
-                                comp_fut.state = "CANCELLED"
+                            self.handle_component_cancellation(
+                                {"uid": comp_fut.uid}, comp_fut
+                            )
                             return
                         self._register_component(
                             comp_fut, comp_type, comp_desc, task_type
@@ -1973,8 +1973,7 @@ class WorkflowEngine:
             if registration is not None:
                 registration.cancel()
             if not future.done():
-                future.cancel()
-                future.state = "CANCELLED"
+                self.handle_component_cancellation({"uid": future.uid}, future)
         # A registration cancelled before it started never runs its finally
         self._pending_registrations.clear()
 

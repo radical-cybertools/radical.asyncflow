@@ -284,6 +284,50 @@ async def test_call_after_shutdown_does_not_register():
     assert fut.uid not in engine.components
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("when", ["pending-at-shutdown", "called-after-shutdown"])
+async def test_shutdown_cancels_through_component_handler(monkeypatch, when):
+    """Shutdown cancels an unregistered component through the handler.
+
+    Every registered component is cancelled through it, so a second path would drift
+    from it.
+    """
+    engine = await WorkflowEngine.create(backend=NoopExecutionBackend())
+    calls = []
+    original = engine.handle_component_cancellation
+
+    def record(component, fut):
+        calls.append((component["uid"], fut))
+        return original(component, fut)
+
+    monkeypatch.setattr(engine, "handle_component_cancellation", record)
+    started = asyncio.Event()
+
+    @engine.executable_task
+    async def slow():
+        started.set()
+        await asyncio.sleep(5)
+        return "echo hi"
+
+    @engine.function_task
+    async def f():
+        return 1
+
+    if when == "pending-at-shutdown":
+        fut = slow()
+        await asyncio.wait_for(started.wait(), timeout=5)
+        await engine.shutdown()
+    else:
+        await engine.shutdown()
+        fut = f()
+        await asyncio.wait([fut], timeout=5)
+
+    assert (fut.uid, fut) in calls
+    assert fut.cancelled()
+    assert fut.state == "CANCELLED"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("outcome", ["failed", "cancelled"])
 async def test_dependent_state_goes_through_component_handlers(
     flow, monkeypatch, outcome
