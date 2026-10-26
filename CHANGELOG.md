@@ -74,6 +74,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   now cancels their registration and their futures, so awaiting them raises
   `CancelledError`, and a body that outlives shutdown, or a call made after it, does
   not register.
+- **An unknown `backend=` name is rejected when the function is decorated** — a task
+  decorated with a `backend=` name that none of the engine's backends has raised a
+  `KeyError` in the engine's run loop when it was submitted, and the whole engine shut
+  down: that task, the other tasks submitted with it and every later task were
+  cancelled, not only the misrouted one. The decorator now raises a `ValueError` that
+  lists the engine's backends, before any task runs. The note in
+  `docs/multi_backend.md`, which said only the task's future failed, says so.
 
 ### Added
 
