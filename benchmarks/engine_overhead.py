@@ -6,7 +6,8 @@
 `measure` prints, as JSON, the metrics of the radical.asyncflow that the interpreter
 imports. `compare` runs `measure` in fresh processes of two interpreters, for example
 the venvs of a pull request's base and head, interleaved (base, head, head, base, ...),
-and prints a Markdown table of the medians across processes.
+and prints a table of the medians across processes; `--markdown FILE` also appends it
+to FILE as Markdown, for example to $GITHUB_STEP_SUMMARY.
 
 Method, as in the reviews of PRs #109, #111 and #112: each workload calls N tasks of
 the Noop backend and lets the loop run until every one has registered (call+register),
@@ -29,7 +30,7 @@ import tempfile
 import time
 import tracemalloc
 
-# Changes beyond this fraction are set in bold in the table
+# Changes beyond this fraction are marked in the table
 THRESHOLD = 0.05
 
 
@@ -143,23 +144,54 @@ def compare(args):
             )
             samples[side].append(json.loads(out.stdout))
 
-    print(f"### Engine overhead: {args.head_label} against {args.base_label}\n")
-    print("| | base | head | change |\n| --- | ---: | ---: | ---: |")
+    rows = []
     for metric in samples["base"][0]:
         base = [s[metric] for s in samples["base"]]
         head = [s[metric] for s in samples["head"]]
         change = statistics.median(head) / statistics.median(base) - 1
+        rows.append((metric, _spread(base), _spread(head), change))
+    title = f"Engine overhead: {args.head_label} against {args.base_label}"
+    note = (
+        f"Median (min–max) of {args.runs} processes per side, interleaved; each "
+        f"process keeps the best of {args.rounds} rounds of {args.n:,} tasks per "
+        f"workload, and measures memory over {args.memory_n:,} executable tasks."
+    )
+    print(_text_table(title, rows, note))
+    if args.markdown:
+        with open(args.markdown, "a") as out:
+            out.write(_markdown_table(title, rows, note))
+
+
+def _text_table(title, rows, note):
+    # Every change ends in two characters, the mark or blanks, to keep the % aligned
+    cells = [("", "base", "head", "change  ")] + [
+        (metric, base, head, f"{change:+.1%}" + (" *" if change > THRESHOLD else "  "))
+        for metric, base, head, change in rows
+    ]
+    widths = [max(len(row[i]) for row in cells) for i in range(4)]
+    lines = [title, ""]
+    for metric, *values in cells:
+        line = [metric.ljust(widths[0])]
+        line += [value.rjust(width) for value, width in zip(values, widths[1:])]
+        lines.append("  ".join(line).rstrip())
+    lines += ["", f"{note} Changes above {THRESHOLD:.0%} are marked *."]
+    return "\n".join(lines)
+
+
+def _markdown_table(title, rows, note):
+    lines = [
+        f"### {title}",
+        "",
+        "| | base | head | change |",
+        "| --- | ---: | ---: | ---: |",
+    ]
+    for metric, base, head, change in rows:
         shown = f"{change:+.1%}"
         if change > THRESHOLD:
             shown = f"**{shown}**"
-        print(f"| {metric} | {_spread(base)} | {_spread(head)} | {shown} |")
-    print(
-        f"\nMedian (min–max) of {args.runs} processes per side, interleaved; each "
-        f"process keeps the best of {args.rounds} rounds of {args.n:,} tasks per "
-        f"workload, and measures memory over {args.memory_n:,} executable tasks. "
-        f"Changes above {THRESHOLD:.0%} are in bold. Informational: this job does not "
-        "fail the build."
-    )
+        lines.append(f"| {metric} | {base} | {head} | {shown} |")
+    lines += ["", f"{note} Changes above {THRESHOLD:.0%} are in bold.", ""]
+    return "\n".join(lines) + "\n"
 
 
 def _spread(values):
@@ -186,6 +218,9 @@ def main():
             p.add_argument("--runs", type=int, default=5, help="processes per side")
             p.add_argument("--base-label", default="base")
             p.add_argument("--head-label", default="head")
+            p.add_argument(
+                "--markdown", metavar="FILE", help="also append the table to FILE"
+            )
     args = parser.parse_args()
     {"measure": measure, "compare": compare}[args.command](args)
 

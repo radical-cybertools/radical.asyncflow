@@ -192,9 +192,13 @@ jobs:
       - name: Compare, Interleaved
         env:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: >-
-          python benchmarks/engine_overhead.py compare
-          --base "$RUNNER_TEMP/venv-base/bin/python"
-          --head "$RUNNER_TEMP/venv-head/bin/python"
-          --base-label "base ${BASE::7}" --head-label "head ${HEAD_SHA::7}"
-          | tee -a "$GITHUB_STEP_SUMMARY"
+        # A text table here, a Markdown one in the run's summary
+        run: |
+          python benchmarks/engine_overhead.py compare \
+            --base "$RUNNER_TEMP/venv-base/bin/python" \
+            --head "$RUNNER_TEMP/venv-head/bin/python" \
+            --base-label "base ${BASE::7}" --head-label "head ${HEAD_SHA::7}" \
+            --markdown "$GITHUB_STEP_SUMMARY"
+          echo "Informational: a slower head does not fail the build." \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "Rendered: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
