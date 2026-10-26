@@ -646,9 +646,14 @@ class WorkflowEngine:
 
         @wraps(func)
         def wrapper(*args, **kwargs):
+            has_futures = self._reject_foreign_futures(func, args, kwargs)
+
             # Create async future - we only support async
             comp_fut = asyncio.Future()
             comp_fut.state = "PENDING"
+            # Marks the future as a dependency for this engine only, also before
+            # it registers (see `_reject_foreign_futures`).
+            comp_fut._engine = self
 
             # Extract call-time workflow_id before storing kwargs or calling the function
             explicit_workflow_id = kwargs.pop("workflow_id", None)
@@ -689,8 +694,13 @@ class WorkflowEngine:
                         else:
                             comp_desc[EXECUTABLE] = None
                         # Awaits only for futures of unregistered components, so the
-                        # common case adds no coroutine to registration.
-                        unregistered = self._unregistered_dependencies(args, kwargs)
+                        # common case adds no coroutine to registration. A call with
+                        # no future of this engine has none, so skip the scan.
+                        unregistered = (
+                            self._unregistered_dependencies(args, kwargs)
+                            if has_futures
+                            else None
+                        )
                         if unregistered:
                             unregistered = await self._wait_for_registration(
                                 unregistered
@@ -773,6 +783,7 @@ class WorkflowEngine:
             - Updates self.components with new component
             - Updates self.dependencies with component dependencies
             - Logs component registration
+            - Undoes all of these if it fails (see `_unregister_component`)
         """
 
         # make sure not to specify both func and executable at the same time
@@ -815,76 +826,121 @@ class WorkflowEngine:
             "output_files": output_files_deps,
         }
 
-        # Setup future (wrapper already set comp_fut.id and comp_fut.uid)
-        setattr(comp_fut, comp_type, comp_desc)
+        # A failure from here on undoes everything stored so far. A future left
+        # with its task/block attribute looks registered, and its dependents
+        # would wait for a component that never runs.
+        try:
+            # Setup future (wrapper already set comp_fut.id and comp_fut.uid)
+            setattr(comp_fut, comp_type, comp_desc)
 
-        # Store component that will be sent to the backend
-        self.components[comp_desc["uid"]] = {
-            "type": comp_type,
-            "future": comp_fut,
-            "description": comp_desc,
-        }
+            # Store component that will be sent to the backend
+            self.components[comp_desc["uid"]] = {
+                "type": comp_type,
+                "future": comp_fut,
+                "description": comp_desc,
+            }
 
-        self.dependencies[comp_desc["uid"]] = comp_deps
+            self.dependencies[comp_desc["uid"]] = comp_deps
 
-        logger.debug(
-            f"Registered {comp_type}: '{comp_desc['name']}' "
-            f"with id of {comp_desc['uid']}"
-        )
-
-        # Update dependency tracking
-        self._update_dependency_tracking(comp_desc["uid"])
-        self._component_change_event.set()
-
-        # Track block membership: if this component is registered from within a block's
-        # execution context, record it so it gets cancelled when the block is cancelled.
-        # Read ContextVar directly — not comp_desc["workflow_id"] which may be overridden
-        # by an explicit call-time kwarg (a telemetry label, not a membership signal).
-        parent_block_uid = self._workflow_id_ctx.get()
-        if (
-            parent_block_uid
-            and parent_block_uid in self.components
-            and self.components[parent_block_uid]["type"] == BLOCK
-        ):
-            self._block_members.setdefault(parent_block_uid, set()).add(
-                comp_desc["uid"]
+            logger.debug(
+                f"Registered {comp_type}: '{comp_desc['name']}' "
+                f"with id of {comp_desc['uid']}"
             )
-            comp_fut.add_done_callback(
-                lambda _, b_uid=parent_block_uid, tuid=comp_desc["uid"]: (
-                    self._remove_member(b_uid, tuid)
+
+            # Update dependency tracking
+            self._update_dependency_tracking(comp_desc["uid"])
+            self._component_change_event.set()
+
+            # Track block membership: if this component is registered from within a
+            # block's execution context, record it so it gets cancelled when the block
+            # is cancelled. Read ContextVar directly — not comp_desc["workflow_id"]
+            # which may be overridden by an explicit call-time kwarg (a telemetry
+            # label, not a membership signal).
+            parent_block_uid = self._workflow_id_ctx.get()
+            if (
+                parent_block_uid
+                and parent_block_uid in self.components
+                and self.components[parent_block_uid]["type"] == BLOCK
+            ):
+                self._block_members.setdefault(parent_block_uid, set()).add(
+                    comp_desc["uid"]
                 )
-            )
+                comp_fut.add_done_callback(
+                    lambda _, b_uid=parent_block_uid, tuid=comp_desc["uid"]: (
+                        self._remove_member(b_uid, tuid)
+                    )
+                )
 
-        # Patch cancel for tasks only; blocks are cancelled via a done_callback
-        # installed in _submit_blocks that cancels the underlying asyncio.Task directly.
-        if comp_type != BLOCK:
-            comp_fut.cancel = self._setup_future_cancel_hook(comp_fut, comp_desc["uid"])
+            # Patch cancel for tasks only; blocks are cancelled via a done_callback
+            # installed in _submit_blocks that cancels the underlying asyncio.Task
+            # directly.
+            if comp_type != BLOCK:
+                comp_fut.cancel = self._setup_future_cancel_hook(
+                    comp_fut, comp_desc["uid"]
+                )
 
-        self._emit(
-            "TaskCreated",
-            task_id=comp_desc["uid"],
-            workflow_id=comp_desc.get("workflow_id"),
-            attributes={
-                "executable": comp_desc["_tel_executable"],
-                "task_type": comp_desc["_tel_task_type"],
-                "depends_on": [d["uid"] for d in comp_deps],
-            },
-        )
-
-        # Emit TaskResolved immediately for tasks with no dependencies.
-        # Tasks with deps will emit from _notify_dependents when the count hits 0.
-        if comp_type == TASK and self._dependency_count.get(comp_desc["uid"], -1) == 0:
             self._emit(
-                "asyncflow.TaskResolved",
+                "TaskCreated",
                 task_id=comp_desc["uid"],
                 workflow_id=comp_desc.get("workflow_id"),
                 attributes={
                     "executable": comp_desc["_tel_executable"],
                     "task_type": comp_desc["_tel_task_type"],
+                    "depends_on": [d["uid"] for d in comp_deps],
                 },
             )
 
+            # Emit TaskResolved immediately for tasks with no dependencies.
+            # Tasks with deps will emit from _notify_dependents when the count hits 0.
+            if (
+                comp_type == TASK
+                and self._dependency_count.get(comp_desc["uid"], -1) == 0
+            ):
+                self._emit(
+                    "asyncflow.TaskResolved",
+                    task_id=comp_desc["uid"],
+                    workflow_id=comp_desc.get("workflow_id"),
+                    attributes={
+                        "executable": comp_desc["_tel_executable"],
+                        "task_type": comp_desc["_tel_task_type"],
+                    },
+                )
+        except BaseException:
+            self._unregister_component(comp_fut, comp_type, comp_desc["uid"])
+            raise
+
         return comp_fut
+
+    def _unregister_component(
+        self, comp_fut: asyncio.Future, comp_type: str, uid: str
+    ) -> None:
+        """Undoes what `_register_component` stored before it failed.
+
+        The future is left as that of any component that failed to register: with
+        its exception set by the caller and no task or block attribute, so its
+        dependents fail with DependencyFailureError (see
+        `_unregistered_dependencies`). Telemetry events already emitted stay.
+
+        Args:
+            comp_fut (asyncio.Future): Future of the component.
+            comp_type (str): Type of component ('task' or 'block').
+            uid (str): The component uid.
+        """
+        if hasattr(comp_fut, comp_type):
+            delattr(comp_fut, comp_type)
+        if hasattr(comp_fut, "original_cancel"):
+            del comp_fut.cancel
+            del comp_fut.original_cancel
+        self.components.pop(uid, None)
+        self.dependencies.pop(uid, None)
+        self._dependency_count.pop(uid, None)
+        for dependents in self._dependents_map.values():
+            dependents.discard(uid)
+        if uid in self._ready_queue:
+            self._ready_queue.remove(uid)
+        parent_block_uid = self._workflow_id_ctx.get()
+        if parent_block_uid:
+            self._remove_member(parent_block_uid, uid)
 
     def _setup_future_cancel_hook(
         self, fut: asyncio.Future, uid: str
@@ -942,6 +998,84 @@ class WorkflowEngine:
         """
         uid = get_next_uid()
         return f"{prefix}.{uid}"
+
+    def _reject_foreign_futures(self, func: Callable, args, kwargs) -> bool:
+        """Raises TypeError for an asyncio future in args or kwargs that is not the
+        future of a task or block of this engine.
+
+        Only those are dependencies (see `_detect_dependencies`): a plain Future or
+        Task has no component to wait for, and the component of another engine's
+        future is never resolved by this engine. `wrapper` sets `_engine` on the
+        future of a task or block when it is created, before it registers.
+
+        Args:
+            func (Callable): The decorated function, to name a positional argument.
+            args (tuple): Positional arguments of the call.
+            kwargs (dict): Keyword arguments of the call.
+
+        Returns:
+            bool: Whether an argument is the future of a task or block of this
+                engine, so that registration scans the arguments again only then.
+
+        Raises:
+            TypeError: If an argument is a plain asyncio Future or Task, or the
+                future of a task or block of another engine.
+        """
+        # Runs on every call: two plain loops, the message only on a rejection.
+        has_futures = False
+        for key, arg in enumerate(args):
+            if isinstance(arg, asyncio.Future):
+                if getattr(arg, "_engine", None) is not self:
+                    raise self._foreign_future_error(func, key, arg)
+                has_futures = True
+        for key, arg in kwargs.items():
+            if isinstance(arg, asyncio.Future):
+                if getattr(arg, "_engine", None) is not self:
+                    raise self._foreign_future_error(func, key, arg)
+                has_futures = True
+        return has_futures
+
+    @staticmethod
+    def _foreign_future_error(func: Callable, key, arg: asyncio.Future) -> TypeError:
+        """Builds the TypeError that `_reject_foreign_futures` raises.
+
+        Args:
+            func (Callable): The decorated function, to name a positional argument.
+            key (Union[int, str]): Position or keyword of the argument.
+            arg (asyncio.Future): The rejected future.
+
+        Returns:
+            TypeError: Names the argument, says what it is and what to pass instead.
+        """
+        if isinstance(key, int):
+            # Name a positional argument after its parameter, if it has one.
+            params = [
+                p.name
+                for p in inspect.signature(func).parameters.values()
+                if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
+            ]
+            name = (
+                f"argument '{params[key]}'"
+                if key < len(params)
+                else f"positional argument {key + 1}"
+            )
+        else:
+            name = f"argument '{key}'"
+        if getattr(arg, "_engine", None) is None:
+            kind = "Task" if isinstance(arg, asyncio.Task) else "Future"
+            problem = (
+                f"is a plain asyncio {kind}, not the future of a task or block; "
+                "only those are dependencies"
+            )
+        else:
+            problem = (
+                f"is the future of {arg.uid} of another WorkflowEngine; only the "
+                "futures of this engine's tasks and blocks are dependencies"
+            )
+        return TypeError(
+            f"{name} {problem}. Await it and pass its result, or await it in a "
+            "block and pass the block's future."
+        )
 
     def _unregistered_dependencies(self, args, kwargs) -> list:
         """Returns the futures in args and kwargs whose component has not registered.
