@@ -36,6 +36,25 @@ PROMPT = "prompt"
 logger = logging.getLogger(__name__)
 
 
+class _ComponentFuture(asyncio.Future):
+    """Future of a task or block whose `cancel()` also sets `state` to CANCELLED.
+
+    A future cancelled before it registers, or a block future, has no patched
+    cancel; this sets its state before its done callbacks run. Overriding the
+    method on the class, not patching each future when it is called, adds no
+    memory per future. Registration still patches task futures so that `cancel()`
+    reaches the backend once the task runs (see `_setup_future_cancel_hook`).
+    """
+
+    __slots__ = ()
+
+    def cancel(self, *args, **kwargs):
+        cancelled = super().cancel(*args, **kwargs)
+        if cancelled:
+            self.state = "CANCELLED"
+        return cancelled
+
+
 class WorkflowEngine:
     """An asynchronous workflow manager that uses asyncio event loops and coroutines to
     manage and execute workflow components (blocks and/or tasks) within Directed Acyclic
@@ -652,7 +671,7 @@ class WorkflowEngine:
             has_futures = self._reject_foreign_futures(func, args, kwargs)
 
             # Create async future - we only support async
-            comp_fut = asyncio.Future()
+            comp_fut = _ComponentFuture()
             comp_fut.state = "PENDING"
             # Marks the future as a dependency for this engine only, also before
             # it registers (see `_reject_foreign_futures`).
@@ -739,11 +758,6 @@ class WorkflowEngine:
                 comp_desc["uid"] = self._assign_uid(prefix=comp_type)
                 comp_fut.id = comp_desc["uid"].split(f"{comp_type}.")[1]
                 comp_fut.uid = comp_desc["uid"]
-                # Patch cancel here, not at registration, so that a future
-                # cancelled before it registers has state CANCELLED too.
-                comp_fut.cancel = self._setup_future_cancel_hook(
-                    comp_fut, comp_desc["uid"], comp_type
-                )
                 # Tracked until registration finishes, so shutdown can cancel it.
                 # Added before create_task: with an eager task factory the
                 # registration can finish, and discard comp_fut, inside it.
@@ -893,6 +907,14 @@ class WorkflowEngine:
                     )
                 )
 
+            # Patch cancel for tasks only; blocks are cancelled via a done_callback
+            # installed in _submit_blocks that cancels the underlying asyncio.Task
+            # directly.
+            if comp_type != BLOCK:
+                comp_fut.cancel = self._setup_future_cancel_hook(
+                    comp_fut, comp_desc["uid"]
+                )
+
             self._emit(
                 "TaskCreated",
                 task_id=comp_desc["uid"],
@@ -942,6 +964,9 @@ class WorkflowEngine:
         """
         if hasattr(comp_fut, comp_type):
             delattr(comp_fut, comp_type)
+        if hasattr(comp_fut, "original_cancel"):
+            del comp_fut.cancel
+            del comp_fut.original_cancel
         self.components.pop(uid, None)
         self.dependencies.pop(uid, None)
         self._dependency_count.pop(uid, None)
@@ -954,21 +979,16 @@ class WorkflowEngine:
             self._remove_member(parent_block_uid, uid)
 
     def _setup_future_cancel_hook(
-        self, fut: asyncio.Future, uid: str, comp_type: str = TASK
+        self, fut: asyncio.Future, uid: str
     ) -> Callable[..., Any]:
         """Sets up a custom cancel hook for a future to enable backend cancellation.
 
         Stores the original `cancel` method and overrides it with a patched version
-        that triggers task cancellation via the execution backend. A block, or a
-        task that is not running on the backend, is cancelled locally and its state
-        is set to CANCELLED before its done callbacks run.
+        that triggers task cancellation via the execution backend.
 
         Args:
             fut (Union[SyncFuture, AsyncFuture]): The future object to modify.
             uid (str): The unique identifier for the task.
-            comp_type (str): Component type. Blocks are always cancelled locally;
-                a done_callback installed in `_submit_blocks` then cancels the
-                underlying asyncio.Task. Defaults to TASK.
 
         Returns:
             Callable[..., Any]: The patched cancel function.
@@ -977,10 +997,9 @@ class WorkflowEngine:
         # to be used for tasks that are not submitted to the
         # execution backend yet.
         fut.original_cancel = orig_cancel
-        on_backend = comp_type != BLOCK
 
         def patched_cancel(*args, **kwargs):
-            if on_backend and not fut.done() and uid in self.running:
+            if not fut.done() and uid in self.running:
                 # NOTE: Returning True means cancellation was requested/scheduled,
                 # but not guaranteed.
                 # This follows asyncio.Future.cancel() behavior, which is best-effort.
@@ -1910,8 +1929,7 @@ class WorkflowEngine:
             return  # already resolved — idempotent, nothing to do
 
         # Task futures have a patched cancel() that routes to the backend; restore
-        # the original before cancelling. A future that the engine did not create
-        # may have none.
+        # the original before cancelling. Block futures were never patched.
         original_cancel = getattr(component_fut, "original_cancel", None)
         if original_cancel is not None:
             component_fut.cancel = original_cancel

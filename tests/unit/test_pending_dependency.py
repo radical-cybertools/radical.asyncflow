@@ -268,6 +268,7 @@ async def test_registration_failing_after_storing_leaves_no_trace(
     assert isinstance(fa.exception(), RuntimeError)
     assert exc_info.value.root_cause is fa.exception()
     assert not hasattr(fa, "task") and not hasattr(fa, "block")
+    assert not hasattr(fa, "original_cancel")
     for records in (
         flow.components,
         flow.dependencies,

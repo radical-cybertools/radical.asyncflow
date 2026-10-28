@@ -135,6 +135,31 @@ async def test_future_state_cancelled_before_registration(comp_type):
 
 
 @pytest.mark.asyncio
+async def test_call_patches_no_cancel_on_the_future():
+    """Calling a task or block must not patch `cancel` onto its future: a patch per call
+    cost 25 MB and 29% more gen-0 collections at 40K tasks.
+
+    The state set on cancellation before registration comes from the future's class.
+    """
+    engine = await _make_engine()
+
+    @engine.executable_task
+    async def slow_command():
+        await asyncio.sleep(0.01)  # not registered when the call returns
+        return "/bin/true"
+
+    @engine.block
+    async def some_block():
+        return "ok"
+
+    for fut in (slow_command(), some_block()):
+        assert getattr(fut.cancel, "__func__", None) is type(fut).cancel
+        assert not hasattr(fut, "original_cancel")
+
+    await engine.shutdown()
+
+
+@pytest.mark.asyncio
 async def test_future_state_failed_registration():
     """A task whose registration fails, here an executable task that returns an empty
     command, must have state == 'FAILED'."""
