@@ -36,6 +36,25 @@ PROMPT = "prompt"
 logger = logging.getLogger(__name__)
 
 
+class _ComponentFuture(asyncio.Future):
+    """Future of a task or block whose `cancel()` also sets `state` to CANCELLED.
+
+    A future cancelled before it registers, or a block future, has no patched
+    cancel; this sets its state before its done callbacks run. Overriding the
+    method on the class, not patching each future when it is called, adds no
+    memory per future. Registration still patches task futures so that `cancel()`
+    reaches the backend once the task runs (see `_setup_future_cancel_hook`).
+    """
+
+    __slots__ = ()
+
+    def cancel(self, *args, **kwargs):
+        cancelled = super().cancel(*args, **kwargs)
+        if cancelled:
+            self.state = "CANCELLED"
+        return cancelled
+
+
 class WorkflowEngine:
     """An asynchronous workflow manager that uses asyncio event loops and coroutines to
     manage and execute workflow components (blocks and/or tasks) within Directed Acyclic
@@ -652,7 +671,7 @@ class WorkflowEngine:
             has_futures = self._reject_foreign_futures(func, args, kwargs)
 
             # Create async future - we only support async
-            comp_fut = asyncio.Future()
+            comp_fut = _ComponentFuture()
             comp_fut.state = "PENDING"
             # Marks the future as a dependency for this engine only, also before
             # it registers (see `_reject_foreign_futures`).
@@ -731,6 +750,7 @@ class WorkflowEngine:
                     except Exception as e:
                         if not comp_fut.done():
                             comp_fut.set_exception(e)
+                            comp_fut.state = "FAILED"
                     finally:
                         self._pending_registrations.discard(comp_fut)
 
@@ -1737,13 +1757,16 @@ class WorkflowEngine:
         for block in blocks:
             block_uid = block["uid"]
             block_fut = self.components[block_uid]["future"]
+            # Before create_task: an eager task factory runs a block that does not
+            # suspend to the end inside create_task.
+            if not block_fut.done():
+                block_fut.state = "RUNNING"
             t = asyncio.create_task(
                 self.execute_block(
                     block_fut, block["function"], *block["args"], **block["kwargs"]
                 ),
                 name=block_uid,
             )
-            block_fut.state = "RUNNING"
             self._block_asyncio_tasks[block_uid] = t
             # Remove from registry when the asyncio.Task finishes (any outcome)
             t.add_done_callback(
