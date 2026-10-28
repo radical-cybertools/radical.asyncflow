@@ -333,6 +333,117 @@ async def test_registration_failing_inside_a_block_leaves_no_membership(
 
 
 @pytest.mark.asyncio
+async def test_shutdown_cancels_pending_registrations():
+    engine = await WorkflowEngine.create(backend=NoopExecutionBackend())
+    started = asyncio.Event()
+
+    @engine.executable_task
+    async def slow():
+        started.set()
+        await asyncio.sleep(60)  # still running at shutdown, so slow never registers
+        return "echo hi"
+
+    b = _identity(engine.function_task)
+
+    fa = slow()
+    fb = b(fa)  # waits for slow's registration
+    await asyncio.wait_for(started.wait(), timeout=5)
+    await engine.shutdown()
+
+    for fut in (fa, fb):
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(fut, timeout=5)
+        assert fut.cancelled()
+
+
+@pytest.mark.asyncio
+async def test_body_finishing_after_shutdown_does_not_register():
+    engine = await WorkflowEngine.create(backend=NoopExecutionBackend())
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    @engine.executable_task
+    async def late():
+        started.set()
+        while not release.is_set():
+            try:
+                await release.wait()
+            except asyncio.CancelledError:
+                pass  # ignores shutdown's cancellation and finishes after it
+        return "echo hi"
+
+    fut = late()
+    registration = fut._registration
+    await asyncio.wait_for(started.wait(), timeout=5)
+    await engine.shutdown()
+    release.set()
+    await asyncio.wait([registration], timeout=5)
+
+    assert registration.done()
+    assert fut.cancelled()
+    assert fut.uid not in engine.components
+
+
+@pytest.mark.asyncio
+async def test_call_after_shutdown_does_not_register():
+    engine = await WorkflowEngine.create(backend=NoopExecutionBackend())
+
+    @engine.function_task
+    async def f():
+        return 1
+
+    await engine.shutdown()
+    fut = f()  # the run loop has stopped, so a registered fut would never finish
+
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(fut, timeout=5)
+    assert fut.uid not in engine.components
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("when", ["pending-at-shutdown", "called-after-shutdown"])
+async def test_shutdown_cancels_through_component_handler(monkeypatch, when):
+    """Shutdown cancels an unregistered component through the handler.
+
+    Every registered component is cancelled through it, so a second path would drift
+    from it.
+    """
+    engine = await WorkflowEngine.create(backend=NoopExecutionBackend())
+    calls = []
+    original = engine.handle_component_cancellation
+
+    def record(component, fut):
+        calls.append((component["uid"], fut))
+        return original(component, fut)
+
+    monkeypatch.setattr(engine, "handle_component_cancellation", record)
+    started = asyncio.Event()
+
+    @engine.executable_task
+    async def slow():
+        started.set()
+        await asyncio.sleep(5)
+        return "echo hi"
+
+    @engine.function_task
+    async def f():
+        return 1
+
+    if when == "pending-at-shutdown":
+        fut = slow()
+        await asyncio.wait_for(started.wait(), timeout=5)
+        await engine.shutdown()
+    else:
+        await engine.shutdown()
+        fut = f()
+        await asyncio.wait([fut], timeout=5)
+
+    assert (fut.uid, fut) in calls
+    assert fut.cancelled()
+    assert fut.state == "CANCELLED"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("outcome", ["failed", "cancelled"])
 async def test_dependent_state_goes_through_component_handlers(
     flow, monkeypatch, outcome

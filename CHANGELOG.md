@@ -66,6 +66,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   tasks and blocks are dependencies, so the call now raises a `TypeError` that names
   the argument, as for a plain `asyncio` future. "What does not count as a
   dependency" in `docs/dependencies.md` says so.
+- **`shutdown()` cancels components that have not registered yet** — it cancelled
+  only registered components, so an executable or prompt task whose body was still
+  running, or a dependent waiting for its dependencies to register, kept a pending
+  future, and awaiting it, or any future depending on it, hung after shutdown. A body
+  that finished after shutdown then registered into the shut-down engine. Shutdown
+  now cancels their registration and their futures, so awaiting them raises
+  `CancelledError`, and a body that outlives shutdown, or a call made after it, does
+  not register.
 
 ### Added
 
