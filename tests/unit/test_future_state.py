@@ -53,7 +53,7 @@ async def test_future_state_transitions_to_running():
         return "ok"
 
     some_task()
-    await asyncio.sleep(0.05)  # let async_wrapper register the component
+    await asyncio.sleep(0.05)  # let the component register (asyncio task)
 
     comp = next(iter(engine.components.values()))
     task_fut = comp["future"]
