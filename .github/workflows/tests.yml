@@ -165,8 +165,8 @@ jobs:
   benchmark:
     name: benchmark against the base
     if: github.event_name == 'pull_request'
-    # Informational for now: a slower head does not fail the build.
-    continue-on-error: true
+    # Fails when the head makes the collector run more than 5% more often; a slower
+    # head does not fail it, because the timings vary from runner to runner.
     timeout-minutes: 30
     runs-on: ubuntu-latest
     steps:
@@ -194,11 +194,9 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         # A text table here, a Markdown one in the run's summary
         run: |
+          echo "Rendered: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
           python benchmarks/engine_overhead.py compare \
             --base "$RUNNER_TEMP/venv-base/bin/python" \
             --head "$RUNNER_TEMP/venv-head/bin/python" \
             --base-label "base ${BASE::7}" --head-label "head ${HEAD_SHA::7}" \
             --markdown "$GITHUB_STEP_SUMMARY"
-          echo "Informational: a slower head does not fail the build." \
-            | tee -a "$GITHUB_STEP_SUMMARY"
-          echo "Rendered: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"

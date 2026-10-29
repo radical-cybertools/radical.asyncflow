@@ -111,7 +111,7 @@ tox -e stress                   # scale tests and 2,000 random workflows, as nig
 
 Every test also checks what it leaves behind: ERROR log records, such as asyncio's "Future exception was never retrieved", and futures or records an engine keeps after `shutdown()`. These checks warn by default. Set `ASYNCFLOW_INVARIANTS=strict` to make them fail the test, or `off` to skip them.
 
-`benchmarks/engine_overhead.py compare --base PYTHON --head PYTHON` compares the per-task cost and the memory of two installed versions, each in its own virtual environment.
+`benchmarks/engine_overhead.py compare --base PYTHON --head PYTHON` compares the per-task cost and the memory of two installed versions, each in its own virtual environment. It exits with an error when the head makes the garbage collector run more than 5% more often than the base, which fails the benchmark job on a pull request.
 
 ---
 

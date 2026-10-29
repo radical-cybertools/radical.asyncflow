@@ -7,15 +7,19 @@
 imports. `compare` runs `measure` in fresh processes of two interpreters, for example
 the venvs of a pull request's base and head, interleaved (base, head, head, base, ...),
 and prints a table of the medians across processes; `--markdown FILE` also appends it
-to FILE as Markdown, for example to $GITHUB_STEP_SUMMARY.
+to FILE as Markdown, for example to $GITHUB_STEP_SUMMARY. It exits with an error when
+the number of collections rises more than THRESHOLD: unlike the timings, that number
+does not depend on the machine, and it is the same in every process.
 
 Method, as in the reviews of PRs #109, #111 and #112: each workload calls N tasks of
 the Noop backend and lets the loop run until every one has registered (call+register),
 then awaits them all (end-to-end). A process repeats this ROUNDS times after a warm-up
 round and keeps its best round. The collector is off while a round is timed, as in
 timeit, so that a collection does not land on whichever workload happens to trigger
-it; its cost is measured on its own, over MEMORY_N tasks with the collector on. Memory
-is what tracemalloc still traces per component after MEMORY_N executable tasks.
+it; its cost is measured on its own, over MEMORY_N tasks with the collector on, as is
+the peak that tracemalloc traces over those tasks, garbage not yet collected included.
+Retained memory is what tracemalloc still traces per component after MEMORY_N
+executable tasks.
 """
 
 import argparse
@@ -26,12 +30,15 @@ import logging
 import os
 import statistics
 import subprocess
+import sys
 import tempfile
 import time
 import tracemalloc
 
 # Changes beyond this fraction are marked in the table
 THRESHOLD = 0.05
+# A rise beyond THRESHOLD in this metric fails compare
+GATED = "mixed, collector on: collections"
 
 
 async def _measure(n, rounds, memory_n):
@@ -97,9 +104,21 @@ async def _measure(n, rounds, memory_n):
     after = [s["collections"] for s in gc.get_stats()]
     results["mixed, collector on: end-to-end (µs)"] = (t1 - t0) / memory_n * 1e6
     results["mixed, collector on: in collections (µs)"] = -sum(pauses) / memory_n * 1e6
-    results["mixed, collector on: collections"] = sum(
-        a - b for a, b in zip(after, before)
-    )
+    results[GATED] = sum(a - b for a, b in zip(after, before))
+    del futs
+    engine._clear_internal_records()
+
+    # The same tasks again, traced on their own so that tracing does not slow the
+    # timed run
+    dep = t()
+    await dep
+    gc.collect()
+    tracemalloc.start()
+    futs = [t(dep) if k % 2 else e() for k in range(memory_n)]
+    await asyncio.gather(*futs)
+    _, peak = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+    results["mixed, collector on: peak memory per component (B)"] = peak / memory_n
     del futs
     engine._clear_internal_records()
 
@@ -154,12 +173,17 @@ def compare(args):
     note = (
         f"Median (min–max) of {args.runs} processes per side, interleaved; each "
         f"process keeps the best of {args.rounds} rounds of {args.n:,} tasks per "
-        f"workload, and measures memory over {args.memory_n:,} executable tasks."
+        f"workload; the mixed and memory rows use {args.memory_n:,} tasks. A rise "
+        f"above {THRESHOLD:.0%} in collections fails the comparison; the other rows "
+        "are informational."
     )
     print(_text_table(title, rows, note))
     if args.markdown:
         with open(args.markdown, "a") as out:
             out.write(_markdown_table(title, rows, note))
+    change = next(change for metric, _, _, change in rows if metric == GATED)
+    if change > THRESHOLD:
+        sys.exit(f"{GATED} rose {change:+.1%}, above {THRESHOLD:.0%}")
 
 
 def _text_table(title, rows, note):
