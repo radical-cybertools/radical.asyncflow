@@ -72,6 +72,48 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   and an engine created after another has shut down continues the numbering instead
   of starting again from `000001`. The `reset_uid_counter()` helper in
   `radical.asyncflow.utils` is removed.
+- **A dependent no longer fails when its dependency has not registered yet** — an
+  executable or prompt task registers only after its body returns, so in
+  `b(a())` with an `a` whose body awaits, `b` registered first. The engine then did
+  not recognise `a`'s future as a dependency and `b` failed with
+  `TypeError: '_asyncio.Future' object is not subscriptable`. A task or block now
+  waits for the components whose futures it receives, positionally or as keyword
+  arguments, to register before it registers itself, then waits for their results as
+  before. A failed or cancelled dependency propagates as `DependencyFailureError` or
+  cancellation, also when the dependency's own registration failed, for example
+  because its body raised or returned no command.
+- **A registration that fails part way no longer leaves the component half
+  registered** — when registering a task or block failed after the engine had stored
+  it, for example in dependency tracking or in a telemetry hook, its future carried
+  the exception but kept `future.task` (or `future.block`), and the component stayed
+  in `flow.components`. A dependent called with that future registered against it and
+  waited forever. The engine now undoes everything it stored for the component, so a
+  dependent fails with `DependencyFailureError`, as for any other registration that
+  fails. Telemetry events already emitted for the component stay.
+- **A plain `asyncio` future passed to a task or block is rejected with a clear
+  error** — calling a task or block with a plain `asyncio` Future or Task, for example
+  `a(asyncio.ensure_future(coro()))` or `a(x=loop.create_future())`, made `a` fail
+  with `TypeError: '_asyncio.Task' object is not subscriptable`. Only the futures
+  returned by the engine's tasks and blocks are dependencies, so the call now raises
+  a `TypeError` that names the argument: await the future and pass its result, or
+  await it in a block and pass the block's future. "What does not count as a
+  dependency" in `docs/dependencies.md` says so.
+- **A future of another engine passed to a task or block is rejected with a clear
+  error** — calling a task or block of one `WorkflowEngine` with the future of a task
+  or block of another, for example `f2_task(fa)` with `fa = f1_task()`, made the
+  engine count `fa` as a dependency it never resolves, so `f2_task` never ran and
+  awaiting it hung, even after `fa` had finished. Only the futures of the engine's own
+  tasks and blocks are dependencies, so the call now raises a `TypeError` that names
+  the argument, as for a plain `asyncio` future. "What does not count as a
+  dependency" in `docs/dependencies.md` says so.
+- **`shutdown()` cancels components that have not registered yet** — it cancelled
+  only registered components, so an executable or prompt task whose body was still
+  running, or a dependent waiting for its dependencies to register, kept a pending
+  future, and awaiting it, or any future depending on it, hung after shutdown. A body
+  that finished after shutdown then registered into the shut-down engine. Shutdown
+  now cancels their registration and their futures, so awaiting them raises
+  `CancelledError`, and a body that outlives shutdown, or a call made after it, does
+  not register.
 
 ### Added
 

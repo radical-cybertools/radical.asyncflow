@@ -179,6 +179,9 @@ class WorkflowEngine:
         self._block_asyncio_tasks: dict[str, asyncio.Task] = {}
         # Block member registry: block_uid -> set of component UIDs registered within it
         self._block_members: dict[str, set[str]] = {}
+        # Futures of components whose registration task has not finished, which
+        # self.components does not hold yet; shutdown cancels them
+        self._pending_registrations: set[asyncio.Future] = set()
 
         self.task_states_map = self.backend.get_task_states_map()
 
@@ -692,8 +695,9 @@ class WorkflowEngine:
         """Creates a workflow component for one call of a decorated function.
 
         Returns the component's future at once; registration runs in an
-        asyncio task, so the component is registered on the next loop
-        iteration (after awaiting ``func`` for executable and prompt tasks).
+        asyncio task (inside this call under an eager task factory, else
+        later). For executable and prompt tasks it first awaits ``func``, and
+        it waits for dependencies that are not yet registered.
 
         Args:
             func (Callable): The decorated async function
@@ -711,8 +715,13 @@ class WorkflowEngine:
         Returns:
             asyncio.Future: The future tracking the component's execution.
         """
+        has_futures = self._reject_foreign_futures(func, args, kwargs)
+
         comp_fut = asyncio.Future()
         comp_fut.state = "PENDING"
+        # Marks the future as a dependency for this engine only, also before
+        # it registers (see `_reject_foreign_futures`).
+        comp_fut._engine = self
 
         # Extract call-time workflow_id before storing kwargs or calling the function
         explicit_workflow_id = kwargs.pop("workflow_id", None)
@@ -749,18 +758,54 @@ class WorkflowEngine:
                     comp_desc[PROMPT] = await func(*args, **kwargs)
                 else:
                     comp_desc[EXECUTABLE] = None
-                return self._register_component(
-                    comp_fut, comp_type, comp_desc, task_type
+                # Awaits only for futures of unregistered components, so the
+                # common case adds no coroutine to registration. A call with
+                # no future of this engine has none, so skip the scan.
+                unregistered = (
+                    self._unregistered_dependencies(args, kwargs)
+                    if has_futures
+                    else None
                 )
+                if unregistered:
+                    unregistered = await self._wait_for_registration(unregistered)
+                    if unregistered:
+                        self._fail_unregistered_dependent(
+                            comp_fut, func.__name__, unregistered
+                        )
+                        return
+                # A body that outlives shutdown, or a call made after it,
+                # does not register into the shut-down engine.
+                if self._shutdown_event.is_set():
+                    self.handle_component_cancellation({"uid": comp_fut.uid}, comp_fut)
+                    return
+                self._register_component(comp_fut, comp_type, comp_desc, task_type)
+                # Dependents now recognise comp_fut by its task/block
+                # attribute; let the finished task be freed. Assign, not
+                # del: under an eager task factory this runs inside
+                # create_task, before the caller could set the attribute.
+                comp_fut._registration = None
             except Exception as e:
                 if not comp_fut.done():
                     comp_fut.set_exception(e)
+            finally:
+                self._pending_registrations.discard(comp_fut)
 
         # Assign the uid here so callers can read it before registration runs
         comp_desc["uid"] = self._assign_uid(prefix=comp_type)
         comp_fut.id = comp_desc["uid"].split(f"{comp_type}.")[1]
         comp_fut.uid = comp_desc["uid"]
-        asyncio.create_task(register())
+        # Tracked until registration finishes, so shutdown can cancel it.
+        # Added before create_task: with an eager task factory the
+        # registration can finish, and discard comp_fut, inside it.
+        self._pending_registrations.add(comp_fut)
+        # Dependents called with this future before it registers wait for
+        # this task. It is named after func, the name they report if
+        # registration fails, and dropped once registration succeeds.
+        registration = asyncio.create_task(register(), name=func.__name__)
+        # An eager task factory can register the component inside
+        # create_task: then keep the None that register set.
+        if not hasattr(comp_fut, comp_type):
+            comp_fut._registration = registration
 
         return comp_fut
 
@@ -802,6 +847,7 @@ class WorkflowEngine:
             - Updates self.components with new component
             - Updates self.dependencies with component dependencies
             - Logs component registration
+            - Undoes all of these if it fails (see `_unregister_component`)
         """
 
         # make sure not to specify both func and executable at the same time
@@ -844,89 +890,133 @@ class WorkflowEngine:
             "output_files": output_files_deps,
         }
 
-        # Setup future (wrapper already set comp_fut.id and comp_fut.uid)
-        setattr(comp_fut, comp_type, comp_desc)
+        # A failure from here on undoes everything stored so far. A future left
+        # with its task/block attribute looks registered, and its dependents
+        # would wait for a component that never runs.
+        try:
+            # Setup future (_create_component already set comp_fut.id and .uid)
+            setattr(comp_fut, comp_type, comp_desc)
 
-        # Store component that will be sent to the backend
-        self.components[comp_desc["uid"]] = {
-            "type": comp_type,
-            "future": comp_fut,
-            "description": comp_desc,
-        }
+            # Store component that will be sent to the backend
+            self.components[comp_desc["uid"]] = {
+                "type": comp_type,
+                "future": comp_fut,
+                "description": comp_desc,
+            }
 
-        self.dependencies[comp_desc["uid"]] = comp_deps
+            self.dependencies[comp_desc["uid"]] = comp_deps
 
-        logger.debug(
-            "Registered %s: '%s' with id of %s",
-            comp_type,
-            comp_desc["name"],
-            comp_desc["uid"],
-        )
-
-        # Update dependency tracking; wake the run loop only if it is ready
-        if self._update_dependency_tracking(comp_desc["uid"]):
-            self._kick()
-
-        # Block and service futures can resolve outside the completion handlers
-        # (a user cancels a block; a service_callback sets the result): report
-        # them via a done callback.  Plain tasks are reported by the handlers.
-        if comp_type == BLOCK or comp_desc.get("is_service"):
-            comp_fut.add_done_callback(lambda _, u=comp_desc["uid"]: self._on_done(u))
-
-        # Track block membership: if this component is registered from within a block's
-        # execution context, record it so it gets cancelled when the block is cancelled.
-        # Read ContextVar directly — not comp_desc["workflow_id"] which may be overridden
-        # by an explicit call-time kwarg (a telemetry label, not a membership signal).
-        parent_block_uid = self._workflow_id_ctx.get()
-        if (
-            parent_block_uid
-            and parent_block_uid in self.components
-            and self.components[parent_block_uid]["type"] == BLOCK
-        ):
-            self._block_members.setdefault(parent_block_uid, set()).add(
-                comp_desc["uid"]
+            logger.debug(
+                "Registered %s: '%s' with id of %s",
+                comp_type,
+                comp_desc["name"],
+                comp_desc["uid"],
             )
-            comp_fut.add_done_callback(
-                lambda _, b_uid=parent_block_uid, tuid=comp_desc["uid"]: (
-                    self._remove_member(b_uid, tuid)
+
+            # Update dependency tracking; wake the run loop only if it is ready
+            if self._update_dependency_tracking(comp_desc["uid"]):
+                self._kick()
+
+            # Block and service futures can resolve outside the completion handlers
+            # (a user cancels a block; a service_callback sets the result): report
+            # them via a done callback.  Plain tasks are reported by the handlers.
+            if comp_type == BLOCK or comp_desc.get("is_service"):
+                comp_fut.add_done_callback(
+                    lambda _, u=comp_desc["uid"]: self._on_done(u)
                 )
-            )
 
-        # Patch cancel for tasks only; blocks are cancelled via a done_callback
-        # installed in _submit_blocks that cancels the underlying asyncio.Task directly.
-        if comp_type != BLOCK:
-            comp_fut.cancel = self._setup_future_cancel_hook(comp_fut, comp_desc["uid"])
+            # Track block membership: if this component is registered from within a
+            # block's execution context, record it so it gets cancelled when the block
+            # is cancelled. Read ContextVar directly — not comp_desc["workflow_id"]
+            # which may be overridden by an explicit call-time kwarg (a telemetry
+            # label, not a membership signal).
+            parent_block_uid = self._workflow_id_ctx.get()
+            if (
+                parent_block_uid
+                and parent_block_uid in self.components
+                and self.components[parent_block_uid]["type"] == BLOCK
+            ):
+                self._block_members.setdefault(parent_block_uid, set()).add(
+                    comp_desc["uid"]
+                )
+                comp_fut.add_done_callback(
+                    lambda _, b_uid=parent_block_uid, tuid=comp_desc["uid"]: (
+                        self._remove_member(b_uid, tuid)
+                    )
+                )
 
-        if self._telemetry is not None:
-            self._emit(
-                "TaskCreated",
-                task_id=comp_desc["uid"],
-                workflow_id=comp_desc.get("workflow_id"),
-                attributes={
-                    "executable": comp_desc["_tel_executable"],
-                    "task_type": comp_desc["_tel_task_type"],
-                    "depends_on": [d["uid"] for d in comp_deps],
-                },
-            )
+            # Patch cancel for tasks only; blocks are cancelled via a done_callback
+            # installed in _submit_blocks that cancels the underlying asyncio.Task
+            # directly.
+            if comp_type != BLOCK:
+                comp_fut.cancel = self._setup_future_cancel_hook(
+                    comp_fut, comp_desc["uid"]
+                )
 
-        # Emit TaskResolved immediately for tasks with no dependencies.
-        # Tasks with deps will emit from _notify_dependents when the count hits 0.
-        if (
-            self._telemetry is not None
-            and comp_type == TASK
-            and self._dependency_count.get(comp_desc["uid"], -1) == 0
-        ):
-            self._emit(
-                "asyncflow.TaskResolved",
-                task_id=comp_desc["uid"],
-                workflow_id=comp_desc.get("workflow_id"),
-                attributes={
-                    "executable": comp_desc["_tel_executable"],
-                    "task_type": comp_desc["_tel_task_type"],
-                },
-            )
+            if self._telemetry is not None:
+                self._emit(
+                    "TaskCreated",
+                    task_id=comp_desc["uid"],
+                    workflow_id=comp_desc.get("workflow_id"),
+                    attributes={
+                        "executable": comp_desc["_tel_executable"],
+                        "task_type": comp_desc["_tel_task_type"],
+                        "depends_on": [d["uid"] for d in comp_deps],
+                    },
+                )
+
+            # Emit TaskResolved immediately for tasks with no dependencies.
+            # Tasks with deps will emit from _notify_dependents when the count hits 0.
+            if (
+                self._telemetry is not None
+                and comp_type == TASK
+                and self._dependency_count.get(comp_desc["uid"], -1) == 0
+            ):
+                self._emit(
+                    "asyncflow.TaskResolved",
+                    task_id=comp_desc["uid"],
+                    workflow_id=comp_desc.get("workflow_id"),
+                    attributes={
+                        "executable": comp_desc["_tel_executable"],
+                        "task_type": comp_desc["_tel_task_type"],
+                    },
+                )
+        except BaseException:
+            self._unregister_component(comp_fut, comp_type, comp_desc["uid"])
+            raise
 
         return comp_fut
+
+    def _unregister_component(
+        self, comp_fut: asyncio.Future, comp_type: str, uid: str
+    ) -> None:
+        """Undoes what `_register_component` stored before it failed.
+
+        The future is left as that of any component that failed to register: with
+        its exception set by the caller and no task or block attribute, so its
+        dependents fail with DependencyFailureError (see
+        `_unregistered_dependencies`). Telemetry events already emitted stay.
+
+        Args:
+            comp_fut (asyncio.Future): Future of the component.
+            comp_type (str): Type of component ('task' or 'block').
+            uid (str): The component uid.
+        """
+        if hasattr(comp_fut, comp_type):
+            delattr(comp_fut, comp_type)
+        if hasattr(comp_fut, "original_cancel"):
+            del comp_fut.cancel
+            del comp_fut.original_cancel
+        self.components.pop(uid, None)
+        self.dependencies.pop(uid, None)
+        self._dependency_count.pop(uid, None)
+        for dependents in self._dependents_map.values():
+            dependents.discard(uid)
+        if uid in self._ready_queue:
+            self._ready_queue.remove(uid)
+        parent_block_uid = self._workflow_id_ctx.get()
+        if parent_block_uid:
+            self._remove_member(parent_block_uid, uid)
 
     def _setup_future_cancel_hook(
         self, fut: asyncio.Future, uid: str
@@ -985,6 +1075,166 @@ class WorkflowEngine:
         """
         uid = get_next_uid()
         return f"{prefix}.{uid}"
+
+    def _reject_foreign_futures(self, func: Callable, args, kwargs) -> bool:
+        """Raises TypeError for an asyncio future in args or kwargs that is not the
+        future of a task or block of this engine.
+
+        Only those are dependencies (see `_detect_dependencies`): a plain Future or
+        Task has no component to wait for, and the component of another engine's
+        future is never resolved by this engine. `_create_component` sets `_engine`
+        on the future of a task or block when it is created, before it registers.
+
+        Args:
+            func (Callable): The decorated function, to name a positional argument.
+            args (tuple): Positional arguments of the call.
+            kwargs (dict): Keyword arguments of the call.
+
+        Returns:
+            bool: Whether an argument is the future of a task or block of this
+                engine, so that registration scans the arguments again only then.
+
+        Raises:
+            TypeError: If an argument is a plain asyncio Future or Task, or the
+                future of a task or block of another engine.
+        """
+        # Runs on every call: two plain loops, the message only on a rejection.
+        has_futures = False
+        for key, arg in enumerate(args):
+            if isinstance(arg, asyncio.Future):
+                if getattr(arg, "_engine", None) is not self:
+                    raise self._foreign_future_error(func, key, arg)
+                has_futures = True
+        for key, arg in kwargs.items():
+            if isinstance(arg, asyncio.Future):
+                if getattr(arg, "_engine", None) is not self:
+                    raise self._foreign_future_error(func, key, arg)
+                has_futures = True
+        return has_futures
+
+    @staticmethod
+    def _foreign_future_error(func: Callable, key, arg: asyncio.Future) -> TypeError:
+        """Builds the TypeError that `_reject_foreign_futures` raises.
+
+        Args:
+            func (Callable): The decorated function, to name a positional argument.
+            key (Union[int, str]): Position or keyword of the argument.
+            arg (asyncio.Future): The rejected future.
+
+        Returns:
+            TypeError: Names the argument, says what it is and what to pass instead.
+        """
+        if isinstance(key, int):
+            # Name a positional argument after its parameter, if it has one.
+            params = [
+                p.name
+                for p in inspect.signature(func).parameters.values()
+                if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
+            ]
+            name = (
+                f"argument '{params[key]}'"
+                if key < len(params)
+                else f"positional argument {key + 1}"
+            )
+        else:
+            name = f"argument '{key}'"
+        if getattr(arg, "_engine", None) is None:
+            kind = "Task" if isinstance(arg, asyncio.Task) else "Future"
+            problem = (
+                f"is a plain asyncio {kind}, not the future of a task or block; "
+                "only those are dependencies"
+            )
+        else:
+            problem = (
+                f"is the future of {arg.uid} of another WorkflowEngine; only the "
+                "futures of this engine's tasks and blocks are dependencies"
+            )
+        return TypeError(
+            f"{name} {problem}. Await it and pass its result, or await it in a "
+            "block and pass the block's future."
+        )
+
+    def _unregistered_dependencies(self, args, kwargs) -> list:
+        """Returns the futures in args and kwargs whose component has not registered.
+
+        Executable and prompt tasks register only after their body returns, so a
+        dependent can be called with the future of a component that has not
+        registered yet. `_detect_dependencies` recognises a dependency by the `task`
+        or `block` attribute set at registration, so the dependent must register
+        after its dependencies (see `_wait_for_registration`).
+
+        Args:
+            args (tuple): Positional arguments of the dependent.
+            kwargs (dict): Keyword arguments of the dependent.
+
+        Returns:
+            list: Futures of components whose registration is pending or failed,
+                usually empty.
+        """
+        return [
+            arg
+            for arg in (*args, *kwargs.values())
+            if isinstance(arg, asyncio.Future)
+            and not hasattr(arg, TASK)
+            and not hasattr(arg, BLOCK)
+            and hasattr(arg, "_registration")
+        ]
+
+    async def _wait_for_registration(self, futures: list) -> list:
+        """Waits until the registration of every component in futures has finished.
+
+        It waits for all of them, as `run` waits for all the dependencies of a
+        dependent before it fails or cancels it, so the outcome does not depend on
+        which registration finishes first.
+
+        Args:
+            futures (list): Futures from `_unregistered_dependencies`.
+
+        Returns:
+            list: Futures whose component did not register, because its
+                registration failed or was cancelled.
+        """
+        pending = [fut._registration for fut in futures if not fut._registration.done()]
+        if pending:
+            # Unlike awaiting the tasks, asyncio.wait does not cancel them
+            # when this registration is cancelled.
+            await asyncio.wait(pending)
+        return [
+            fut for fut in futures if not hasattr(fut, TASK) and not hasattr(fut, BLOCK)
+        ]
+
+    def _fail_unregistered_dependent(
+        self, comp_fut: asyncio.Future, name: str, unregistered: list
+    ) -> None:
+        """Cancels or fails a dependent of components that did not register, as `run`
+        does for a dependent of cancelled or failed components, through
+        `handle_component_cancellation` and `handle_component_failure`.
+
+        Args:
+            comp_fut (asyncio.Future): Future of the dependent, not registered.
+            name (str): Name of the dependent.
+            unregistered (list): Futures of the dependencies that did not register.
+        """
+        if comp_fut.done():
+            return
+
+        component = {"uid": comp_fut.uid}
+        # A dependency future that is not done had its registration cancelled.
+        if any(fut.cancelled() or not fut.done() for fut in unregistered):
+            self.handle_component_cancellation(component, comp_fut)
+            return
+
+        self.handle_component_failure(
+            component,
+            comp_fut,
+            DependencyFailureError(
+                message=f"Cannot execute '{name}' due to dependency failure",
+                failed_dependencies=[
+                    fut._registration.get_name() for fut in unregistered
+                ],
+                root_cause=unregistered[0].exception(),
+            ),
+        )
 
     def _detect_dependencies(
         self, possible_args_dependencies, possible_kw_dependencies=None
@@ -1913,7 +2163,8 @@ class WorkflowEngine:
             submitting workflows.
             3. Waits for the cancellation and completion of these tasks,
             with a timeout of 5 seconds.
-            4. Cancel workflow tasks.
+            4. Cancel workflow tasks, including those that have not
+            registered yet.
             5. Logs a warning if the tasks do not complete within the timeout
             period.
             6. Shuts down the backend using an executor to avoid blocking the
@@ -1941,6 +2192,18 @@ class WorkflowEngine:
             future = comp["future"]
             if not future.done():
                 self.handle_component_cancellation(comp["description"], future)
+
+        # cancel the futures of components that have not registered yet: an
+        # executable or prompt task whose body is still running, or a dependent
+        # waiting for its dependencies to register
+        for future in list(self._pending_registrations):
+            registration = getattr(future, "_registration", None)
+            if registration is not None:
+                registration.cancel()
+            if not future.done():
+                self.handle_component_cancellation({"uid": future.uid}, future)
+        # A registration cancelled before it started never runs its finally
+        self._pending_registrations.clear()
 
         # Cancel internal components task
         if not self._run_task.done():

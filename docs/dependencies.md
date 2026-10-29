@@ -90,7 +90,8 @@ scaled = scale(x, factor=x)
 |---|---|---|
 | Plain values (`42`, `"text"`, objects) | No | Passed through unchanged. |
 | Futures **nested inside containers**: `f([a, b])`, `f(cfg={"x": a})` | **No** | The task does not wait for them and receives the raw future objects. Pass each future as its own argument instead. |
-| `asyncio.Future`s or tasks **not** created by the engine | No | They are not part of the workflow graph. |
+| Plain `asyncio` futures or tasks, **not** returned by a task or block | **Rejected** | The call raises a `TypeError` naming the argument. Await the future and pass its result, or await it inside a block and pass the block's future. |
+| Futures returned by a task or block of **another** engine | **Rejected** | The call raises a `TypeError` naming the argument, whether or not that task or block has registered or finished. This engine never runs the other engine's component, so it cannot wait for it. Await the future and pass its result, or await it inside a block and pass the block's future. |
 | Futures awaited **inside** a task body | No | They don't order scheduling; awaiting just blocks that task while it runs. |
 
 !!! warning
@@ -118,6 +119,7 @@ except DependencyFailureError as e:
     print(e.failed_dependencies, repr(e.root_cause))
 ```
 
+- A dependency that **never registers** counts as failed: for example, its decorated function raised, or an executable or prompt task returned no command or prompt. The dependent fails with a `DependencyFailureError` whose `root_cause` is that exception.
 - If a dependency is **cancelled**, the dependent task is cancelled as well.
 - If a **block**'s body raises `asyncio.CancelledError` (for example by awaiting a task that was cancelled), the block itself is cancelled: its still-running member tasks are cancelled, and so are the components that depend on it.
 
