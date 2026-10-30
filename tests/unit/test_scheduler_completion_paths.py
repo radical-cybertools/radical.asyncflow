@@ -4,8 +4,9 @@ releases its dependents promptly, also while the run loop is kept busy.
 Each path releases dependents through the engine's ``_on_done``.  Nothing
 polls: a path that skipped it would leave its dependents waiting forever,
 so every wait in these tests is bounded.  A task future resolved outside the
-engine is the exception: its dependents are released when the backend reports
-the task.
+engine while the task runs is the exception: its dependents are released when
+the backend reports the task.  One resolved while the backend's submit_tasks is
+still running is released when submission returns.
 """
 
 import asyncio
@@ -276,6 +277,30 @@ class TestCompletionPaths:
         task = backend.parked.pop(p.task["uid"])
         task["exception"] = RuntimeError("late")  # read for FAILED only
         backend._callback_func(task, state)
+        await _resolves_within(d, 0.5)
+        assert d.exception() is None
+        assert p.task["uid"] not in flow.running
+
+    @pytest.mark.asyncio
+    async def test_task_resolved_outside_engine_during_submit(self, make_flow):
+        """A future resolved while the backend's submit_tasks is still running releases
+        its dependents when submission returns, even if the backend never reports the
+        task."""
+        flow, backend = await make_flow()
+        backend.slow = 0.1
+
+        @flow.function_task
+        async def park_slow():
+            return 1
+
+        @flow.function_task
+        async def dep(x):
+            return 2
+
+        p = park_slow()
+        d = dep(p)
+        await asyncio.wait_for(backend.slow_started.wait(), 5)
+        p.set_result("set outside the engine")
         await _resolves_within(d, 0.5)
         assert d.exception() is None
         assert p.task["uid"] not in flow.running

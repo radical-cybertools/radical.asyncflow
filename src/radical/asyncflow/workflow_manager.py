@@ -1675,9 +1675,13 @@ class WorkflowEngine:
                     for comp_desc in to_submit:
                         comp_uid = comp_desc["uid"]
                         self.resolved.add(comp_uid)
-                        # A backend may complete a task inside submit_tasks;
-                        # its handler has already released the dependents.
-                        if not self.components[comp_uid]["future"].done():
+                        # Done already: the backend completed the task inside
+                        # submit_tasks (its handler released the dependents), or
+                        # user code resolved the future meanwhile (nothing did).
+                        # _on_done is idempotent, so release in both cases.
+                        if self.components[comp_uid]["future"].done():
+                            self._on_done(comp_uid)
+                        else:
                             self.running.add(comp_uid)
 
                 if self._ready_queue:
