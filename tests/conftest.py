@@ -57,10 +57,10 @@ def pytest_addoption(parser):
     group.addoption(
         "--engine-invariants",
         choices=("strict", "warn", "off"),
-        default=os.environ.get("ASYNCFLOW_INVARIANTS", "warn"),
+        default=os.environ.get("ASYNCFLOW_INVARIANTS", "strict"),
         help="strict fails a test that leaves ERROR logs or engine records after "
         "shutdown, warn reports it, off skips the checks; also "
-        "ASYNCFLOW_INVARIANTS (default: warn)",
+        "ASYNCFLOW_INVARIANTS (default: strict)",
     )
 
 
