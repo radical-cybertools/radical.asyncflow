@@ -1,0 +1,54 @@
+name: stress
+
+# Scale tests and the nightly Hypothesis profile, under both task factories: nightly,
+# by hand, and on pull requests labelled "stress" (again on each push while labelled).
+on:
+  schedule:
+    - cron: '30 3 * * *'
+  workflow_dispatch:
+  pull_request:
+    types: [labeled, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stress-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  stress:
+    if: >-
+      github.event_name != 'pull_request' ||
+      (contains(github.event.pull_request.labels.*.name, 'stress') &&
+       (github.event.action != 'labeled' || github.event.label.name == 'stress'))
+    name: stress (${{ matrix.python }}, ${{ matrix.tasks }} task factory)
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.9', '3.10', '3.11', '3.12', '3.13']
+        tasks: [default, eager]
+        exclude:  # asyncio.eager_task_factory is new in Python 3.12
+          - python: '3.9'
+            tasks: eager
+          - python: '3.10'
+            tasks: eager
+          - python: '3.11'
+            tasks: eager
+    runs-on: ubuntu-latest
+    env:
+      ASYNCFLOW_EAGER_TASKS: ${{ matrix.tasks == 'eager' && '1' || '0' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python ${{ matrix.python }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install Packages
+        run: python -m pip install --upgrade pip tox
+      - name: Run Stress and Nightly Property Tests
+        run: tox -e stress -- -vv

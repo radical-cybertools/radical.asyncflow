@@ -37,6 +37,7 @@ dev = [
     "pytest",
     "pytest-asyncio",
     "pytest-cov",
+    "hypothesis",
     "pre-commit"
 ]
 
@@ -73,6 +74,8 @@ asyncio_mode = "auto"
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests as integration tests",
+    "stress: scale tests, run nightly and on PRs labelled 'stress' (select with -m stress)",
+    "no_engine_invariants: skip the engine_invariants checks of tests/conftest.py",
 ]
 
 [tool.coverage.run]
