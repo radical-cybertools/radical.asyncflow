@@ -1,7 +1,8 @@
 name: benchmark
 
-# The engine's per-task cost and memory, head against base, on pull requests that can
-# change them. Fails when the head makes the collector run more than 5% more often; a
+# The engine's cost and memory, head against base: on pull requests that can change
+# them, per task against the PR's base; nightly, 40,000 tasks at once, main against its
+# last release. Fails when the head makes the collector run more than 5% more often; a
 # slower head does not fail it, because the timings vary from runner to runner.
 on:
   pull_request:
@@ -10,17 +11,28 @@ on:
       - 'benchmarks/**'
       - 'pyproject.toml'
       - '.github/workflows/benchmark.yml'
+  schedule:
+    - cron: '0 4 * * *'
+  workflow_dispatch:
+    inputs:
+      base:
+        description: 'Base: a tag, branch or commit (default: the last release before the head)'
+        required: false
+      head:
+        description: 'Head: a tag, branch or commit (default: the branch this runs on)'
+        required: false
 
 permissions:
   contents: read
 
 concurrency:
-  group: benchmark-${{ github.event.pull_request.number }}
+  group: benchmark-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
 jobs:
   benchmark:
     name: benchmark against the base
+    if: github.event_name == 'pull_request'
     timeout-minutes: 30
     runs-on: ubuntu-latest
     steps:
@@ -53,4 +65,50 @@ jobs:
             --base "$RUNNER_TEMP/venv-base/bin/python" \
             --head "$RUNNER_TEMP/venv-head/bin/python" \
             --base-label "base ${BASE::7}" --head-label "head ${HEAD_SHA::7}" \
+            --markdown "$GITHUB_STEP_SUMMARY"
+
+  scale:
+    name: 40,000 tasks against the base
+    if: github.event_name != 'pull_request'
+    timeout-minutes: 30
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # every tag, to find the last release
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install the Base and the Head
+        env:
+          BASE_REF: ${{ inputs.base }}
+          HEAD_REF: ${{ inputs.head }}
+        run: |
+          # A branch other than the one checked out is only a remote branch here
+          commit() {
+            git rev-parse -q --verify "$1^{commit}" ||
+              git rev-parse --verify "origin/$1^{commit}"
+          }
+          head=$(commit "${HEAD_REF:-HEAD}")
+          base=$(commit "${BASE_REF:-$(git describe --tags --abbrev=0 "$head")}")
+          {
+            echo "HEAD_LABEL=head $(git describe --tags --always "$head")"
+            echo "BASE_LABEL=base $(git describe --tags --always "$base")"
+          } >> "$GITHUB_ENV"
+          git worktree add "$RUNNER_TEMP/base" "$base"
+          git worktree add "$RUNNER_TEMP/head" "$head"
+          for side in base head; do
+            python -m venv "$RUNNER_TEMP/venv-$side"
+            "$RUNNER_TEMP/venv-$side/bin/pip" install -q "$RUNNER_TEMP/$side"
+          done
+      - name: Compare, Interleaved
+        # A text table here, a Markdown one in the run's summary
+        run: |
+          echo "Rendered: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          python benchmarks/engine_overhead.py compare --scale 40000 \
+            --base "$RUNNER_TEMP/venv-base/bin/python" \
+            --head "$RUNNER_TEMP/venv-head/bin/python" \
+            --base-label "$BASE_LABEL" --head-label "$HEAD_LABEL" \
             --markdown "$GITHUB_STEP_SUMMARY"

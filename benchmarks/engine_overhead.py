@@ -2,6 +2,7 @@
 
     python benchmarks/engine_overhead.py measure
     python benchmarks/engine_overhead.py compare --base PYTHON --head PYTHON
+    python benchmarks/engine_overhead.py compare --scale N --base PYTHON --head PYTHON
 
 `measure` prints, as JSON, the metrics of the radical.asyncflow that the interpreter
 imports. `compare` runs `measure` in fresh processes of two interpreters, for example
@@ -20,6 +21,11 @@ it; its cost is measured on its own, over MEMORY_N tasks with the collector on, 
 the peak that tracemalloc traces over those tasks, garbage not yet collected included.
 Retained memory is what tracemalloc still traces per component after MEMORY_N
 executable tasks.
+
+`--scale N` measures instead what an application sees, as in the review of #113: N
+tasks submitted at once, function tasks with a future argument and executable tasks
+alternating, with the collector on. It reports their wall time, the collector's
+collections and the time spent in them, and the process's peak RSS.
 """
 
 import argparse
@@ -28,6 +34,7 @@ import gc
 import json
 import logging
 import os
+import resource
 import statistics
 import subprocess
 import sys
@@ -37,11 +44,14 @@ import tracemalloc
 
 # Changes beyond this fraction are marked in the table
 THRESHOLD = 0.05
-# A rise beyond THRESHOLD in this metric fails compare
-GATED = "mixed, collector on: collections"
 
 
-async def _measure(n, rounds, memory_n):
+def _gated(metric):
+    # A rise beyond THRESHOLD in a count of collections fails compare
+    return metric.endswith(": collections")
+
+
+async def _engine():
     from radical.asyncflow import WorkflowEngine
 
     engine = await WorkflowEngine.create(dry_run=True)
@@ -53,6 +63,53 @@ async def _measure(n, rounds, memory_n):
     @engine.executable_task
     async def e(x=None):
         return "echo hi"
+
+    return engine, t, e
+
+
+async def _mixed(t, e, n):
+    """Run n tasks at once with the collector on, function tasks with a future argument
+    and executable tasks alternating.
+
+    Returns their wall time and the time spent in collections, in seconds, and the
+    number of collections.
+    """
+    pauses = []
+
+    def on_gc(phase, info):
+        pauses.append(time.perf_counter() if phase == "start" else -time.perf_counter())
+
+    dep = t()
+    await dep
+    gc.collect()
+    before = [s["collections"] for s in gc.get_stats()]
+    gc.callbacks.append(on_gc)
+    t0 = time.perf_counter()
+    futs = [t(dep) if k % 2 else e() for k in range(n)]
+    await asyncio.gather(*futs)
+    t1 = time.perf_counter()
+    gc.callbacks.remove(on_gc)
+    after = [s["collections"] for s in gc.get_stats()]
+    return t1 - t0, -sum(pauses), sum(a - b for a, b in zip(after, before))
+
+
+async def _scale(n):
+    engine, t, e = await _engine()
+    seconds, collecting, collections = await _mixed(t, e, n)
+    # ru_maxrss counts bytes on macOS and KiB on Linux
+    peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    peak /= 2**20 if sys.platform == "darwin" else 2**10
+    await engine.shutdown()
+    return {
+        f"{n:,} tasks: end-to-end (s)": seconds,
+        f"{n:,} tasks: in collections (s)": collecting,
+        f"{n:,} tasks: collections": collections,
+        f"{n:,} tasks: peak RSS (MiB)": peak,
+    }
+
+
+async def _measure(n, rounds, memory_n):
+    engine, t, e = await _engine()
 
     workloads = {
         "function, no args": lambda dep: [t() for _ in range(n)],
@@ -84,28 +141,11 @@ async def _measure(n, rounds, memory_n):
         results[f"{label}: call+register (µs)"] = min(register)
         results[f"{label}: end-to-end (µs)"] = min(total)
 
-    # The collector's share: function tasks with a future argument and executable
-    # tasks, alternating, with the collector on.
-    pauses = []
-
-    def on_gc(phase, info):
-        pauses.append(time.perf_counter() if phase == "start" else -time.perf_counter())
-
-    dep = t()
-    await dep
-    gc.collect()
-    before = [s["collections"] for s in gc.get_stats()]
-    gc.callbacks.append(on_gc)
-    t0 = time.perf_counter()
-    futs = [t(dep) if k % 2 else e() for k in range(memory_n)]
-    await asyncio.gather(*futs)
-    t1 = time.perf_counter()
-    gc.callbacks.remove(on_gc)
-    after = [s["collections"] for s in gc.get_stats()]
-    results["mixed, collector on: end-to-end (µs)"] = (t1 - t0) / memory_n * 1e6
-    results["mixed, collector on: in collections (µs)"] = -sum(pauses) / memory_n * 1e6
-    results[GATED] = sum(a - b for a, b in zip(after, before))
-    del futs
+    # The collector's share
+    seconds, collecting, collections = await _mixed(t, e, memory_n)
+    results["mixed, collector on: end-to-end (µs)"] = seconds / memory_n * 1e6
+    results["mixed, collector on: in collections (µs)"] = collecting / memory_n * 1e6
+    results["mixed, collector on: collections"] = collections
     engine._clear_internal_records()
 
     # The same tasks again, traced on their own so that tracing does not slow the
@@ -139,7 +179,10 @@ def measure(args):
     logging.disable(logging.CRITICAL)
     with tempfile.TemporaryDirectory() as work_dir:
         os.chdir(work_dir)  # where the engine makes its work directory
-        results = asyncio.run(_measure(args.n, args.rounds, args.memory_n))
+        if args.scale:
+            results = asyncio.run(_scale(args.scale))
+        else:
+            results = asyncio.run(_measure(args.n, args.rounds, args.memory_n))
     print(json.dumps(results))
 
 
@@ -152,6 +195,8 @@ def compare(args):
         f"--rounds={args.rounds}",
         f"--memory-n={args.memory_n}",
     ]
+    if args.scale:
+        command.append(f"--scale={args.scale}")
     samples = {"base": [], "head": []}
     for run in range(args.runs):
         for side in ("base", "head") if run % 2 == 0 else ("head", "base"):
@@ -169,21 +214,35 @@ def compare(args):
         head = [s[metric] for s in samples["head"]]
         change = statistics.median(head) / statistics.median(base) - 1
         rows.append((metric, _spread(base), _spread(head), change))
-    title = f"Engine overhead: {args.head_label} against {args.base_label}"
+    if args.scale:
+        what = f"Engine at {args.scale:,} tasks"
+        workload = (
+            f"each process runs {args.scale:,} tasks at once, function tasks with a "
+            "future argument and executable tasks alternating, with the collector on"
+        )
+    else:
+        what = "Engine overhead"
+        workload = (
+            f"each process keeps the best of {args.rounds} rounds of {args.n:,} tasks "
+            f"per workload; the mixed and memory rows use {args.memory_n:,} tasks"
+        )
+    title = f"{what}: {args.head_label} against {args.base_label}"
     note = (
-        f"Median (min–max) of {args.runs} processes per side, interleaved; each "
-        f"process keeps the best of {args.rounds} rounds of {args.n:,} tasks per "
-        f"workload; the mixed and memory rows use {args.memory_n:,} tasks. A rise "
-        f"above {THRESHOLD:.0%} in collections fails the comparison; the other rows "
-        "are informational."
+        f"Median (min–max) of {args.runs} processes per side, interleaved; "
+        f"{workload}. A rise above {THRESHOLD:.0%} in collections fails the "
+        "comparison; the other rows are informational."
     )
     print(_text_table(title, rows, note))
     if args.markdown:
         with open(args.markdown, "a") as out:
             out.write(_markdown_table(title, rows, note))
-    change = next(change for metric, _, _, change in rows if metric == GATED)
-    if change > THRESHOLD:
-        sys.exit(f"{GATED} rose {change:+.1%}, above {THRESHOLD:.0%}")
+    risen = [
+        f"{metric} rose {change:+.1%}"
+        for metric, _, _, change in rows
+        if _gated(metric) and change > THRESHOLD
+    ]
+    if risen:
+        sys.exit(f"{'; '.join(risen)}, above {THRESHOLD:.0%}")
 
 
 def _text_table(title, rows, note):
@@ -235,6 +294,12 @@ def main():
         p.add_argument("--rounds", type=int, default=6, help="rounds per process")
         p.add_argument(
             "--memory-n", type=int, default=20_000, help="tasks measured for memory"
+        )
+        p.add_argument(
+            "--scale",
+            type=int,
+            metavar="N",
+            help="instead, run N tasks at once, as an application does",
         )
         if name == "compare":
             p.add_argument("--base", required=True, help="interpreter of the base")
