@@ -1,0 +1,67 @@
+name: nightly report
+
+# Opens an issue when a nightly run fails, comments on it on each further failing night,
+# and closes it when a nightly run passes again. GitHub tells only whoever last edited
+# a cron line about scheduled runs, so a failing nightly could otherwise go unnoticed.
+on:
+  workflow_run:
+    workflows: [stress, benchmark]
+    types: [completed]
+
+permissions:
+  actions: read  # the failed jobs of the run
+  issues: write
+
+concurrency:
+  group: nightly-report-${{ github.event.workflow_run.name }}
+  cancel-in-progress: false
+
+jobs:
+  report:
+    # Pull requests run these workflows too and report on the PR. This job checks out
+    # nothing, so a run from a fork's PR could not bring code here anyway.
+    if: github.event.workflow_run.event == 'schedule'
+    timeout-minutes: 5
+    runs-on: ubuntu-latest
+    steps:
+      - name: Open, Comment on or Close the Issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          WORKFLOW: ${{ github.event.workflow_run.name }}
+          CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          export TITLE="Nightly $WORKFLOW failed"
+          number=$(gh issue list --state open --limit 500 --json number,title \
+            --jq 'map(select(.title == env.TITLE)) | .[0].number // empty')
+          case "$CONCLUSION" in
+            failure|timed_out)
+              {
+                echo "The nightly \`$WORKFLOW\` run on ${SHA::7} failed: $RUN_URL"
+                echo
+                echo "Failed jobs:"
+                gh run view "$RUN_ID" --json jobs --jq '.jobs[]
+                  | select(.conclusion == "failure" or .conclusion == "timed_out")
+                  | "- \(.name)"'
+              } > report.md
+              if [ -n "$number" ]; then
+                gh issue comment "$number" --body-file report.md
+              else
+                {
+                  echo
+                  echo "This issue gets a comment on each further failing night, and" \
+                    "closes when a nightly \`$WORKFLOW\` run passes."
+                } >> report.md
+                gh issue create --title "$TITLE" --body-file report.md
+              fi
+              ;;
+            success)
+              if [ -n "$number" ]; then
+                gh issue close "$number" --comment \
+                  "The nightly \`$WORKFLOW\` run on ${SHA::7} passed: $RUN_URL"
+              fi
+              ;;
+          esac
