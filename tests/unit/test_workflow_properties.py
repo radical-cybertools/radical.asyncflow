@@ -434,7 +434,7 @@ async def check_workflow(wf, work_dir):
             outcome(fut)  # retrieves its exception
 
     if done_before is None:
-        for fut, ok in zip(futures, registered):
+        for fut, ok in zip(futures, registered, strict=True):
             if not ok:
                 assert fut.uid not in flow.components, f"{fut.uid} failed to register"
                 assert fut.uid not in flow.dependencies, f"{fut.uid} failed to register"
