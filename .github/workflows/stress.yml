@@ -37,11 +37,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: ['3.10', '3.11', '3.12', '3.13']
+        python: ['3.11', '3.12', '3.13']
         tasks: [default, eager]
         exclude:  # asyncio.eager_task_factory is new in Python 3.12
-          - python: '3.10'
-            tasks: eager
           - python: '3.11'
             tasks: eager
     runs-on: ubuntu-latest
