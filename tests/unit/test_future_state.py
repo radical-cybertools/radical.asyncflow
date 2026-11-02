@@ -94,7 +94,6 @@ async def test_future_state_transitions_to_cancelled():
 
     fut = asyncio.Future()
     fut.state = "RUNNING"
-    fut.original_cancel = fut.cancel
     task_desc = {"uid": "task.cancel-test"}
 
     engine.handle_component_cancellation(task_desc, fut)
@@ -135,11 +134,11 @@ async def test_future_state_cancelled_before_registration(comp_type):
 
 
 @pytest.mark.asyncio
-async def test_call_patches_no_cancel_on_the_future():
-    """Calling a task or block must not patch `cancel` onto its future: a patch per call
-    cost 25 MB and 29% more gen-0 collections at 40K tasks.
+async def test_component_futures_are_never_patched():
+    """No task or block future gets a `cancel` of its own, before or after it registers.
 
-    The state set on cancellation before registration comes from the future's class.
+    A patch per call cost 25 MB and 29% more gen-0 collections at 40K tasks, and a
+    `cancel` bound before a patch at registration missed the backend.
     """
     engine = await _make_engine()
 
@@ -148,13 +147,21 @@ async def test_call_patches_no_cancel_on_the_future():
         await asyncio.sleep(0.01)  # not registered when the call returns
         return "/bin/true"
 
+    @engine.function_task
+    async def some_task():
+        return 1
+
     @engine.block
     async def some_block():
         return "ok"
 
-    for fut in (slow_command(), some_block()):
-        assert getattr(fut.cancel, "__func__", None) is type(fut).cancel
-        assert not hasattr(fut, "original_cancel")
+    futs = (slow_command(), some_task(), some_block())
+    for registered in (False, True):
+        if registered:
+            await asyncio.sleep(0.05)  # let them register
+            assert all(hasattr(f, "task") or hasattr(f, "block") for f in futs)
+        for fut in futs:
+            assert getattr(fut.cancel, "__func__", None) is type(fut).cancel
 
     await engine.shutdown()
 

@@ -82,6 +82,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   exception set. Under `asyncio.eager_task_factory`, a block that finished without
   suspending ended `"RUNNING"` instead of `"DONE"` or `"FAILED"`. Each now ends
   `"CANCELLED"`, `"FAILED"` or `"DONE"`, set before its done callbacks run.
+- **`cancel()` on a task that has not registered** — a task cancelled before it
+  registered still registered, emitted `TaskCreated` and `TaskResolved` with no
+  terminal event, and an executable or prompt task's body ran on. It now never
+  registers, and its body stops. A `cancel` bound before the task registered, such
+  as `loop.call_later(t, fut.cancel)`, cancelled a running task only in the engine,
+  never on the execution backend; it now behaves like `fut.cancel()` called later.
 
 ### Added
 
