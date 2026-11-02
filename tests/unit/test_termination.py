@@ -143,7 +143,7 @@ class TestGracefulShutdown:
         # Wait for shutdown to be called with timeout
         try:
             await asyncio.wait_for(shutdown_called.wait(), timeout=2.0)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             pytest.fail("Shutdown was not called within timeout period")
 
         # Assert: Shutdown was triggered
