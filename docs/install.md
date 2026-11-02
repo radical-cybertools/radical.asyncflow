@@ -103,7 +103,7 @@ The `-e` flag installs it in *editable mode* — any local changes you make to t
 ### Running the tests
 
 ```bash
-tox -e py312                    # unit tests, including 150 random workflows (Hypothesis)
+tox -e py312                    # unit tests, including 150 random workflows, the same each run
 tox -e py312-all                # integration tests
 tox -e py312 -- --eager-tasks   # unit tests under asyncio.eager_task_factory (3.12+)
 tox -e stress                   # scale tests and 2,000 random workflows, as nightly

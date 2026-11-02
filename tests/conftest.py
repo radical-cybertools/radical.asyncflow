@@ -30,7 +30,10 @@ else:
         "deadline": None,
         "suppress_health_check": [HealthCheck.function_scoped_fixture],
     }
-    settings.register_profile("ci", max_examples=150, print_blob=True, **_common)
+    # Pull requests run the same examples on every run; the nightly ones explore.
+    settings.register_profile(
+        "ci", max_examples=150, derandomize=True, print_blob=True, **_common
+    )
     settings.register_profile("nightly", max_examples=2000, **_common)
     # Only the @example cases, for coverage that does not change from run to run
     settings.register_profile("explicit", phases=[Phase.explicit], **_common)
