@@ -86,6 +86,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `docs/telemetry.md`: the span that is current when a task is called, in-process or
   extracted from a W3C `traceparent` carrier, becomes the task span's parent.
 
+### Removed
+
+- **Python 3.9 support** — AsyncFlow now requires Python 3.10 or newer
+  (`requires-python = ">=3.10"`). Python 3.9 reached end of life in October 2025, and
+  CI no longer tests it: the `py39` and `py39-all` tox environments and their CI jobs
+  are gone, and Ruff targets `py310`.
+
 ## [0.6.0] 2026-10-19
 
 ### Fixed

@@ -15,7 +15,7 @@ maintainers = [
     {name = "Aymen Alsaadi", email = "aymen.alsaadi@rutgers.edu"},
 ]
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 
 dependencies = [
     "pydantic",
@@ -54,7 +54,7 @@ doc = [
 
 [tool.ruff]
 line-length = 88
-target-version = "py39"
+target-version = "py310"
 fix = true
 
 [tool.ruff.lint]

@@ -296,7 +296,7 @@ def _panel_stage_dist(ax, tl: dict):
             flierprops=dict(marker=".", markersize=4, alpha=0.5),
         )
         colors = ["#a29bfe", "#74b9ff", "#fdcb6e", "#fd79a8", "#55efc4"]
-        for patch, color in zip(bp["boxes"], colors):
+        for patch, color in zip(bp["boxes"], colors, strict=False):
             patch.set_facecolor(color)
             patch.set_alpha(0.75)
     ax.tick_params(axis="x", rotation=20)
@@ -441,7 +441,7 @@ def _panel_stage_timers(ax, stages: dict):
         )
         ax.set_xticks(list(xs))
         ax.set_xticklabels(names, rotation=20, ha="right")
-        for bar, m in zip(bars, means):
+        for bar, m in zip(bars, means, strict=True):
             ax.text(
                 bar.get_x() + bar.get_width() / 2,
                 bar.get_height() + max(means) * 0.02,
