@@ -2,6 +2,8 @@ name: stress
 
 # Scale tests and the nightly Hypothesis profile, under both task factories: nightly,
 # by hand, and on pull requests labelled "stress" (again on each push while labelled).
+# GitHub cannot filter pull_request events by label, so every push to every PR starts
+# a run whose job skips, at no runner cost.
 on:
   schedule:
     - cron: '30 3 * * *'
@@ -12,8 +14,16 @@ on:
 permissions:
   contents: read
 
+# A run that tests cancels the one before it. A run that skips, because the PR has no
+# stress label or because another label was added, gets a group of its own, so that it
+# cancels nothing.
 concurrency:
-  group: stress-${{ github.event.pull_request.number || github.ref }}
+  group: >-
+    stress-${{ github.event.pull_request.number || github.ref }}-${{
+    github.event_name == 'pull_request' &&
+    (!contains(github.event.pull_request.labels.*.name, 'stress') ||
+    (github.event.action == 'labeled' && github.event.label.name != 'stress')) &&
+    github.run_id || 'tests' }}
   cancel-in-progress: true
 
 jobs:
@@ -27,11 +37,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: ['3.9', '3.10', '3.11', '3.12', '3.13']
+        python: ['3.10', '3.11', '3.12', '3.13']
         tasks: [default, eager]
         exclude:  # asyncio.eager_task_factory is new in Python 3.12
-          - python: '3.9'
-            tasks: eager
           - python: '3.10'
             tasks: eager
           - python: '3.11'

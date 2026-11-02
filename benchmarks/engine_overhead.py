@@ -90,7 +90,7 @@ async def _mixed(t, e, n):
     t1 = time.perf_counter()
     gc.callbacks.remove(on_gc)
     after = [s["collections"] for s in gc.get_stats()]
-    return t1 - t0, -sum(pauses), sum(a - b for a, b in zip(after, before))
+    return t1 - t0, -sum(pauses), sum(a - b for a, b in zip(after, before, strict=True))
 
 
 async def _scale(n):
@@ -255,7 +255,9 @@ def _text_table(title, rows, note):
     lines = [title, ""]
     for metric, *values in cells:
         line = [metric.ljust(widths[0])]
-        line += [value.rjust(width) for value, width in zip(values, widths[1:])]
+        line += [
+            value.rjust(width) for value, width in zip(values, widths[1:], strict=True)
+        ]
         lines.append("  ".join(line).rstrip())
     lines += ["", f"{note} Changes above {THRESHOLD:.0%} are marked *."]
     return "\n".join(lines)

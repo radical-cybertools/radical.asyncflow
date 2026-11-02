@@ -82,6 +82,10 @@ markers = [
 source = ["radical.asyncflow"]
 omit = ["tests/*"]
 
+[tool.coverage.paths]
+# The tests run against the installed package: report its files as the ones in src/
+source = ["src/radical/asyncflow", "*/site-packages/radical/asyncflow"]
+
 [tool.coverage.report]
 exclude_lines = [
     "pragma: no cover",

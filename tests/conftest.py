@@ -30,7 +30,10 @@ else:
         "deadline": None,
         "suppress_health_check": [HealthCheck.function_scoped_fixture],
     }
-    settings.register_profile("ci", max_examples=150, print_blob=True, **_common)
+    # Pull requests run the same examples on every run; the nightly ones explore.
+    settings.register_profile(
+        "ci", max_examples=150, derandomize=True, print_blob=True, **_common
+    )
     settings.register_profile("nightly", max_examples=2000, **_common)
     # Only the @example cases, for coverage that does not change from run to run
     settings.register_profile("explicit", phases=[Phase.explicit], **_common)
@@ -39,6 +42,7 @@ else:
 _previous_policy = pytest.StashKey()
 _violations = pytest.StashKey()
 _call_failed = pytest.StashKey()
+_after_failure = pytest.StashKey()
 
 
 class EngineInvariantWarning(UserWarning):
@@ -86,6 +90,14 @@ def pytest_report_header(config):
     return f"asyncflow: {factory} task factory, engine invariants {invariants}"
 
 
+def pytest_collection_finish(session):
+    # The modules and objects every test shares stay alive to the end: moved out of
+    # the collector's reach, they no longer slow the collections the
+    # engine_invariants fixture makes around every test.
+    gc.collect()
+    gc.freeze()
+
+
 def pytest_collection_modifyitems(config, items):
     if config.getoption("eager_tasks"):
         for item in items:
@@ -104,8 +116,10 @@ def pytest_collection_modifyitems(config, items):
 @pytest.hookimpl(wrapper=True)
 def pytest_runtest_makereport(item, call):
     report = yield
-    if report.when == "call" and (report.failed or hasattr(report, "wasxfail")):
-        item.stash[_call_failed] = True
+    if report.failed or hasattr(report, "wasxfail"):
+        item.config.stash[_after_failure] = True
+        if report.when == "call":
+            item.stash[_call_failed] = True
     return report
 
 
@@ -139,12 +153,15 @@ def engine_invariants(request, monkeypatch):
 
     monkeypatch.setattr(WorkflowEngine, "__init__", tracked_init)
     monkeypatch.setattr(WorkflowEngine, "shutdown", tracked_shutdown)
-    # What earlier tests left is not this test's: pytest keeps the traceback of the
-    # last failure, and the futures in its frames, until this test's call phase.
-    for name in ("last_exc", "last_type", "last_value", "last_traceback"):
-        if hasattr(sys, name):
-            delattr(sys, name)
-    gc.collect()
+    # What earlier tests left is not this test's. The teardown below collects what a
+    # passing test leaves, but pytest keeps the traceback of the last failure, and the
+    # futures in its frames, until this test's call phase.
+    if request.config.stash.get(_after_failure, False):
+        request.config.stash[_after_failure] = False
+        for name in ("last_exc", "last_type", "last_value", "last_traceback"):
+            if hasattr(sys, name):
+                delattr(sys, name)
+        gc.collect()
     errors = ErrorRecords()
     root = logging.getLogger()
     root.addHandler(errors)

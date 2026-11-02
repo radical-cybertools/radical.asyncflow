@@ -1,8 +1,11 @@
 name: nightly report
 
-# Opens an issue when a nightly run fails, comments on it on each further failing night,
-# and closes it when a nightly run passes again. GitHub tells only whoever last edited
-# a cron line about scheduled runs, so a failing nightly could otherwise go unnoticed.
+# Opens an issue when a nightly run fails, and comments on it on each further failing
+# night. GitHub tells only whoever last edited a cron line about scheduled runs, so a
+# failing nightly could otherwise go unnoticed. A stress failure lasts until it is
+# fixed, so a passing stress run closes its issue. A benchmark failure is a rise from
+# one night to the next, which the night after no longer shows, so its issue stays
+# open until someone fixes or accepts the rise.
 on:
   workflow_run:
     workflows: [stress, benchmark]
@@ -50,16 +53,20 @@ jobs:
               if [ -n "$number" ]; then
                 gh issue comment "$number" --body-file report.md
               else
-                {
-                  echo
+                echo >> report.md
+                if [ "$WORKFLOW" = benchmark ]; then
+                  echo "Each night compares with the night before, so the next run" \
+                    "passes whether or not the rise stays. Close this issue once the" \
+                    "rise is fixed or accepted." >> report.md
+                else
                   echo "This issue gets a comment on each further failing night, and" \
-                    "closes when a nightly \`$WORKFLOW\` run passes."
-                } >> report.md
+                    "closes when a nightly \`$WORKFLOW\` run passes." >> report.md
+                fi
                 gh issue create --title "$TITLE" --body-file report.md
               fi
               ;;
             success)
-              if [ -n "$number" ]; then
+              if [ -n "$number" ] && [ "$WORKFLOW" != benchmark ]; then
                 gh issue close "$number" --comment \
                   "The nightly \`$WORKFLOW\` run on ${SHA::7} passed: $RUN_URL"
               fi

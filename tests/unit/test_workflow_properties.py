@@ -16,8 +16,8 @@ For every example:
   the engine keeps no transient record, and after shutdown no record at all;
 - nothing is logged at ERROR.
 
-The Hypothesis profile comes from HYPOTHESIS_PROFILE: ci (default) or nightly, see
-tests/conftest.py.
+The Hypothesis profile comes from HYPOTHESIS_PROFILE: ci (default, the same 150
+examples on every run) or nightly (2,000 new ones each run), see tests/conftest.py.
 """
 
 import asyncio
@@ -354,11 +354,20 @@ def records(flow, names):
     return {name: entries for name, entries in found.items() if entries}
 
 
-async def settle(flow, timeout=3.0):
-    """Waits until the run loop has processed every finished component."""
+async def settle(flow):
+    """Waits until the run loop has processed every finished component.
+
+    It gives up only when the records have not changed for TIMEOUT seconds, so a slow
+    machine makes it wait longer rather than fail.
+    """
     loop = asyncio.get_running_loop()
-    deadline = loop.time() + timeout
-    while records(flow, TRANSIENT) and loop.time() < deadline:
+    last, since = None, loop.time()
+    while left := records(flow, TRANSIENT):
+        sizes = {name: len(entries) for name, entries in left.items()}
+        if sizes != last:
+            last, since = sizes, loop.time()
+        elif loop.time() - since > TIMEOUT:
+            return
         await asyncio.sleep(0.005)
 
 
@@ -425,7 +434,7 @@ async def check_workflow(wf, work_dir):
             outcome(fut)  # retrieves its exception
 
     if done_before is None:
-        for fut, ok in zip(futures, registered):
+        for fut, ok in zip(futures, registered, strict=True):
             if not ok:
                 assert fut.uid not in flow.components, f"{fut.uid} failed to register"
                 assert fut.uid not in flow.dependencies, f"{fut.uid} failed to register"
