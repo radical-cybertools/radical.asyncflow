@@ -7,7 +7,7 @@ This guide will help you install AsyncFlow in a clean Python environment.
 
 ## Prerequisites
 
-* Python ≥ **3.10** (recommended: 3.11 or newer)
+* Python ≥ **3.11**
 * `pip` ≥ 22.0
 * Optional: `conda` ≥ 4.10 for Conda environments
 

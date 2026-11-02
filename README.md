@@ -6,7 +6,7 @@
     <img src="https://img.shields.io/badge/License-MIT-gre.svg" alt="License: MIT">
   </a>
   <a href="https://www.python.org/downloads/">
-    <img src="https://img.shields.io/badge/python-3.10+-blue.svg" alt="Python 3.10+">
+    <img src="https://img.shields.io/badge/python-3.11+-blue.svg" alt="Python 3.11+">
   </a>
   <a href="https://github.com/radical-cybertools/radical.asyncflow/actions/workflows/tests.yml">
     <img src="https://github.com/radical-cybertools/radical.asyncflow/actions/workflows/tests.yml/badge.svg?branch=main" alt="Tests">

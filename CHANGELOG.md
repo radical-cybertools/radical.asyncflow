@@ -88,10 +88,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Removed
 
-- **Python 3.9 support** — AsyncFlow now requires Python 3.10 or newer
-  (`requires-python = ">=3.10"`). Python 3.9 reached end of life in October 2025, and
-  CI no longer tests it: the `py39` and `py39-all` tox environments and their CI jobs
-  are gone, and Ruff targets `py310`.
+- **Python 3.9 and 3.10 support** — AsyncFlow now requires Python 3.11 or newer
+  (`requires-python = ">=3.11"`). Python 3.9 reached end of life in October 2025 and
+  3.10 in October 2026, and CI no longer tests them: the `py39`, `py39-all`, `py310`
+  and `py310-all` tox environments and their CI jobs are gone, and Ruff targets
+  `py311`.
 
 ## [0.6.0] 2026-10-19
 

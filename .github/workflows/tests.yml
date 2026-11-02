@@ -14,9 +14,6 @@ jobs:
       matrix:
         include:
         - os: ubuntu-latest
-          python: '3.10'
-          toxenv: py310
-        - os: ubuntu-latest
           python: '3.11'
           toxenv: py311
         - os: ubuntu-latest
@@ -55,9 +52,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-        - os: ubuntu-latest
-          python: '3.10'
-          toxenv: py310-all
         - os: ubuntu-latest
           python: '3.11'
           toxenv: py311-all
