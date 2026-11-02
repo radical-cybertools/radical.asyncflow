@@ -1,9 +1,11 @@
 name: benchmark
 
 # The engine's cost and memory, head against base: on pull requests that can change
-# them, per task against the PR's base; nightly, 40,000 tasks at once, main against its
-# last release. Fails when the head makes the collector run more than 5% more often; a
-# slower head does not fail it, because the timings vary from runner to runner.
+# them, per task against the PR's base; nightly, 40,000 tasks at once, main against the
+# commit of the night before, so that a rise shows on the night it lands and a rise
+# that is kept does not fail every night after. Fails when the head makes the collector
+# run more than 5% more often; a slower head does not fail it, because the timings
+# vary from runner to runner.
 on:
   pull_request:
     paths:
@@ -16,7 +18,7 @@ on:
   workflow_dispatch:
     inputs:
       base:
-        description: 'Base: a tag, branch or commit (default: the last release before the head)'
+        description: 'Base: a tag, branch or commit (default: the commit of the last nightly run)'
         required: false
       head:
         description: 'Head: a tag, branch or commit (default: the branch this runs on)'
@@ -70,13 +72,16 @@ jobs:
   scale:
     name: 40,000 tasks against the base
     if: github.event_name != 'pull_request'
+    permissions:
+      contents: read
+      actions: read  # the commit of the last nightly run
     timeout-minutes: 30
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # every tag, to find the last release
+          fetch-depth: 0  # every commit and tag, for the base
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -85,6 +90,9 @@ jobs:
         env:
           BASE_REF: ${{ inputs.base }}
           HEAD_REF: ${{ inputs.head }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          MAIN: ${{ github.event.repository.default_branch }}
         run: |
           # A branch other than the one checked out is only a remote branch here
           commit() {
@@ -92,7 +100,14 @@ jobs:
               git rev-parse --verify "origin/$1^{commit}"
           }
           head=$(commit "${HEAD_REF:-HEAD}")
-          base=$(commit "${BASE_REF:-$(git describe --tags --abbrev=0 "$head")}")
+          if [ -z "$BASE_REF" ]; then
+            # The commit of the last nightly run, or on the first night the last release
+            BASE_REF=$(gh run list --workflow benchmark.yml --event schedule \
+              --branch "$MAIN" --status completed --limit 1 --json headSha \
+              --jq '.[0].headSha // empty')
+            BASE_REF=${BASE_REF:-$(git describe --tags --abbrev=0 "$head")}
+          fi
+          base=$(commit "$BASE_REF")
           {
             echo "HEAD_LABEL=head $(git describe --tags --always "$head")"
             echo "BASE_LABEL=base $(git describe --tags --always "$base")"
