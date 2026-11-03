@@ -126,7 +126,7 @@ async def test_shutdown_of_one_engine_does_not_reset_another_engines_uids():
     second = work()
     try:
         await asyncio.wait_for(second, timeout=5)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         pytest.fail(
             f"e1 reused {second.task['uid']} after e2.shutdown() and the task hung"
         )
