@@ -130,11 +130,16 @@ def engine_invariants(request, monkeypatch):
     It tracks every WorkflowEngine the test creates. At teardown it reports ERROR log
     records, futures an engine held that its shutdown() left unfinished, and records
     it keeps after shutdown. A test marked ``no_engine_invariants`` is not checked,
-    nor is one that already failed.
+    nor is one that already failed, but what either leaves is still collected, so that
+    the next test does not report it.
     """
     mode = request.config.getoption("engine_invariants")
-    if mode == "off" or request.node.get_closest_marker("no_engine_invariants"):
+    if mode == "off":
         yield
+        return
+    if request.node.get_closest_marker("no_engine_invariants"):
+        yield
+        gc.collect()
         return
 
     engines, unfinished, kept = [], {}, set()
@@ -153,9 +158,9 @@ def engine_invariants(request, monkeypatch):
 
     monkeypatch.setattr(WorkflowEngine, "__init__", tracked_init)
     monkeypatch.setattr(WorkflowEngine, "shutdown", tracked_shutdown)
-    # What earlier tests left is not this test's. The teardown below collects what a
-    # passing test leaves, but pytest keeps the traceback of the last failure, and the
-    # futures in its frames, until this test's call phase.
+    # What earlier tests left is not this test's. Teardown collects what a passing test
+    # leaves, but pytest keeps the traceback of the last failure, and the futures in
+    # its frames, until this test's call phase.
     if request.config.stash.get(_after_failure, False):
         request.config.stash[_after_failure] = False
         for name in ("last_exc", "last_type", "last_value", "last_traceback"):
