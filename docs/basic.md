@@ -10,7 +10,7 @@ You’ll learn how to define tasks, set dependencies, execute the workflow, and 
 ## Prerequisites
 
 - Make sure you have installed `radical.asyncflow` in your Python environment.
-- You also need a working Jupyter Notebook or Python >=3.9.
+- You also need a working Jupyter Notebook or Python >=3.11.
 
 ---
 

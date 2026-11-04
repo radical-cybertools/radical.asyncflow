@@ -339,7 +339,7 @@ def _panel_stage_breakdown(ax, by_wf: dict[str, list[dict]]):
             height=0.55,
             zorder=3,
         )
-        for row, (left, w) in enumerate(zip(lefts, widths)):
+        for row, (left, w) in enumerate(zip(lefts, widths, strict=True)):
             if w > 8:
                 ax.text(
                     left + w / 2,
