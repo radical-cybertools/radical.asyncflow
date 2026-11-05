@@ -17,21 +17,10 @@ import sys
 
 EAGER_TASKS_SUPPORTED = sys.version_info >= (3, 12)
 
-_BLOCK_STATE = (
-    "engine: _submit_blocks sets block_fut.state = 'RUNNING' after create_task, "
-    "which has already run a block that does not suspend to the end"
-)
 # Tests that fail under an eager task factory, and why, by node id regex. They are
 # strict expected failures with --eager-tasks: once fixed they XPASS, which fails, and
 # leave the list.
-EAGER_TASK_FAILURES = {
-    r"test_block_execution\.py::test_block_success_and_failure_states_unchanged": (
-        _BLOCK_STATE
-    ),
-    r"test_future_state\.py::test_block_future_state_transitions_to_failed": (
-        _BLOCK_STATE
-    ),
-}
+EAGER_TASK_FAILURES = {}
 
 
 def eager_task_failure(nodeid: str):
