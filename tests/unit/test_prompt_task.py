@@ -201,16 +201,25 @@ async def test_routed_task_resolves_on_correct_backend():
 
 
 @pytest.mark.asyncio
-async def test_unregistered_backend_name_fails_task():
-    """Routing to an unknown backend name causes the task future to fail."""
-    engine = await WorkflowEngine.create(dry_run=True)
+@pytest.mark.parametrize(
+    "decorator", ["function_task", "executable_task", "prompt_task", "block"]
+)
+async def test_unregistered_backend_name_is_rejected(decorator):
+    """Decorating with an unknown backend name raises, naming the engine's backends."""
+    b1 = NoopExecutionBackend(name="compute")
+    b2 = NoopExecutionBackend(name="ai")
+    engine = await WorkflowEngine.create(backend=[b1, b2])
 
-    @engine.function_task(backend="nonexistent")
-    async def bad_route():
-        return "oops"
+    with pytest.raises(ValueError, match="'nonexistent'.*'compute', 'ai'"):
 
-    t = bad_route()
-    await asyncio.sleep(0.2)
+        @getattr(engine, decorator)(backend="nonexistent")
+        async def bad_route():
+            return "oops"
 
-    # The KeyError triggers engine shutdown; the future ends up done (failed/cancelled)
-    assert t.done()
+    # The engine keeps running the tasks of its backends
+    @engine.prompt_task(backend="ai")
+    async def ask_ai(q):
+        return f"Q: {q}"
+
+    assert await ask_ai("hello?") == "Dummy Prompt Output"
+    await engine.shutdown()

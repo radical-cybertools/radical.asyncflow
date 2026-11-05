@@ -74,6 +74,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   now cancels their registration and their futures, so awaiting them raises
   `CancelledError`, and a body that outlives shutdown, or a call made after it, does
   not register.
+- **An unknown `backend=` name is rejected when the function is decorated** — a task
+  decorated with a `backend=` name that none of the engine's backends has raised a
+  `KeyError` in the engine's run loop when it was submitted, and the whole engine shut
+  down: that task, the other tasks submitted with it and every later task were
+  cancelled, not only the misrouted one. The decorator now raises a `ValueError` that
+  lists the engine's backends, before any task runs. The note in
+  `docs/multi_backend.md`, which said only the task's future failed, says so.
 
 ### Changed
 
@@ -103,6 +110,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `docs/async_workflows.md`, and "Linking tasks to your own traces" in
   `docs/telemetry.md`: the span that is current when a task is called, in-process or
   extracted from a W3C `traceparent` carrier, becomes the task span's parent.
+- **More checks in CI** — pull requests also run the unit tests under
+  `asyncio.eager_task_factory` and report the coverage of the lines they add to
+  `src/`. The unit tests now include Hypothesis properties over random workflows, and
+  every test checks what it leaves behind: ERROR log records, and futures or records
+  an engine keeps after `shutdown()`. `stress.yml` runs the scale tests in
+  `tests/stress` and 2,000 random workflows under both task factories, nightly, by
+  hand, and on pull requests labelled `stress`. "Running the tests" in
+  `docs/install.md` lists the commands.
+- **A benchmark of the engine's cost** — `benchmarks/engine_overhead.py` compares the
+  per-task cost and the memory of two installed versions. `benchmark.yml` runs it on
+  pull requests that touch the package or the benchmark, and fails one when the number
+  of garbage collections rises by more than 5%. Each night it compares 40,000 tasks on
+  `main` with the commit of the night before, and `nightly-report.yml` opens an issue
+  when a nightly stress or benchmark run fails.
 
 ### Removed
 
