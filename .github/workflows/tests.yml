@@ -22,6 +22,9 @@ jobs:
         - os: ubuntu-latest
           python: '3.13'
           toxenv: py313
+        - os: ubuntu-latest
+          python: '3.13'
+          toxenv: py313-nodebug
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout

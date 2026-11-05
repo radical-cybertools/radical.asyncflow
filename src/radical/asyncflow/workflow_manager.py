@@ -1919,6 +1919,7 @@ class WorkflowEngine:
 
         component_fut.set_exception(exception)
         component_fut.state = "FAILED"
+        logger.warning("%s failed", component["uid"])
 
     def handle_component_cancellation(
         self, component: dict, component_fut: asyncio.Future
@@ -1934,6 +1935,7 @@ class WorkflowEngine:
             component_fut.cancel = original_cancel
         result = component_fut.cancel()
         component_fut.state = "CANCELLED"
+        logger.info("%s canceled", component["uid"])
         return result
 
     @_debug_typechecked
@@ -2011,10 +2013,14 @@ class WorkflowEngine:
 
         uid = task_dct["uid"]
 
-        tel_attrs = {
-            "executable": comp_desc["_tel_executable"],
-            "task_type": comp_desc["_tel_task_type"],
-        }
+        tel_attrs = (
+            {
+                "executable": comp_desc["_tel_executable"],
+                "task_type": comp_desc["_tel_task_type"],
+            }
+            if self._telemetry is not None
+            else None
+        )
 
         if state == self.task_states_map.DONE:
             self.handle_component_success(task_dct, task_fut)

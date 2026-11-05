@@ -195,7 +195,12 @@ init_default_logger(logging.DEBUG)
 ```
 
 DEBUG logs show task registration, dependencies, submission and every task
-state change; INFO and above show engine lifecycle events and errors.
+state change; INFO and above show engine lifecycle events, cancelled
+components (INFO) and failed components (WARNING).
+
+`init_default_logger` sets the logger's level to the lowest level of its
+handlers, as `logging.basicConfig(level=...)` does: a handler added later
+receives only records at or above that level, AsyncFlow's own included.
 
 ### Debug mode
 
