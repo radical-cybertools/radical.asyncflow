@@ -167,7 +167,7 @@ async def _resolves_within(fut, limit):
     # shield: a timeout must not cancel the dependent via its patched cancel
     try:
         await asyncio.wait_for(asyncio.shield(fut), limit)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         pytest.fail(f"dependent not released within {limit}s")
     except (Exception, asyncio.CancelledError):
         pass  # failed or cancelled dependents count as released

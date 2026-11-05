@@ -82,6 +82,7 @@ async def test_future_state_transitions_to_failed():
     engine.handle_component_failure(task_desc, fut)
 
     assert fut.state == "FAILED"
+    assert fut.exception() is task_desc["exception"]
 
     await engine.shutdown()
 

@@ -15,7 +15,7 @@ maintainers = [
     {name = "Aymen Alsaadi", email = "aymen.alsaadi@rutgers.edu"},
 ]
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 
 dependencies = [
     "pydantic",
@@ -37,6 +37,7 @@ dev = [
     "pytest",
     "pytest-asyncio",
     "pytest-cov",
+    "hypothesis",
     "pre-commit"
 ]
 
@@ -54,7 +55,7 @@ doc = [
 
 [tool.ruff]
 line-length = 88
-target-version = "py39"
+target-version = "py311"
 fix = true
 
 [tool.ruff.lint]
@@ -73,11 +74,17 @@ asyncio_mode = "auto"
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests as integration tests",
+    "stress: scale tests, run nightly and on PRs labelled 'stress' (select with -m stress)",
+    "no_engine_invariants: skip the engine_invariants checks of tests/conftest.py",
 ]
 
 [tool.coverage.run]
 source = ["radical.asyncflow"]
 omit = ["tests/*"]
+
+[tool.coverage.paths]
+# The tests run against the installed package: report its files as the ones in src/
+source = ["src/radical/asyncflow", "*/site-packages/radical/asyncflow"]
 
 [tool.coverage.report]
 exclude_lines = [

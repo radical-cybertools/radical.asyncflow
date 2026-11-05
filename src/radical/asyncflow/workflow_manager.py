@@ -562,10 +562,13 @@ class WorkflowEngine:
                   or None if decorator is called with parameters.
                 - service (bool): Whether the component should be treated as a service.
                     Defaults to False.
+                - backend (str): Name of the backend the task is routed to. Defaults
+                    to the default backend.
 
         Raises:
             TypeError: If service parameter is not a boolean, if the decorated object
                 is not callable, or if task_description default value is not a dict.
+            ValueError: If backend is not the name of one of the engine's backends.
 
         Example:
             >>> # Create task decorator
@@ -601,6 +604,12 @@ class WorkflowEngine:
             if not isinstance(service, bool):
                 raise TypeError(
                     f"'service' must be a boolean, got {type(service).__name__}"
+                )
+            # The engine's backends are fixed when it is created
+            if backend is not None and backend not in self._backends:
+                raise ValueError(
+                    f"Unknown backend {backend!r}: the engine's backends are "
+                    + ", ".join(repr(name) for name in self._backends)
                 )
 
             def actual_decorator(func: Callable) -> Callable:
@@ -1975,6 +1984,7 @@ class WorkflowEngine:
 
         component_fut.set_exception(exception)
         component_fut.state = "FAILED"
+        logger.warning("%s failed", component["uid"])
         self._on_done(component["uid"])
 
     def handle_component_cancellation(
@@ -1994,6 +2004,7 @@ class WorkflowEngine:
             component_fut.cancel = original_cancel
         result = component_fut.cancel()
         component_fut.state = "CANCELLED"
+        logger.info("%s canceled", component["uid"])
         self._on_done(component["uid"])
         return result
 
@@ -2087,10 +2098,14 @@ class WorkflowEngine:
 
         uid = task_dct["uid"]
 
-        tel_attrs = {
-            "executable": comp_desc["_tel_executable"],
-            "task_type": comp_desc["_tel_task_type"],
-        }
+        tel_attrs = (
+            {
+                "executable": comp_desc["_tel_executable"],
+                "task_type": comp_desc["_tel_task_type"],
+            }
+            if self._telemetry is not None
+            else None
+        )
 
         if state == self.task_states_map.DONE:
             self.handle_component_success(task_dct, task_fut)

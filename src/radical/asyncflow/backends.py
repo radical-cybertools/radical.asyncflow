@@ -3,8 +3,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from collections.abc import Callable
 from concurrent.futures import Executor, ProcessPoolExecutor, ThreadPoolExecutor
-from typing import Any, Callable
+from typing import Any
 
 import cloudpickle
 
