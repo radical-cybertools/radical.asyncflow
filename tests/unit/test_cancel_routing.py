@@ -146,6 +146,84 @@ async def test_failed_backend_cancel_can_be_retried():
         await engine.shutdown()
 
 
+class RaisingBackend(ParkingBackend):
+    """The first cancel raises; later ones behave."""
+
+    async def cancel_task(self, uid):
+        if not self.cancelled:
+            self.cancelled.append(uid)
+            raise RuntimeError("boom")
+        return await super().cancel_task(uid)
+
+
+class HangingBackend(ParkingBackend):
+    """The first cancel never returns until it is cancelled; later ones behave."""
+
+    async def cancel_task(self, uid):
+        if not self.cancelled:
+            self.cancelled.append(uid)
+            self.sender = asyncio.current_task()
+            await asyncio.Event().wait()
+        return await super().cancel_task(uid)
+
+
+async def _running(backend):
+    engine = await WorkflowEngine.create(backend=backend)
+
+    @engine.function_task
+    async def slow():
+        return 1
+
+    fut = slow()
+    await _wait_running(engine, fut)
+    return engine, fut
+
+
+async def test_raising_backend_cancel_is_logged_and_retried(caplog):
+    backend = RaisingBackend("only")
+    engine, fut = await _running(backend)
+    try:
+        with caplog.at_level(logging.WARNING):
+            assert fut.cancel() is True
+            await asyncio.sleep(0.01)
+        assert "boom" in caplog.text
+        assert not fut.done()
+        assert fut.cancel() is True  # sent again, now accepted
+        await _settle(fut)
+        assert backend.cancelled == [fut.uid, fut.uid]
+    finally:
+        await engine.shutdown()
+
+
+async def test_cancelled_send_is_retried():
+    backend = HangingBackend("only")
+    engine, fut = await _running(backend)
+    try:
+        assert fut.cancel() is True
+        await asyncio.sleep(0.01)
+        backend.sender.cancel()
+        await asyncio.sleep(0.01)
+        assert fut.cancel() is True
+        await _settle(fut)
+        assert backend.cancelled == [fut.uid, fut.uid]
+    finally:
+        await engine.shutdown()
+
+
+async def test_cancel_that_could_not_be_sent_is_retried():
+    backend = ParkingBackend("only")
+    engine, fut = await _running(backend)
+    try:
+        # no running loop in a worker thread: create_task raises
+        with pytest.raises(RuntimeError):
+            await asyncio.to_thread(fut.cancel)
+        assert fut.cancel() is True
+        await _settle(fut)
+        assert backend.cancelled == [fut.uid]
+    finally:
+        await engine.shutdown()
+
+
 class YieldingBackend(ParkingBackend):
     """Parks a task, then suspends once more inside submit_tasks."""
 

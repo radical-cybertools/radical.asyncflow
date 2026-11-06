@@ -14,7 +14,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   that backend reported it. The cancel now goes to the backend the task was submitted
   to, and is sent once: cancelling a block reaches a running member through both the
   block's cascade and the future its body awaits, which sent the member's cancel
-  twice. A cancel the backend refuses or fails on can be retried.
+  twice. A cancel the backend refuses, fails on, or that cannot be sent (no running
+  event loop) can be retried.
 - **Cancelling a task while it is being submitted reaches its backend** — a task
   enters `running` only when `submit` returns, so a `cancel()` before that cancelled
   the future alone: `cancel_task` was never called and the task ran on. With several
