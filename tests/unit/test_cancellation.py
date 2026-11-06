@@ -24,6 +24,20 @@ def _pending_future(engine, uid):
     return fut
 
 
+class GatedBackend(NoopExecutionBackend):
+    """Holds submit_tasks open until `gate` is set."""
+
+    def __init__(self):
+        super().__init__()
+        self.entered = asyncio.Event()
+        self.gate = asyncio.Event()
+
+    async def submit_tasks(self, tasks):
+        self.entered.set()
+        await self.gate.wait()
+        await super().submit_tasks(tasks)
+
+
 @pytest.mark.asyncio
 async def test_pending_cancel_actually_cancels():
     """Cancel() on a pending future must mark it cancelled, not return the method
@@ -161,6 +175,78 @@ async def test_block_cancel_stops_execution():
 
     assert block_fut.cancelled()
     assert not execution_reached_end
+
+    await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_block_cancelled_during_submit_never_starts():
+    """A block cancelled while the tasks of its batch are being submitted must not run
+    its body, and what depends on it must still be released."""
+    backend = GatedBackend()
+    engine = await WorkflowEngine.create(backend=backend)
+    started = []
+
+    @engine.function_task
+    async def task():
+        return 1
+
+    @engine.block
+    async def block():
+        started.append("body")
+
+    @engine.function_task
+    async def dependent(value):
+        return value
+
+    # Called in one tick, so the task and the block are one batch
+    task_fut = task()
+    block_fut = block()
+    dependent_fut = dependent(block_fut)
+    await asyncio.wait_for(backend.entered.wait(), timeout=5)
+
+    assert block_fut.cancel() is True
+    backend.gate.set()
+    await asyncio.wait_for(asyncio.wait([task_fut, dependent_fut]), timeout=5)
+
+    assert started == []
+    assert block_fut.cancelled()
+    assert block_fut.state == "CANCELLED"
+    assert dependent_fut.cancelled()
+    assert task_fut.done() and not task_fut.cancelled()
+    assert block_fut.uid not in engine._block_asyncio_tasks
+    assert block_fut.uid not in engine._block_members
+
+    await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_block_cancelled_by_a_block_of_its_batch_never_starts():
+    """A block cancelled by an earlier block of its batch must not run its body.
+
+    Under the default task factory its asyncio.Task exists by then but has not taken a
+    step; under an eager one it does not exist yet.
+    """
+    engine = await _make_engine()
+    started = []
+    futures = {}
+
+    @engine.block
+    async def first():
+        futures["second"].cancel()
+
+    @engine.block
+    async def second():
+        started.append("body")
+
+    first_fut = first()
+    second_fut = futures["second"] = second()
+    await asyncio.wait_for(asyncio.wait([first_fut, second_fut]), timeout=5)
+
+    assert started == []
+    assert first_fut.state == "DONE"
+    assert second_fut.cancelled()
+    assert second_fut.state == "CANCELLED"
 
     await engine.shutdown()
 
