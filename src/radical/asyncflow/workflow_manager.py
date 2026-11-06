@@ -66,12 +66,11 @@ class _ComponentFuture(asyncio.Future):
             # delivered to the WorkflowEngine via callbacks only.
             # Sent once: a block cancel cascades to its members, and a running
             # member is also cancelled through the future the block body
-            # awaits, so it would be cancelled twice; Dragon raises on a second
-            # cancel_task. A send that fails is forgotten, so a later cancel
-            # retries it.
+            # awaits, so it would be cancelled twice. One send saves a backend
+            # round trip and a second CANCELED report. A send that fails, or
+            # cannot start, is forgotten, so a later cancel retries it.
             if self._cancel_sent:
                 return True
-            self._cancel_sent = True
             logger.info(
                 f"Cancellation requested for {self.uid} "
                 "('running') from the execution backend"
@@ -80,8 +79,14 @@ class _ComponentFuture(asyncio.Future):
             backend = engine._backends[
                 self.task.get("target_backend") or engine._default_backend_name
             ]
-            sent = asyncio.create_task(backend.cancel_task(self.uid))
-            sent.add_done_callback(self._on_cancel_sent)  # non-blocking
+            self._cancel_sent = True
+            send = self._send_cancel(backend)
+            try:
+                asyncio.create_task(send)  # non-blocking
+            except RuntimeError:  # no running loop: nothing was sent
+                send.close()
+                self._cancel_sent = False
+                raise
             return True
 
         logger.info(f"Cancellation requested for {self.uid} (pending) locally")
@@ -94,17 +99,21 @@ class _ComponentFuture(asyncio.Future):
             engine._pending_registrations.discard(self)
         return True
 
-    def _on_cancel_sent(self, sent: asyncio.Task) -> None:
-        """Forgets a backend cancel that failed, so a later cancel() retries it."""
-        if sent.cancelled():
-            self._cancel_sent = False
-        elif sent.exception() is not None:
-            logger.warning(
-                "Cancelling %s on its backend failed: %r", self.uid, sent.exception()
-            )
-            self._cancel_sent = False
-        elif sent.result() is False:
-            self._cancel_sent = False
+    async def _send_cancel(self, backend) -> None:
+        """Sends the cancel; forgets one that failed, so a later cancel() retries it.
+
+        A coroutine, not a done callback on the task: a callback costs a context, a
+        bound method and a handle per cancel, which a burst of cancels pays in
+        collections.
+        """
+        accepted = False
+        try:
+            accepted = await backend.cancel_task(self.uid)
+        except Exception as e:
+            logger.warning("Cancelling %s on its backend failed: %r", self.uid, e)
+        finally:
+            if accepted is False:
+                self._cancel_sent = False
 
     def _cancel_locally(self, *args, **kwargs):
         """Cancels the future, with state CANCELLED set before its done callbacks
