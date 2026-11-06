@@ -69,6 +69,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   ended. A refusal is now logged as a warning, and `cancel()` on the task retries it;
   the engine does not retry on its own. What `cancel()` returns to its callers is
   unchanged.
+- **Cancelling a task while it is being submitted reaches its backend** — a task
+  enters `running` only when `submit` returns, so a `cancel()` before that cancelled
+  the future alone: `cancel_task` was never called and the task ran on. With several
+  backends `submit` always suspends, so any run routing tasks with `backend=` could
+  hit this. The future is still cancelled at once, and its backend is now told when
+  `submit` returns, unless it has reported the task finished by then.
 - **A component's uid is set when the call returns** — calling a task or block
   returned its future before the engine assigned the component's uid, so `future.id`
   did not exist until the next event-loop step. A caller that read it right after the
