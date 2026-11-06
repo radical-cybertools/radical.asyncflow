@@ -74,6 +74,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   now cancels their registration and their futures, so awaiting them raises
   `CancelledError`, and a body that outlives shutdown, or a call made after it, does
   not register.
+- **`future.state` matches how the future ended** — three cases left `state` out of
+  step with the outcome. A task or block cancelled with `cancel()` before it
+  registered stayed `"PENDING"`, and so did a running block for the done callbacks
+  added before the cancellation. A task whose registration failed, for example an
+  executable task that returned an empty command, stayed `"PENDING"` with the
+  exception set. Under `asyncio.eager_task_factory`, a block that finished without
+  suspending ended `"RUNNING"` instead of `"DONE"` or `"FAILED"`. Each now ends
+  `"CANCELLED"`, `"FAILED"` or `"DONE"`, set before its done callbacks run.
+- **`cancel()` on a task that has not registered** — a task cancelled before it
+  registered still registered, emitted `TaskCreated` and `TaskResolved` with no
+  terminal event, and an executable or prompt task's body ran on. It now never
+  registers, and its body stops. A `cancel` bound before the task registered, such
+  as `loop.call_later(t, fut.cancel)`, cancelled a running task only in the engine,
+  never on the execution backend; it now behaves like `fut.cancel()` called later.
 - **An unknown `backend=` name is rejected when the function is decorated** — a task
   decorated with a `backend=` name that none of the engine's backends has raised a
   `KeyError` in the engine's run loop when it was submitted, and the whole engine shut
