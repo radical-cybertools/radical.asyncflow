@@ -54,7 +54,8 @@ class _ComponentFuture(asyncio.Future):
 
         A task running on the backend is cancelled there, and the backend reports
         the cancellation through `task_callbacks`. Any other component is cancelled
-        here. One that has not registered also has its registration cancelled, so
+        here. One being submitted is also cancelled on its backend, once `submit`
+        returns. One that has not registered also has its registration cancelled, so
         it never registers and an executable or prompt task's body stops.
         """
         engine = self._engine
@@ -71,17 +72,11 @@ class _ComponentFuture(asyncio.Future):
             # retries it.
             if self._cancel_sent:
                 return True
-            self._cancel_sent = True
             logger.info(
                 f"Cancellation requested for {self.uid} "
                 "('running') from the execution backend"
             )
-            # the backend the task was submitted to (see submit)
-            backend = engine._backends[
-                self.task.get("target_backend") or engine._default_backend_name
-            ]
-            sent = asyncio.create_task(backend.cancel_task(self.uid))
-            sent.add_done_callback(self._on_cancel_sent)  # non-blocking
+            self._cancel_on_backend()
             return True
 
         logger.info(f"Cancellation requested for {self.uid} (pending) locally")
@@ -92,7 +87,23 @@ class _ComponentFuture(asyncio.Future):
             registration.cancel()
             # A registration cancelled before it started never runs its finally.
             engine._pending_registrations.discard(self)
+        if hasattr(self, TASK) and self.uid in engine.resolved:
+            # Resolved but not running: submit is in flight. A backend that holds
+            # the task must hear of this or the task runs on, but one that does not
+            # hold it yet may raise, as Dragon does. run() sends it when submit
+            # returns.
+            engine._pending_cancels.add(self)
         return True
+
+    def _cancel_on_backend(self) -> None:
+        """Sends the cancel to the backend the task was submitted to (see submit)."""
+        self._cancel_sent = True
+        engine = self._engine
+        backend = engine._backends[
+            self.task.get("target_backend") or engine._default_backend_name
+        ]
+        sent = asyncio.create_task(backend.cancel_task(self.uid))
+        sent.add_done_callback(self._on_cancel_sent)  # non-blocking
 
     def _on_cancel_sent(self, sent: asyncio.Task) -> None:
         """Forgets a backend cancel that failed, so a later cancel() retries it."""
@@ -200,6 +211,9 @@ class WorkflowEngine:
         # Futures of components whose registration task has not finished, which
         # self.components does not hold yet; shutdown cancels them
         self._pending_registrations: set[asyncio.Future] = set()
+        # Futures of tasks cancelled while submit was in flight, whose backends are
+        # told when it returns
+        self._pending_cancels: set[_ComponentFuture] = set()
 
         self.task_states_map = self.backend.get_task_states_map()
 
@@ -1315,6 +1329,7 @@ class WorkflowEngine:
         self._dependency_count.clear()
         self._block_members.clear()
         self._block_asyncio_tasks.clear()
+        self._pending_cancels.clear()
         self.resolved.clear()
         self.running.clear()
         self._task_submit_times.clear()
@@ -1595,6 +1610,9 @@ class WorkflowEngine:
                         continue
 
                     to_submit.append(comp_desc)
+                    # Now, not after submit: it tells cancel() that submit has this
+                    # task, which is not in running until submit returns.
+                    self.resolved.add(comp_uid)
                     res_deps = [dep["name"] for dep in dependencies]
                     msg = f"Ready to submit: {comp_desc['name']}"
                     msg += f" with resolved dependencies: {res_deps}"
@@ -1615,9 +1633,10 @@ class WorkflowEngine:
                 if to_submit:
                     await self.submit(to_submit)
                     for comp_desc in to_submit:
-                        comp_uid = comp_desc["uid"]
-                        self.running.add(comp_uid)
-                        self.resolved.add(comp_uid)
+                        self.running.add(comp_desc["uid"])
+                    # Every backend knows these tasks now
+                    while self._pending_cancels:
+                        self._pending_cancels.pop()._cancel_on_backend()
 
                 # Check for completed components and update dependency tracking
                 completed_components = []
@@ -2025,6 +2044,10 @@ class WorkflowEngine:
             # service tasks are marked done by a backend specific
             # mechanism that are provided during the callbacks only
             service_callback(task_fut, task_obj, state)
+
+        # A task the backend has finished has nothing left to cancel there
+        if self._pending_cancels and state != self.task_states_map.RUNNING:
+            self._pending_cancels.discard(task_fut)
 
         uid = task_dct["uid"]
 
