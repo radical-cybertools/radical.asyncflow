@@ -15,6 +15,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   to, and is sent once: cancelling a block reaches a running member through both the
   block's cascade and the future its body awaits, which sent the member's cancel
   twice. A cancel the backend refuses or fails on can be retried.
+- **The body of a cancelled block stops when a member cannot be cancelled** — a backend
+  can refuse to cancel a running task, or fail to. When it did for a task that a
+  cancelled block's body was awaiting, the block was `CANCELLED` but its body carried
+  on past the `await` once the task ended, or got the task's own exception. The body
+  now gets `asyncio.CancelledError` at that `await` when the task ends, however it
+  ends. This also holds for a task from outside the block, and through `wait_for` or
+  a task the body awaits. The task keeps running and its future reports how it really
+  ended. A refusal is now logged as a warning, and `cancel()` on the task retries it;
+  the engine does not retry on its own. What `cancel()` returns to its callers is
+  unchanged.
 - **A component's uid is set when the call returns** — calling a task or block
   returned its future before the engine assigned the component's uid, so `future.id`
   did not exist until the next event-loop step. A caller that read it right after the
