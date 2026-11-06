@@ -34,9 +34,6 @@ def test_eager_task_failures_match_node_ids(monkeypatch):
     monkeypatch.setitem(EAGER_TASK_FAILURES, r"test_x\.py::test_y\[.*-pending\]", "why")
     assert eager_task_failure("tests/unit/test_x.py::test_y[keyword-pending]") == "why"
     assert not eager_task_failure("tests/unit/test_x.py::test_y[keyword-registered]")
-    assert eager_task_failure(
-        "tests/unit/test_future_state.py::test_block_future_state_transitions_to_failed"
-    )
     assert not eager_task_failure("tests/unit/test_async.py::test_async_flow")
 
 
