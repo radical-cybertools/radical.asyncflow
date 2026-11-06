@@ -88,7 +88,7 @@ async def postprocess(summary):
 Tasks **without** `backend=` fall back to the default backend. Routing is entirely opt-in — existing workflows with a single backend are unaffected.
 
 !!! note
-    Routing to an unregistered backend name causes the task future to fail with a `KeyError`. Always verify that the backend name passed to the decorator matches the `.name` attribute used when the backend was constructed.
+    The decorator raises a `ValueError` that lists the engine's backends when `backend=` names none of them. The name must match the `.name` attribute used when the backend was constructed.
 
 ---
 
