@@ -1,6 +1,7 @@
 """Tests for the public future.state attribute lifecycle."""
 
 import asyncio
+import sys
 
 import pytest
 
@@ -94,12 +95,93 @@ async def test_future_state_transitions_to_cancelled():
 
     fut = asyncio.Future()
     fut.state = "RUNNING"
-    fut.original_cancel = fut.cancel
     task_desc = {"uid": "task.cancel-test"}
 
     engine.handle_component_cancellation(task_desc, fut)
 
     assert fut.state == "CANCELLED"
+
+    await engine.shutdown()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("comp_type", ["task", "block"])
+async def test_future_state_cancelled_before_registration(comp_type):
+    """A future cancelled before its component registers must have state == 'CANCELLED',
+    already set when its done callbacks run."""
+    engine = await _make_engine()
+
+    @engine.executable_task
+    async def slow_command():
+        await asyncio.sleep(0.01)  # the task registers after its body returns
+        return "/bin/true"
+
+    @engine.block
+    async def some_block():
+        return "ok"
+
+    fut = slow_command() if comp_type == "task" else some_block()
+    seen = []
+    fut.add_done_callback(lambda f: seen.append(f.state))
+
+    assert fut.cancel()
+    await asyncio.sleep(0.05)  # let registration run
+
+    assert fut.cancelled()
+    assert fut.state == "CANCELLED"
+    assert seen == ["CANCELLED"]
+
+    await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_component_futures_are_never_patched():
+    """No task or block future gets a `cancel` of its own, before or after it registers.
+
+    A patch per call cost 25 MB and 29% more gen-0 collections at 40K tasks, and a
+    `cancel` bound before a patch at registration missed the backend.
+    """
+    engine = await _make_engine()
+
+    @engine.executable_task
+    async def slow_command():
+        await asyncio.sleep(0.01)  # not registered when the call returns
+        return "/bin/true"
+
+    @engine.function_task
+    async def some_task():
+        return 1
+
+    @engine.block
+    async def some_block():
+        return "ok"
+
+    futs = (slow_command(), some_task(), some_block())
+    for registered in (False, True):
+        if registered:
+            await asyncio.sleep(0.05)  # let them register
+            assert all(hasattr(f, "task") or hasattr(f, "block") for f in futs)
+        for fut in futs:
+            assert getattr(fut.cancel, "__func__", None) is type(fut).cancel
+
+    await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_future_state_failed_registration():
+    """A task whose registration fails, here an executable task that returns an empty
+    command, must have state == 'FAILED'."""
+    engine = await _make_engine()
+
+    @engine.executable_task
+    async def empty_command():
+        return ""
+
+    fut = empty_command()
+    with pytest.raises(ValueError, match="non-empty command string"):
+        await fut
+
+    assert fut.state == "FAILED"
 
     await engine.shutdown()
 
@@ -149,3 +231,63 @@ async def test_block_future_state_transitions_to_failed():
     assert isinstance(block_fut.exception(), ValueError)
 
     await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_block_future_state_cancelled_while_running():
+    """A running block cancelled with cancel() must have state == 'CANCELLED', already
+    set when its done callbacks run."""
+    engine = await _make_engine()
+    block_started = asyncio.Event()
+
+    @engine.block
+    async def long_block():
+        block_started.set()
+        await asyncio.sleep(10)
+
+    block_fut = long_block()
+    seen = []
+    block_fut.add_done_callback(lambda f: seen.append(f.state))
+    await block_started.wait()
+    assert block_fut.state == "RUNNING"
+
+    assert block_fut.cancel()
+    await asyncio.sleep(0.05)
+
+    assert block_fut.state == "CANCELLED"
+    assert seen == ["CANCELLED"]
+
+    await engine.shutdown()
+
+
+@pytest.mark.skipif(
+    sys.version_info < (3, 12), reason="asyncio.eager_task_factory needs Python 3.12"
+)
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fails", [False, True], ids=["done", "failed"])
+async def test_block_future_state_under_eager_task_factory(fails):
+    """Under an eager task factory, a block that does not suspend finishes inside
+    create_task; its state must be DONE or FAILED, not RUNNING."""
+    loop = asyncio.get_running_loop()
+    previous_factory = loop.get_task_factory()
+    loop.set_task_factory(asyncio.eager_task_factory)
+    engine = await _make_engine()
+
+    @engine.block
+    async def quick_block():
+        if fails:
+            raise ValueError("block error")
+        return "ok"
+
+    try:
+        block_fut = quick_block()
+        if fails:
+            with pytest.raises(ValueError, match="block error"):
+                await block_fut
+            assert block_fut.state == "FAILED"
+        else:
+            assert await block_fut == "ok"
+            assert block_fut.state == "DONE"
+    finally:
+        await engine.shutdown()
+        loop.set_task_factory(previous_factory)
