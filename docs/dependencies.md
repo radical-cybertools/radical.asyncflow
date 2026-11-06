@@ -122,6 +122,7 @@ except DependencyFailureError as e:
 - A dependency that **never registers** counts as failed: for example, its decorated function raised, or an executable or prompt task returned no command or prompt. The dependent fails with a `DependencyFailureError` whose `root_cause` is that exception.
 - If a dependency is **cancelled**, the dependent task is cancelled as well.
 - If a **block**'s body raises `asyncio.CancelledError` (for example by awaiting a task that was cancelled), the block itself is cancelled: its still-running member tasks are cancelled, and so are the components that depend on it.
+- A backend can **refuse** to cancel a running task. A cancelled block's body still stops: it gets `asyncio.CancelledError` at the task it is awaiting, once that task ends. The task keeps running and its future reports how it really ended, which also applies to a member the body is not awaiting. A refusal is logged as a warning, and calling `cancel()` on the task again retries it. The engine does not retry on its own.
 
 ---
 
