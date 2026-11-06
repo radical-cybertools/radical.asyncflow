@@ -51,6 +51,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Cancelling a task that waits for its dependencies** — its dependents
   stayed pending until the cancelled task's own dependencies finished, or
   forever if they never did. They are now cancelled at once.
+- **Cancelling a running task cancels it on its own backend** (#118) — with several
+  backends, `cancel()` on a running task sent the cancel to the default backend, so a
+  task routed elsewhere with `backend=` kept running and its future resolved only when
+  that backend reported it. The cancel now goes to the backend the task was submitted
+  to, and is sent once: cancelling a block reaches a running member through both the
+  block's cascade and the future its body awaits, which sent the member's cancel
+  twice. A cancel the backend refuses, fails on, or that cannot be sent (no running
+  event loop) can be retried.
 - **A component's uid is set when the call returns** — calling a task or block
   returned its future before the engine assigned the component's uid, so `future.id`
   did not exist until the next event-loop step. A caller that read it right after the
