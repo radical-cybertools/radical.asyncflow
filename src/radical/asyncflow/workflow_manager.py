@@ -1915,7 +1915,8 @@ class WorkflowEngine:
 
         Calls the given function with provided args, awaiting it if it's a coroutine,
         or running it in the executor otherwise. On completion, updates the `block_fut`
-        with the result or exception.
+        with the result or exception. Does not call the function if `block_fut` is
+        already done.
 
         Args:
             block_fut (asyncio.Future): Future to store the result or exception.
@@ -1926,6 +1927,12 @@ class WorkflowEngine:
         Returns:
             None
         """
+
+        # Done before this first step: cancelled while submit was suspended on the
+        # tasks of the batch, or after create_task. The done callback that cancels
+        # this task runs too late to stop the body from starting.
+        if block_fut.done():
+            return
 
         block_uid = block_fut.block["uid"]
         token = self._workflow_id_ctx.set(block_uid)
