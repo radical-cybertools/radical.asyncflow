@@ -39,6 +39,7 @@ RECORDS = (
     "_dependents_map",
     "_ready_queue",
     "_pending_registrations",
+    "_pending_cancels",
 )
 
 
