@@ -191,7 +191,6 @@ async def main():
         )
 
     await flow.shutdown()
-    await telemetry.stop()
 
 
 if __name__ == "__main__":

@@ -81,6 +81,10 @@ TRANSIENT = (
 CANCELLED = ("cancelled",)
 
 
+async def _stop_nothing():
+    pass
+
+
 class InjectedError(Exception):
     """Raised by an injected fault."""
 
@@ -202,9 +206,11 @@ def inject_step_faults(flow, steps):
     tracking, emit = flow._update_dependency_tracking, flow._emit
     if flow._telemetry is None and "_emit" in steps.values():
         # The engine calls _emit only with telemetry enabled: a stand-in enables
-        # it (blocks open a span), and the other components' events are dropped.
+        # it (blocks open a span, shutdown stops it), and the other components'
+        # events are dropped.
         flow._telemetry = types.SimpleNamespace(
-            span_scope=lambda *args, **kwargs: contextlib.nullcontext()
+            span_scope=lambda *args, **kwargs: contextlib.nullcontext(),
+            stop=_stop_nothing,
         )
 
         def emit(*args, **kwargs):
