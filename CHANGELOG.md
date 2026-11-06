@@ -6,8 +6,51 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Per-task overhead** — runtime type checks on the per-task path
+  (`task_callbacks`) run only in debug mode (`RADICAL_ASYNCFLOW_DEBUG` or
+  `RADICAL_DEBUG`, see *Logging & Debugging* in the best-practice guide);
+  per-task log messages format lazily; telemetry event arguments are built
+  only when telemetry is enabled; a decorated call creates its component
+  directly instead of building a wrapper per call.
+- **Log levels** — per-task messages (`<uid> is in <state> state`,
+  `Submitting <n> tasks/blocks`) are logged at DEBUG instead of INFO. A failed
+  component is logged at WARNING (`<uid> failed`) and a cancelled one at INFO
+  (`<uid> canceled`), also when the failure or cancellation does not come from
+  the backend (failed dependencies, shutdown).
+- **`init_default_logger`** sets the logger level to the lowest level of its
+  handlers instead of `NOTSET`, so records no handler would emit are dropped
+  before they are built. Configuring the root logger, records of other
+  libraries below that level are dropped too.
+- **Run loop** — a component that resolves releases its dependents at once,
+  and the run loop sleeps until a component is ready. Before, the loop found
+  finished components by scanning the running ones on each pass, up to 1 s
+  apart while nothing was ready, so a dependent could start up to 1 s late,
+  and an engine waiting on running tasks woke every second. A task future
+  that user code resolves (`set_result` on the future) releases its
+  dependents when the backend reports the task.
+- **Code that touches asyncio from other threads** without
+  `call_soon_threadsafe` (for example `set_result` on a future, or
+  `Event.set()`) was never safe, and the periodic wake-up hid it. Now it can
+  hang the workflow. Run with `PYTHONASYNCIODEBUG=1` to find it: asyncio then
+  raises "Non-thread-safe operation invoked on an event loop other than the
+  current one" at the offending call.
+
 ### Fixed
 
+- **Backend callbacks from other threads** — a backend that reports task
+  states from its own thread, as the monitor thread of rhapsody's Dragon
+  backend does for Dragon-side cancellations, ran the engine's own completion
+  handlers on that thread, racing the run loop. They now run on the loop
+  thread.
+- **Services that become ready on another thread** — a `service_callback`
+  that resolves the service future from its own thread, as the RADICAL-Pilot
+  backend's does, set an asyncio future outside its event loop. It now moves
+  onto the loop thread, and the service's dependents start at once.
+- **Cancelling a task that waits for its dependencies** — its dependents
+  stayed pending until the cancelled task's own dependencies finished, or
+  forever if they never did. They are now cancelled at once.
 - **Cancelling a running task cancels it on its own backend** (#118) — with several
   backends, `cancel()` on a running task sent the cancel to the default backend, so a
   task routed elsewhere with `backend=` kept running and its future resolved only when
@@ -103,24 +146,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   cancelled, not only the misrouted one. The decorator now raises a `ValueError` that
   lists the engine's backends, before any task runs. The note in
   `docs/multi_backend.md`, which said only the task's future failed, says so.
-
-### Changed
-
-- **Per-task overhead** — runtime type checks on the per-task path
-  (`task_callbacks`) run only in debug mode (`RADICAL_ASYNCFLOW_DEBUG` or
-  `RADICAL_DEBUG`, see *Logging & Debugging* in the best-practice guide);
-  per-task log messages format lazily; telemetry event arguments are built
-  only when telemetry is enabled; a decorated call creates its component
-  directly instead of building a wrapper per call.
-- **Log levels** — per-task messages (`<uid> is in <state> state`,
-  `Submitting <n> tasks/blocks`) are logged at DEBUG instead of INFO. A failed
-  component is logged at WARNING (`<uid> failed`) and a cancelled one at INFO
-  (`<uid> canceled`), also when the failure or cancellation does not come from
-  the backend (failed dependencies, shutdown).
-- **`init_default_logger`** sets the logger level to the lowest level of its
-  handlers instead of `NOTSET`, so records no handler would emit are dropped
-  before they are built. Configuring the root logger, records of other
-  libraries below that level are dropped too.
 
 ### Added
 
