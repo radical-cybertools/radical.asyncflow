@@ -46,6 +46,9 @@ class _ComponentFuture(asyncio.Future):
 
     __slots__ = ()
 
+    # Set while a backend cancel is in flight or has been accepted; see cancel()
+    _cancel_sent = False
+
     def cancel(self, *args, **kwargs):
         """Cancels the component, on the execution backend if it runs there.
 
@@ -61,13 +64,29 @@ class _ComponentFuture(asyncio.Future):
             # This follows asyncio.Future.cancel() behavior, which is best-effort.
             # Actual cancellation is handled asynchronously by the backend and
             # delivered to the WorkflowEngine via callbacks only.
+            # Sent once: a block cancel cascades to its members, and a running
+            # member is also cancelled through the future the block body
+            # awaits, so it would be cancelled twice. One send saves a backend
+            # round trip and a second CANCELED report. A send that fails, or
+            # cannot start, is forgotten, so a later cancel retries it.
+            if self._cancel_sent:
+                return True
             logger.info(
                 f"Cancellation requested for {self.uid} "
                 "('running') from the execution backend"
             )
-            asyncio.create_task(
-                engine.backend.cancel_task(self.uid)
-            )  # fire and forget (non-blocking)
+            # the backend the task was submitted to (see submit)
+            backend = engine._backends[
+                self.task.get("target_backend") or engine._default_backend_name
+            ]
+            self._cancel_sent = True
+            send = self._send_cancel(backend)
+            try:
+                asyncio.create_task(send)  # non-blocking
+            except RuntimeError:  # no running loop: nothing was sent
+                send.close()
+                self._cancel_sent = False
+                raise
             return True
 
         logger.info(f"Cancellation requested for {self.uid} (pending) locally")
@@ -79,6 +98,22 @@ class _ComponentFuture(asyncio.Future):
             # A registration cancelled before it started never runs its finally.
             engine._pending_registrations.discard(self)
         return True
+
+    async def _send_cancel(self, backend) -> None:
+        """Sends the cancel; forgets one that failed, so a later cancel() retries it.
+
+        A coroutine, not a done callback on the task: a callback costs a context, a
+        bound method and a handle per cancel, which a burst of cancels pays in
+        collections.
+        """
+        accepted = False
+        try:
+            accepted = await backend.cancel_task(self.uid)
+        except Exception as e:
+            logger.warning("Cancelling %s on its backend failed: %r", self.uid, e)
+        finally:
+            if accepted is False:
+                self._cancel_sent = False
 
     def _cancel_locally(self, *args, **kwargs):
         """Cancels the future, with state CANCELLED set before its done callbacks
