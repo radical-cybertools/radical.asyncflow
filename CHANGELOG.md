@@ -104,6 +104,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   lists the engine's backends, before any task runs. The note in
   `docs/multi_backend.md`, which said only the task's future failed, says so.
 
+### Changed
+
+- **Per-task overhead** — runtime type checks on the per-task path
+  (`task_callbacks`) run only in debug mode (`RADICAL_ASYNCFLOW_DEBUG` or
+  `RADICAL_DEBUG`, see *Logging & Debugging* in the best-practice guide);
+  per-task log messages format lazily; telemetry event arguments are built
+  only when telemetry is enabled; a decorated call creates its component
+  directly instead of building a wrapper per call.
+- **Log levels** — per-task messages (`<uid> is in <state> state`,
+  `Submitting <n> tasks/blocks`) are logged at DEBUG instead of INFO. A failed
+  component is logged at WARNING (`<uid> failed`) and a cancelled one at INFO
+  (`<uid> canceled`), also when the failure or cancellation does not come from
+  the backend (failed dependencies, shutdown).
+- **`init_default_logger`** sets the logger level to the lowest level of its
+  handlers instead of `NOTSET`, so records no handler would emit are dropped
+  before they are built. Configuring the root logger, records of other
+  libraries below that level are dropped too.
+
 ### Added
 
 - **`future.uid`** — the full uid (`"task.000001"`, `"block.000002"`), set when the

@@ -21,9 +21,11 @@ examples on every run) or nightly (2,000 new ones each run), see tests/conftest.
 """
 
 import asyncio
+import contextlib
 import gc
 import logging
 import os
+import types
 from dataclasses import dataclass
 from typing import Optional
 
@@ -198,6 +200,15 @@ def inject_step_faults(flow, steps):
         return comp["description"]["name"] if comp else None
 
     tracking, emit = flow._update_dependency_tracking, flow._emit
+    if flow._telemetry is None and "_emit" in steps.values():
+        # The engine calls _emit only with telemetry enabled: a stand-in enables
+        # it (blocks open a span), and the other components' events are dropped.
+        flow._telemetry = types.SimpleNamespace(
+            span_scope=lambda *args, **kwargs: contextlib.nullcontext()
+        )
+
+        def emit(*args, **kwargs):
+            return None
 
     def failing_tracking(uid):
         if steps.get(name_of(uid)) == "_update_dependency_tracking":
