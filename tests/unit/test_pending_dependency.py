@@ -6,8 +6,10 @@ the future is recognisable as a dependency.
 """
 
 import asyncio
+import contextlib
 import sys
 import threading
+import types
 
 import pytest
 import pytest_asyncio
@@ -222,8 +224,19 @@ def _fail_step_for(flow, monkeypatch, step, name):
 
     Install it before the call: with an eager task factory a function task or block
     registers inside the call, before its future, and so its uid, is returned.
+    The engine calls `_emit` only with telemetry enabled, so for that step a
+    stand-in enables it, and the other components' events are dropped.
     """
     original = getattr(flow, step)
+    if step == "_emit" and flow._telemetry is None:
+        # blocks open a span; nothing else of telemetry is used here
+        stand_in = types.SimpleNamespace(
+            span_scope=lambda *args, **kwargs: contextlib.nullcontext()
+        )
+        monkeypatch.setattr(flow, "_telemetry", stand_in)
+
+        def original(*args, **kwargs):
+            return None
 
     def fail_for_name(*args, **kwargs):
         # Both steps take the uid, positionally or as task_id.
