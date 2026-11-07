@@ -33,6 +33,11 @@ FUNCTION = "function"
 EXECUTABLE = "executable"
 PROMPT = "prompt"
 
+# seconds a backend's submit_tasks may hold the run loop before a warning, and
+# the minimum interval between two such warnings for the same backend
+SLOW_SUBMIT_WARNING = 1.0
+SLOW_SUBMIT_REPEAT = 60.0
+
 logger = logging.getLogger(__name__)
 
 # The msg of the Task.cancel() that stops the body of a cancelled block
@@ -330,6 +335,8 @@ class WorkflowEngine:
         self._tel_make_event = None  # cached to avoid per-call import lookup
         self._tel_events: dict = {}  # cached event classes: name -> class
         self._task_submit_times: dict[str, float] = {}
+        # backend name -> monotonic time of its last slow-submit warning
+        self._slow_submit_warned: dict[str, float] = {}
         self._task_start_times: dict[str, float] = {}
 
         self._setup_signal_handlers()
@@ -1860,19 +1867,76 @@ class WorkflowEngine:
                 # refuses its batch (e.g. its endpoint is gone) fails only
                 # those tasks: the engine and the other backends keep running.
                 results = await asyncio.gather(
-                    *(backend.submit_tasks(b_tasks) for backend, b_tasks in groups),
+                    *(
+                        self._timed_submit(backend, b_tasks)
+                        for backend, b_tasks in groups
+                    ),
                     return_exceptions=True,
                 )
+                timed = []
                 for (backend, b_tasks), result in zip(groups, results):
                     if isinstance(result, asyncio.CancelledError):
                         raise result
                     if isinstance(result, BaseException):
+                        # not an Exception (those are timed): fail the batch
                         self._fail_submit(backend, b_tasks, result)
+                        continue
+                    took, error = result
+                    if error is not None:
+                        self._fail_submit(backend, b_tasks, error)
+                    timed.append((took, backend, len(b_tasks), error is not None))
+                self._warn_slow_submit(timed)
             if blocks:
                 await self._submit_blocks(blocks)
         except Exception as e:
             logger.exception(f"Error in submit component: {e}")
             raise
+
+    async def _timed_submit(self, backend, tasks: list) -> tuple:
+        """Run ``backend.submit_tasks``; return ``(seconds, error or None)``.
+
+        A failure is timed too: a backend that waits on a lost endpoint and then
+        raises held the run loop just the same.  Cancellation propagates.
+        """
+        start = time.monotonic()
+        error = None
+        try:
+            await backend.submit_tasks(tasks)
+        except Exception as e:
+            error = e
+        return time.monotonic() - start, error
+
+    def _warn_slow_submit(self, timed: list) -> None:
+        """Warn when a backend's ``submit_tasks`` held the run loop.
+
+        *timed* holds ``(seconds, backend, n_tasks, failed)`` per backend of one
+        submit. The run loop waits for ``submit``, so a slow ``submit_tasks``
+        delays every backend and the loop's completion handling. Of the backends
+        over the threshold and not warned about in the last minute, only the
+        slowest is named: one that blocks the event loop also inflates the others'
+        times.
+        """
+        now = time.monotonic()
+        candidates = []
+        for took, backend, n_tasks, failed in timed:
+            if took <= SLOW_SUBMIT_WARNING:
+                continue
+            name = str(getattr(backend, "name", backend))
+            last = self._slow_submit_warned.get(name)
+            if last is None or now - last >= SLOW_SUBMIT_REPEAT:
+                candidates.append((took, name, n_tasks, failed))
+        if not candidates:
+            return
+        took, name, n_tasks, failed = max(candidates, key=lambda c: c[0])
+        self._slow_submit_warned[name] = now
+        logger.warning(
+            "Backend %s held the run loop for %.1f s in submit_tasks (%d task(s)%s);"
+            " a backend should hand slow work to the background",
+            name,
+            took,
+            n_tasks,
+            ", then failed" if failed else "",
+        )
 
     def _fail_submit(self, backend, tasks: list, error: BaseException) -> None:
         """Fail the tasks of one backend whose ``submit_tasks`` raised.
