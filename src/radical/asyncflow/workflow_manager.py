@@ -1845,25 +1845,52 @@ class WorkflowEngine:
 
                 if not any(t.get("target_backend") for t in tasks):
                     # Fast path: all tasks go to the default backend
-                    await self.backend.submit_tasks(tasks)
+                    groups = [(self.backend, tasks)]
                 else:
                     by_backend: dict = {}
                     for t in tasks:
                         by_backend.setdefault(
                             t.get("target_backend") or self._default_backend_name, []
                         ).append(t)
-                    # Submit to all target backends in parallel
-                    await asyncio.gather(
-                        *(
-                            self._backends[b_name].submit_tasks(b_tasks)
-                            for b_name, b_tasks in by_backend.items()
-                        )
-                    )
+                    groups = [
+                        (self._backends[b_name], b_tasks)
+                        for b_name, b_tasks in by_backend.items()
+                    ]
+                # Submit to all target backends in parallel.  A backend that
+                # refuses its batch (e.g. its endpoint is gone) fails only
+                # those tasks: the engine and the other backends keep running.
+                results = await asyncio.gather(
+                    *(backend.submit_tasks(b_tasks) for backend, b_tasks in groups),
+                    return_exceptions=True,
+                )
+                for (backend, b_tasks), result in zip(groups, results):
+                    if isinstance(result, asyncio.CancelledError):
+                        raise result
+                    if isinstance(result, BaseException):
+                        self._fail_submit(backend, b_tasks, result)
             if blocks:
                 await self._submit_blocks(blocks)
         except Exception as e:
             logger.exception(f"Error in submit component: {e}")
             raise
+
+    def _fail_submit(self, backend, tasks: list, error: BaseException) -> None:
+        """Fail the tasks of one backend whose ``submit_tasks`` raised.
+
+        Their futures get the backend's error, so awaiting callers and dependents see a
+        task failure instead of the engine shutting down.
+        """
+        # a task failure, reported through the futures, not an engine error
+        logger.warning(
+            "Backend %s refused %d task(s): %s",
+            getattr(backend, "name", backend),
+            len(tasks),
+            error,
+        )
+        for t in tasks:
+            comp = self.components.get(t["uid"])
+            if comp is not None:
+                self.handle_component_failure(t, comp["future"], error)
 
     async def _submit_blocks(self, blocks: list):
         """Submits workflow blocks for asynchronous execution.

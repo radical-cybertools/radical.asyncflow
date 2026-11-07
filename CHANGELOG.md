@@ -85,6 +85,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   as Ctrl-C in a terminal, no longer reaches commands directly. `shutdown()` and
   `asyncio.run()` stop them instead. `shutdown()` now waits for the commands, and a
   repeated `cancel_task()` no longer reports the task twice.
+- **A backend that refuses a submit fails only its own tasks** — when a backend's
+  `submit_tasks` raised (for example, a remote endpoint that is gone), the error
+  escaped into the run loop, which shut the whole engine down: every task on every
+  backend was cancelled. The tasks of that batch now fail with the backend's error,
+  their dependents fail with `DependencyFailureError`, and the engine and the other
+  backends keep running.
 - **A component's uid is set when the call returns** — calling a task or block
   returned its future before the engine assigned the component's uid, so `future.id`
   did not exist until the next event-loop step. A caller that read it right after the
