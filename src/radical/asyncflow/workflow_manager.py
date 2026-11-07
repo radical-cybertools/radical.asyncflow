@@ -1724,17 +1724,19 @@ class WorkflowEngine:
                     ),
                     return_exceptions=True,
                 )
-                slowest = None
+                timed = []
                 for (backend, b_tasks), result in zip(groups, results):
-                    if isinstance(result, BaseException):  # cancelled
+                    if isinstance(result, asyncio.CancelledError):
                         raise result
+                    if isinstance(result, BaseException):
+                        # not an Exception (those are timed): fail the batch
+                        self._fail_submit(backend, b_tasks, result)
+                        continue
                     took, error = result
                     if error is not None:
                         self._fail_submit(backend, b_tasks, error)
-                    if slowest is None or took > slowest[0]:
-                        slowest = (took, backend, len(b_tasks), error is not None)
-                if slowest is not None and slowest[0] > SLOW_SUBMIT_WARNING:
-                    self._warn_slow_submit(*slowest)
+                    timed.append((took, backend, len(b_tasks), error is not None))
+                self._warn_slow_submit(timed)
             if blocks:
                 await self._submit_blocks(blocks)
         except Exception as e:
@@ -1751,31 +1753,36 @@ class WorkflowEngine:
         error = None
         try:
             await backend.submit_tasks(tasks)
-        except asyncio.CancelledError:
-            raise
         except Exception as e:
             error = e
         return time.monotonic() - start, error
 
-    def _warn_slow_submit(
-        self, took: float, backend, n_tasks: int, failed: bool = False
-    ) -> None:
-        """Warn that a backend's ``submit_tasks`` held the run loop.
+    def _warn_slow_submit(self, timed: list) -> None:
+        """Warn when a backend's ``submit_tasks`` held the run loop.
 
-        The run loop waits for ``submit``, so a backend that waits on remote I/O in
-        ``submit_tasks`` delays every backend and the loop's completion handling. Only
-        the slowest backend of a submit is named (one that blocks the event loop also
-        inflates the others' times), at most once a minute per backend.
+        *timed* holds ``(seconds, backend, n_tasks, failed)`` per backend of one
+        submit. The run loop waits for ``submit``, so a slow ``submit_tasks``
+        delays every backend and the loop's completion handling. Of the backends
+        over the threshold and not warned about in the last minute, only the
+        slowest is named: one that blocks the event loop also inflates the others'
+        times.
         """
-        name = str(getattr(backend, "name", backend))
         now = time.monotonic()
-        last = self._slow_submit_warned.get(name)
-        if last is not None and now - last < SLOW_SUBMIT_REPEAT:
+        candidates = []
+        for took, backend, n_tasks, failed in timed:
+            if took <= SLOW_SUBMIT_WARNING:
+                continue
+            name = str(getattr(backend, "name", backend))
+            last = self._slow_submit_warned.get(name)
+            if last is None or now - last >= SLOW_SUBMIT_REPEAT:
+                candidates.append((took, name, n_tasks, failed))
+        if not candidates:
             return
+        took, name, n_tasks, failed = max(candidates, key=lambda c: c[0])
         self._slow_submit_warned[name] = now
         logger.warning(
             "Backend %s held the run loop for %.1f s in submit_tasks (%d task(s)%s);"
-            " a backend should not wait on remote I/O there",
+            " a backend should hand slow work to the background",
             name,
             took,
             n_tasks,

@@ -190,3 +190,27 @@ async def test_refused_slow_submit_is_reported_as_slow(monkeypatch, caplog):
         assert len(msgs) == 1 and "then failed" in msgs[0]
     finally:
         await flow.shutdown()
+
+
+def test_slow_submit_warning_rate_limit_and_second_backend(monkeypatch, caplog):
+    """Direct check of the selection rule: the slowest backend not warned about
+    in the last minute is named, so a rate-limited one does not hide another."""
+    import radical.asyncflow.workflow_manager as wm
+
+    engine = wm.WorkflowEngine.__new__(wm.WorkflowEngine)
+    engine._slow_submit_warned = {}
+    a, b = NoopExecutionBackend(name="a"), NoopExecutionBackend(name="b")
+
+    with caplog.at_level("WARNING", logger="radical.asyncflow.workflow_manager"):
+        engine._warn_slow_submit([(5.0, a, 1, False), (3.0, b, 1, False)])
+        engine._warn_slow_submit([(5.0, a, 1, False), (3.0, b, 1, False)])
+        engine._warn_slow_submit([(5.0, a, 1, False), (3.0, b, 1, False)])
+    msgs = _slow_warnings(caplog)
+    assert len(msgs) == 2
+    assert "Backend a" in msgs[0] and "Backend b" in msgs[1]
+
+    monkeypatch.setattr(wm, "SLOW_SUBMIT_REPEAT", 0.0)
+    caplog.clear()
+    with caplog.at_level("WARNING", logger="radical.asyncflow.workflow_manager"):
+        engine._warn_slow_submit([(5.0, a, 1, False)])
+    assert len(_slow_warnings(caplog)) == 1
