@@ -85,3 +85,33 @@ async def test_dependent_of_a_refused_task_fails_as_a_dependency(flow):
 
     with pytest.raises(DependencyFailureError):
         await asyncio.wait_for(use(learn()), timeout=5)
+
+
+class SlowBackend(NoopExecutionBackend):
+    """Holds the run loop in submit_tasks, as a backend waiting on remote I/O does."""
+
+    async def submit_tasks(self, tasks):
+        await asyncio.sleep(0.1)
+        await super().submit_tasks(tasks)
+
+
+@pytest.mark.asyncio
+async def test_slow_submit_logs_a_warning(monkeypatch, caplog):
+    import radical.asyncflow.workflow_manager as wm
+
+    monkeypatch.setattr(wm, "SLOW_SUBMIT_WARNING", 0.05)
+    flow = await WorkflowEngine.create(backend=SlowBackend(name="slow"))
+    try:
+
+        @flow.function_task
+        async def task():
+            return 1
+
+        with caplog.at_level("WARNING", logger="radical.asyncflow.workflow_manager"):
+            await asyncio.wait_for(task(), timeout=5)
+        assert any(
+            "held the run loop" in r.getMessage() and "slow" in r.getMessage()
+            for r in caplog.records
+        )
+    finally:
+        await flow.shutdown()

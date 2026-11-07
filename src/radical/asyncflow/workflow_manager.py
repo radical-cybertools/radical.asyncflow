@@ -33,6 +33,9 @@ FUNCTION = "function"
 EXECUTABLE = "executable"
 PROMPT = "prompt"
 
+# seconds a backend's submit_tasks may hold the run loop before a warning
+SLOW_SUBMIT_WARNING = 1.0
+
 logger = logging.getLogger(__name__)
 
 
@@ -1711,7 +1714,10 @@ class WorkflowEngine:
                 # refuses its batch (e.g. its endpoint is gone) fails only
                 # those tasks: the engine and the other backends keep running.
                 results = await asyncio.gather(
-                    *(backend.submit_tasks(b_tasks) for backend, b_tasks in groups),
+                    *(
+                        self._timed_submit(backend, b_tasks)
+                        for backend, b_tasks in groups
+                    ),
                     return_exceptions=True,
                 )
                 for (backend, b_tasks), result in zip(groups, results):
@@ -1724,6 +1730,27 @@ class WorkflowEngine:
         except Exception as e:
             logger.exception(f"Error in submit component: {e}")
             raise
+
+    async def _timed_submit(self, backend, tasks: list) -> None:
+        """``backend.submit_tasks``, with a warning when it holds the run loop.
+
+        The run loop waits for ``submit_tasks``, so a backend that waits on remote I/O
+        there stalls every backend of the engine. A backend should hand slow work to
+        the background and report through its callback.
+        """
+        start = time.monotonic()
+        try:
+            return await backend.submit_tasks(tasks)
+        finally:
+            took = time.monotonic() - start
+            if took > SLOW_SUBMIT_WARNING:
+                logger.warning(
+                    "Backend %s held the run loop for %.1f s in submit_tasks"
+                    " (%d task(s)); a backend should not wait on remote I/O there",
+                    getattr(backend, "name", backend),
+                    took,
+                    len(tasks),
+                )
 
     def _fail_submit(self, backend, tasks: list, error: BaseException) -> None:
         """Fail the tasks of one backend whose ``submit_tasks`` raised.
