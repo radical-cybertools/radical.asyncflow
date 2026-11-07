@@ -33,8 +33,10 @@ FUNCTION = "function"
 EXECUTABLE = "executable"
 PROMPT = "prompt"
 
-# seconds a backend's submit_tasks may hold the run loop before a warning
+# seconds a backend's submit_tasks may hold the run loop before a warning, and
+# the minimum interval between two such warnings for the same backend
 SLOW_SUBMIT_WARNING = 1.0
+SLOW_SUBMIT_REPEAT = 60.0
 
 logger = logging.getLogger(__name__)
 
@@ -199,6 +201,8 @@ class WorkflowEngine:
         self._tel_make_event = None  # cached to avoid per-call import lookup
         self._tel_events: dict = {}  # cached event classes: name -> class
         self._task_submit_times: dict[str, float] = {}
+        # backend name -> monotonic time of its last slow-submit warning
+        self._slow_submit_warned: dict = {}
         self._task_start_times: dict[str, float] = {}
 
         self._setup_signal_handlers()
@@ -1720,37 +1724,53 @@ class WorkflowEngine:
                     ),
                     return_exceptions=True,
                 )
+                slowest = None
                 for (backend, b_tasks), result in zip(groups, results):
                     if isinstance(result, asyncio.CancelledError):
                         raise result
                     if isinstance(result, BaseException):
                         self._fail_submit(backend, b_tasks, result)
+                    elif slowest is None or result > slowest[0]:
+                        slowest = (result, backend, len(b_tasks))
+                if slowest is not None and slowest[0] > SLOW_SUBMIT_WARNING:
+                    self._warn_slow_submit(*slowest)
             if blocks:
                 await self._submit_blocks(blocks)
         except Exception as e:
             logger.exception(f"Error in submit component: {e}")
             raise
 
-    async def _timed_submit(self, backend, tasks: list) -> None:
-        """``backend.submit_tasks``, with a warning when it holds the run loop.
+    async def _timed_submit(self, backend, tasks: list) -> float:
+        """Run ``backend.submit_tasks`` and return how long it took (seconds).
 
-        The run loop waits for ``submit_tasks``, so a backend that waits on remote I/O
-        there stalls every backend of the engine. A backend should hand slow work to
-        the background and report through its callback.
+        An exception propagates untimed: a refused submit is reported by
+        ``_fail_submit``, not as a slow one.
         """
         start = time.monotonic()
-        try:
-            return await backend.submit_tasks(tasks)
-        finally:
-            took = time.monotonic() - start
-            if took > SLOW_SUBMIT_WARNING:
-                logger.warning(
-                    "Backend %s held the run loop for %.1f s in submit_tasks"
-                    " (%d task(s)); a backend should not wait on remote I/O there",
-                    getattr(backend, "name", backend),
-                    took,
-                    len(tasks),
-                )
+        await backend.submit_tasks(tasks)
+        return time.monotonic() - start
+
+    def _warn_slow_submit(self, took: float, backend, n_tasks: int) -> None:
+        """Warn that a backend's ``submit_tasks`` held the run loop.
+
+        The run loop waits for ``submit``, so a backend that waits on remote I/O in
+        ``submit_tasks`` delays every backend and the loop's completion handling. Only
+        the slowest backend of a submit is named (one that blocks the event loop also
+        inflates the others' times), at most once a minute per backend.
+        """
+        name = getattr(backend, "name", backend)
+        now = time.monotonic()
+        last = self._slow_submit_warned.get(name)
+        if last is not None and now - last < SLOW_SUBMIT_REPEAT:
+            return
+        self._slow_submit_warned[name] = now
+        logger.warning(
+            "Backend %s held the run loop for %.1f s in submit_tasks (%d task(s));"
+            " a backend should not wait on remote I/O there",
+            name,
+            took,
+            n_tasks,
+        )
 
     def _fail_submit(self, backend, tasks: list, error: BaseException) -> None:
         """Fail the tasks of one backend whose ``submit_tasks`` raised.

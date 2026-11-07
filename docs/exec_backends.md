@@ -49,11 +49,11 @@ Both default to `False`, and AsyncFlow skips the corresponding hooks entirely fo
 
 ## Writing a Backend: `submit_tasks` Must Return Promptly
 
-The engine's run loop awaits `submit_tasks` before it submits anything else, to any backend. A backend that waits on remote I/O there (an HTTP request to a remote endpoint, a scheduler call) therefore stalls every backend of the engine for that long, not only its own tasks.
+The engine submits one batch at a time: within a batch the backends' `submit_tasks` calls run concurrently, but the run loop waits for all of them before it submits the next batch or processes completions and dependencies. A backend that waits on remote I/O in `submit_tasks` (an HTTP request to a remote endpoint, a scheduler call) therefore delays every backend of the engine for that long, not only its own tasks.
 
 - Register the tasks, hand the slow work to a background task, and return. Report the outcome through the task callback (`DONE`, `FAILED`, ...), as for any running task.
 - If `submit_tasks` raises, the engine fails the tasks of that call with the error and keeps running.
-- The engine logs a warning when one `submit_tasks` call takes longer than 1 s.
+- The engine logs a warning, at most once a minute per backend, when a backend's `submit_tasks` takes longer than 1 s.
 
 ## Local vs HPC Execution: A Side-by-Side Comparison
 
