@@ -53,7 +53,7 @@ The engine submits one batch at a time: within a batch the backends' `submit_tas
 
 - Register the tasks, hand the slow work to a background task, and return. Report the outcome through the task callback (`DONE`, `FAILED`, ...), as for any running task.
 - If `submit_tasks` raises, the engine fails the tasks of that call with the error and keeps running.
-- The engine logs a warning, at most once a minute per backend, when a backend's `submit_tasks` takes longer than 1 s.
+- The engine logs a warning when a `submit_tasks` call takes longer than 1 s, whether it returns or raises. Per batch it names the slowest backend (one that blocks the event loop inflates the others' times too), and it warns about each backend at most once a minute.
 
 ## Local vs HPC Execution: A Side-by-Side Comparison
 

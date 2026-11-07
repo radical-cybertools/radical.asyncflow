@@ -202,7 +202,7 @@ class WorkflowEngine:
         self._tel_events: dict = {}  # cached event classes: name -> class
         self._task_submit_times: dict[str, float] = {}
         # backend name -> monotonic time of its last slow-submit warning
-        self._slow_submit_warned: dict = {}
+        self._slow_submit_warned: dict[str, float] = {}
         self._task_start_times: dict[str, float] = {}
 
         self._setup_signal_handlers()
@@ -1726,12 +1726,13 @@ class WorkflowEngine:
                 )
                 slowest = None
                 for (backend, b_tasks), result in zip(groups, results):
-                    if isinstance(result, asyncio.CancelledError):
+                    if isinstance(result, BaseException):  # cancelled
                         raise result
-                    if isinstance(result, BaseException):
-                        self._fail_submit(backend, b_tasks, result)
-                    elif slowest is None or result > slowest[0]:
-                        slowest = (result, backend, len(b_tasks))
+                    took, error = result
+                    if error is not None:
+                        self._fail_submit(backend, b_tasks, error)
+                    if slowest is None or took > slowest[0]:
+                        slowest = (took, backend, len(b_tasks), error is not None)
                 if slowest is not None and slowest[0] > SLOW_SUBMIT_WARNING:
                     self._warn_slow_submit(*slowest)
             if blocks:
@@ -1740,17 +1741,25 @@ class WorkflowEngine:
             logger.exception(f"Error in submit component: {e}")
             raise
 
-    async def _timed_submit(self, backend, tasks: list) -> float:
-        """Run ``backend.submit_tasks`` and return how long it took (seconds).
+    async def _timed_submit(self, backend, tasks: list) -> tuple:
+        """Run ``backend.submit_tasks``; return ``(seconds, error or None)``.
 
-        An exception propagates untimed: a refused submit is reported by
-        ``_fail_submit``, not as a slow one.
+        A failure is timed too: a backend that waits on a lost endpoint and then
+        raises held the run loop just the same.  Cancellation propagates.
         """
         start = time.monotonic()
-        await backend.submit_tasks(tasks)
-        return time.monotonic() - start
+        error = None
+        try:
+            await backend.submit_tasks(tasks)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            error = e
+        return time.monotonic() - start, error
 
-    def _warn_slow_submit(self, took: float, backend, n_tasks: int) -> None:
+    def _warn_slow_submit(
+        self, took: float, backend, n_tasks: int, failed: bool = False
+    ) -> None:
         """Warn that a backend's ``submit_tasks`` held the run loop.
 
         The run loop waits for ``submit``, so a backend that waits on remote I/O in
@@ -1758,18 +1767,19 @@ class WorkflowEngine:
         the slowest backend of a submit is named (one that blocks the event loop also
         inflates the others' times), at most once a minute per backend.
         """
-        name = getattr(backend, "name", backend)
+        name = str(getattr(backend, "name", backend))
         now = time.monotonic()
         last = self._slow_submit_warned.get(name)
         if last is not None and now - last < SLOW_SUBMIT_REPEAT:
             return
         self._slow_submit_warned[name] = now
         logger.warning(
-            "Backend %s held the run loop for %.1f s in submit_tasks (%d task(s));"
+            "Backend %s held the run loop for %.1f s in submit_tasks (%d task(s)%s);"
             " a backend should not wait on remote I/O there",
             name,
             took,
             n_tasks,
+            ", then failed" if failed else "",
         )
 
     def _fail_submit(self, backend, tasks: list, error: BaseException) -> None:

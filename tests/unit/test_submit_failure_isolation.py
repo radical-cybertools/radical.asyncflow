@@ -109,7 +109,9 @@ async def test_slow_submit_logs_a_warning(monkeypatch, caplog):
 
         with caplog.at_level("WARNING", logger="radical.asyncflow.workflow_manager"):
             await asyncio.wait_for(task(), timeout=5)
-            await asyncio.sleep(0.05)  # the warning follows the task's completion
+            await _until(
+                lambda: _slow_warnings(caplog)
+            )  # follows the task's completion
         assert any(
             "held the run loop" in r.getMessage() and "slow" in r.getMessage()
             for r in caplog.records
@@ -122,6 +124,14 @@ class SlowRefusingBackend(NoopExecutionBackend):
     async def submit_tasks(self, tasks):
         await asyncio.sleep(0.1)
         raise RuntimeError("endpoint lost")
+
+
+async def _until(cond, timeout=5.0):
+    """Poll *cond* on the loop until it holds (no fixed sleeps)."""
+    deadline = asyncio.get_running_loop().time() + timeout
+    while not cond():
+        assert asyncio.get_running_loop().time() < deadline, "condition never held"
+        await asyncio.sleep(0.01)
 
 
 def _slow_warnings(caplog):
@@ -151,7 +161,7 @@ async def test_slow_warning_names_only_the_slowest_backend_once(monkeypatch, cap
         with caplog.at_level("WARNING", logger="radical.asyncflow.workflow_manager"):
             for _ in range(3):
                 await asyncio.wait_for(asyncio.gather(on_slow(), on_fast()), timeout=5)
-                await asyncio.sleep(0.05)
+                await _until(lambda: _slow_warnings(caplog))
         msgs = _slow_warnings(caplog)
         assert len(msgs) == 1  # rate limited per backend
         assert "Backend slow" in msgs[0]
@@ -161,7 +171,7 @@ async def test_slow_warning_names_only_the_slowest_backend_once(monkeypatch, cap
 
 
 @pytest.mark.asyncio
-async def test_refused_slow_submit_is_not_reported_as_slow(monkeypatch, caplog):
+async def test_refused_slow_submit_is_reported_as_slow(monkeypatch, caplog):
     import radical.asyncflow.workflow_manager as wm
 
     monkeypatch.setattr(wm, "SLOW_SUBMIT_WARNING", 0.05)
@@ -175,7 +185,8 @@ async def test_refused_slow_submit_is_not_reported_as_slow(monkeypatch, caplog):
         with caplog.at_level("WARNING", logger="radical.asyncflow.workflow_manager"):
             with pytest.raises(RuntimeError, match="endpoint lost"):
                 await asyncio.wait_for(task(), timeout=5)
-            await asyncio.sleep(0.05)
-        assert _slow_warnings(caplog) == []
+            await _until(lambda: _slow_warnings(caplog))
+        msgs = _slow_warnings(caplog)
+        assert len(msgs) == 1 and "then failed" in msgs[0]
     finally:
         await flow.shutdown()
