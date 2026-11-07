@@ -460,6 +460,51 @@ class WorkflowEngine:
             )
         )
 
+    def _watch_outcome(self, fut: asyncio.Future, comp_desc: dict) -> None:
+        """Emit the component's terminal telemetry event when its future resolves.
+
+        One event however it resolves: reported by the backend, failed or cancelled
+        with a dependency, cancelled by the user or at shutdown, or a block.
+        """
+        comp_desc["_tel_watched"] = True
+        fut.add_done_callback(lambda f, d=comp_desc: self._emit_terminal(f, d))
+
+    def _emit_terminal(self, fut: asyncio.Future, comp_desc: dict) -> None:
+        """Emit the terminal telemetry event of a resolved component future.
+
+        No-op for a component that never emitted ``TaskCreated``, and once telemetry
+        has stopped.
+        """
+        if self._telemetry is None or not comp_desc.get("_tel_created"):
+            return
+        uid = comp_desc["uid"]
+        now = time.time()
+        start = self._task_start_times.pop(uid, self._task_submit_times.get(uid, now))
+        self._task_submit_times.pop(uid, None)
+        kwargs = {}
+        if fut.cancelled():
+            event_name = "TaskCanceled"
+        # Not exception(): it marks the exception retrieved, and asyncio would no
+        # longer log a failed future that nobody awaits.
+        elif fut._exception is not None:
+            event_name = "TaskFailed"
+            kwargs["error_type"] = type(fut._exception).__name__
+        else:
+            event_name = "TaskCompleted"
+        self._emit(
+            event_name,
+            task_id=uid,
+            backend=comp_desc.get("target_backend"),
+            workflow_id=comp_desc.get("workflow_id"),
+            event_time=now,
+            duration_seconds=now - start,
+            attributes={
+                "executable": comp_desc["_tel_executable"],
+                "task_type": comp_desc["_tel_task_type"],
+            },
+            **kwargs,
+        )
+
     @asynccontextmanager
     async def workflow_scope(
         self, workflow_id: str | None = None
@@ -837,6 +882,10 @@ class WorkflowEngine:
             "capture_stdio": capture_stdio,
             "_explicit_workflow_id": explicit_workflow_id,
         }
+        # Before the caller can await the future: its terminal event is then
+        # emitted before the caller resumes.
+        if self._telemetry is not None:
+            self._watch_outcome(comp_fut, comp_desc)
 
         async def register():
             try:
@@ -1062,6 +1111,10 @@ class WorkflowEngine:
                         "depends_on": [d["uid"] for d in comp_deps],
                     },
                 )
+                comp_desc["_tel_created"] = True
+                # Telemetry started after the component was created
+                if "_tel_watched" not in comp_desc:
+                    self._watch_outcome(comp_fut, comp_desc)
 
             # Emit TaskResolved immediately for tasks with no dependencies.
             # Tasks with deps will emit from _notify_dependents when the count hits 0.
@@ -2149,22 +2202,10 @@ class WorkflowEngine:
             else None
         )
 
+        # The terminal telemetry events come from the future's done callback (see
+        # `_emit_terminal`).
         if state == self.task_states_map.DONE:
             self.handle_component_success(task_dct, task_fut)
-            if self._telemetry is not None:
-                now = time.time()
-                start = self._task_start_times.pop(
-                    uid, self._task_submit_times.get(uid, now)
-                )
-                self._task_submit_times.pop(uid, None)
-                self._emit(
-                    "TaskCompleted",
-                    task_id=uid,
-                    workflow_id=task_dct.get("workflow_id"),
-                    event_time=now,
-                    duration_seconds=now - start,
-                    attributes=tel_attrs,
-                )
         elif state == self.task_states_map.RUNNING:
             # NOTE: with asyncio future the running state is
             # implicit: when a coroutine that awaits the future
@@ -2183,37 +2224,8 @@ class WorkflowEngine:
                 )
         elif state == self.task_states_map.CANCELED:
             self.handle_component_cancellation(task_dct, task_fut)
-            if self._telemetry is not None:
-                now = time.time()
-                start = self._task_start_times.pop(
-                    uid, self._task_submit_times.get(uid, now)
-                )
-                self._task_submit_times.pop(uid, None)
-                self._emit(
-                    "TaskCanceled",
-                    task_id=uid,
-                    workflow_id=task_dct.get("workflow_id"),
-                    event_time=now,
-                    duration_seconds=now - start,
-                    attributes=tel_attrs,
-                )
         elif state == self.task_states_map.FAILED:
             self.handle_component_failure(task_dct, task_fut)
-            if self._telemetry is not None:
-                now = time.time()
-                start = self._task_start_times.pop(
-                    uid, self._task_submit_times.get(uid, now)
-                )
-                self._task_submit_times.pop(uid, None)
-                self._emit(
-                    "TaskFailed",
-                    task_id=uid,
-                    workflow_id=task_dct.get("workflow_id"),
-                    event_time=now,
-                    duration_seconds=now - start,
-                    error_type="unknown",
-                    attributes=tel_attrs,
-                )
 
     async def shutdown(self, skip_execution_backend: bool = False) -> None:
         """Internal implementation of asynchronous shutdown for the workflow manager.
@@ -2228,7 +2240,9 @@ class WorkflowEngine:
             registered yet.
             5. Logs a warning if the tasks do not complete within the timeout
             period.
-            6. Shuts down the backend using an executor to avoid blocking the
+            6. Stops telemetry, if it was started, after the events of the
+            cancelled components.
+            7. Shuts down the backend using an executor to avoid blocking the
             event loop.
 
         Args:
@@ -2278,6 +2292,17 @@ class WorkflowEngine:
             logger.warning("Timeout waiting for internal components to shutdown")
         except asyncio.CancelledError:
             logger.warning("Internal components shutdown cancelled")
+
+        # Stop telemetry before the backends, as rhapsody's Session.close() does: a
+        # backend's telemetry adapter may keep worker processes alive. Yield first,
+        # so the done callbacks of the futures cancelled above emit their events.
+        if self._telemetry is not None:
+            await asyncio.sleep(0)
+            telemetry, self._telemetry = self._telemetry, None
+            try:
+                await telemetry.stop()
+            except Exception:
+                logger.exception("Stopping telemetry failed")
 
         # Shutdown all registered execution backends
         if not skip_execution_backend and self._backends:
