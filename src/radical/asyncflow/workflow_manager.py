@@ -1717,13 +1717,19 @@ class WorkflowEngine:
                 # Submit to all target backends in parallel.  A backend that
                 # refuses its batch (e.g. its endpoint is gone) fails only
                 # those tasks: the engine and the other backends keep running.
-                results = await asyncio.gather(
-                    *(
-                        self._timed_submit(backend, b_tasks)
-                        for backend, b_tasks in groups
-                    ),
-                    return_exceptions=True,
-                )
+                if len(groups) == 1:
+                    # Awaited directly, not through gather: gather wraps the
+                    # call in a task, which adds a yield to the loop in the
+                    # middle of submit.
+                    results = [await self._timed_submit(*groups[0])]
+                else:
+                    results = await asyncio.gather(
+                        *(
+                            self._timed_submit(backend, b_tasks)
+                            for backend, b_tasks in groups
+                        ),
+                        return_exceptions=True,
+                    )
                 timed = []
                 for (backend, b_tasks), result in zip(groups, results):
                     if isinstance(result, asyncio.CancelledError):
