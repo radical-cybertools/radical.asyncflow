@@ -47,6 +47,14 @@ Both default to `False`, and AsyncFlow skips the corresponding hooks entirely fo
 !!! note "Custom backends"
     Leave both attributes `False` if your tasks share a filesystem or your backend moves no files. Set one to `True` only if you implement the matching hook. The two are independent. See [Task Dependencies](dependencies.md#data-file-dependencies) for how file dependencies are declared.
 
+## Writing a Backend: `submit_tasks` Must Return Promptly
+
+The engine submits one batch at a time: within a batch the backends' `submit_tasks` calls run concurrently, but the run loop waits for all of them before it submits the next batch or processes completions and dependencies. A backend that waits on remote I/O in `submit_tasks` (an HTTP request to a remote endpoint, a scheduler call) therefore delays every backend of the engine for that long, not only its own tasks.
+
+- Register the tasks, hand the slow work to a background task, and return. Report the outcome through the task callback (`DONE`, `FAILED`, ...), as for any running task.
+- If `submit_tasks` raises, the engine fails the tasks of that call with the error and keeps running.
+- The engine logs a warning when a `submit_tasks` call takes longer than 1 s, whether it returns or raises. Per batch it names the slowest backend (one that blocks the event loop inflates the others' times too), and it warns about each backend at most once a minute.
+
 ## Local vs HPC Execution: A Side-by-Side Comparison
 
 ### Local Execution with LocalExecutionBackend

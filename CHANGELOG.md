@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **A warning when a backend's `submit_tasks` holds the run loop** — the run loop awaits
+  `submit_tasks`, so a backend that waits on remote I/O there stalls every backend of
+  the engine. A call that takes longer than 1 s, returning or raising, now logs a
+  warning naming the slowest backend of the batch, at most once a minute per backend,
+  and the execution-backend docs state the contract: return promptly and report
+  through the task callback.
+
 ### Fixed
 
 - **A backend that refuses a submit fails only its own tasks** — when a backend's
