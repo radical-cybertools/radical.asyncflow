@@ -64,8 +64,16 @@ async def test_clear_internal_records_resets_resolved_and_running():
 
     # Confirm something was processed (and released after it finished)
     assert engine._is_released(fut.task["uid"])
+    # a finished task leaves nothing here, so give the clear something to clear
+    engine.resolved.add("task.x")
+    engine.running.add("task.y")
+    engine._to_release.append("task.z")
+    engine._dependency_futures["task.w"] = []
 
     await engine.shutdown()
+
+    assert not engine._is_released(fut.task["uid"])
+    assert not engine._to_release and not engine._dependency_futures
 
     assert len(engine.resolved) == 0
     assert len(engine.running) == 0

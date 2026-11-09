@@ -376,10 +376,12 @@ class LocalExecutionBackend:
             # Before create_task: an eager task factory runs a task that does
             # not suspend to the end inside it, and its handler removes it
             self.tasks[task["uid"]] = task
+            coro = self._handle_task(task)
             try:
-                future = asyncio.create_task(self._handle_task(task))
+                future = asyncio.create_task(coro)
             except BaseException:
                 self.tasks.pop(task["uid"], None)
+                coro.close()
                 raise
             submitted_tasks.append(future)
             task["future"] = future

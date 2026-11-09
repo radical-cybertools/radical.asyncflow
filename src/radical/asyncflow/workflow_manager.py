@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 def _uid_number(uid: str) -> Optional[int]:
     """The counter value in a uid like 'task.000042' (see get_next_uid)."""
     num = uid.rpartition(".")[2]
-    return int(num) if num.isdigit() else None
+    return int(num) if num.isdecimal() else None
 
 
 class _ComponentFuture(asyncio.Future):
@@ -567,9 +567,9 @@ class WorkflowEngine:
 
         # Count unresolved dependencies
         unresolved_count = 0
-        for dep in dependencies:
+        for dep, dep_fut in zip(dependencies, self._dependency_futures[comp_uid]):
             dep_uid = dep["uid"]
-            if dep_uid not in self.components and self._is_released(dep_uid):
+            if dep_uid not in self.components and dep_fut.done():
                 continue  # finished and released: resolved
             if (
                 dep_uid not in self.resolved
@@ -1964,7 +1964,8 @@ class WorkflowEngine:
                 - 'return_value' / 'stdout': Result of the execution
             component_fut (asyncio.Future): Future to set the result on.
         """
-        internal_component = self.components[component["uid"]]["description"]
+        comp = self.components.get(component["uid"])  # gone if released
+        internal_component = comp["description"] if comp else component
 
         if not component_fut.done():
             if internal_component[FUNCTION]:
@@ -2106,7 +2107,10 @@ class WorkflowEngine:
         else:
             task_dct = task.as_dict()
 
-        if task_dct["uid"] not in self.components:
+        # one lookup: a backend may call this from its own thread while the
+        # run loop releases the component
+        comp = self.components.get(task_dct["uid"])
+        if comp is None:
             if self._is_released(task_dct["uid"]):
                 logger.debug(f"{task_dct['uid']} was released, skipping {state}")
                 return
@@ -2115,7 +2119,6 @@ class WorkflowEngine:
             )
             return
 
-        comp = self.components[task_dct["uid"]]
         task_fut = comp["future"]
         comp_desc = comp["description"]
         logger.info(f"{task_dct['uid']} is in {state} state")
