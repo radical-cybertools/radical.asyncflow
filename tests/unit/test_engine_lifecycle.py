@@ -161,8 +161,9 @@ async def test_uids_are_unique_across_engines_and_shutdowns():
     async def t2():
         return 3
 
-    await asyncio.wait_for(asyncio.gather(t1(), b1(), t2()), timeout=5)
-    uids = [*e1.components, *e2.components]
+    futs = [t1(), b1(), t2()]
+    await asyncio.wait_for(asyncio.gather(*futs), timeout=5)
+    uids = [f.uid for f in futs]
     await e2.shutdown()
 
     e3 = await WorkflowEngine.create(dry_run=True)
@@ -171,8 +172,9 @@ async def test_uids_are_unique_across_engines_and_shutdowns():
     async def t3():
         return 4
 
-    await asyncio.wait_for(t3(), timeout=5)
-    uids += [*e3.components]
+    fut = t3()
+    await asyncio.wait_for(fut, timeout=5)
+    uids.append(fut.uid)
 
     assert len(set(uids)) == len(uids) == 4, uids
 

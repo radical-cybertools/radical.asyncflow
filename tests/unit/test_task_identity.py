@@ -78,7 +78,8 @@ async def test_uid_matches_registered_description(kind, comp_type):
 
     await fut
     assert getattr(fut, comp_type)["uid"] == uid_at_call
-    assert engine.components[uid_at_call]["future"] is fut
+    # registered under it: found by that uid (also once released)
+    assert engine._dep_future(uid_at_call) is fut
     await engine.shutdown()
 
 
