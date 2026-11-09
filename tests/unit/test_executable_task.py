@@ -1,7 +1,5 @@
 """Unit tests for executable_task decorator — shlex splitting behaviour."""
 
-import asyncio
-
 import pytest
 
 from radical.asyncflow import WorkflowEngine
@@ -21,10 +19,9 @@ async def test_executable_task_simple_split():
     async def t():
         return "echo hello"
 
-    await t()
-    await asyncio.sleep(0.05)
-
-    desc = next(iter(engine.components.values()))["description"]
+    fut = t()
+    await fut
+    desc = fut.task
     assert desc[EXECUTABLE] == "echo"
     assert desc["arguments"] == ["hello"]
     assert desc[FUNCTION] is None
@@ -40,10 +37,9 @@ async def test_executable_task_no_arguments():
     async def t():
         return "ls"
 
-    await t()
-    await asyncio.sleep(0.05)
-
-    desc = next(iter(engine.components.values()))["description"]
+    fut = t()
+    await fut
+    desc = fut.task
     assert desc[EXECUTABLE] == "ls"
     assert desc["arguments"] == []
     await engine.shutdown()
@@ -58,10 +54,9 @@ async def test_executable_task_multiple_arguments():
     async def t():
         return "echo hello world"
 
-    await t()
-    await asyncio.sleep(0.05)
-
-    desc = next(iter(engine.components.values()))["description"]
+    fut = t()
+    await fut
+    desc = fut.task
     assert desc[EXECUTABLE] == "echo"
     assert desc["arguments"] == ["hello", "world"]
     await engine.shutdown()
@@ -76,10 +71,9 @@ async def test_executable_task_quoted_argument():
     async def t():
         return 'echo "hello world"'
 
-    await t()
-    await asyncio.sleep(0.05)
-
-    desc = next(iter(engine.components.values()))["description"]
+    fut = t()
+    await fut
+    desc = fut.task
     assert desc[EXECUTABLE] == "echo"
     assert desc["arguments"] == ["hello world"]
     await engine.shutdown()
@@ -94,10 +88,9 @@ async def test_executable_task_path_with_spaces():
     async def t():
         return '"/usr/my tool" --verbose'
 
-    await t()
-    await asyncio.sleep(0.05)
-
-    desc = next(iter(engine.components.values()))["description"]
+    fut = t()
+    await fut
+    desc = fut.task
     assert desc[EXECUTABLE] == "/usr/my tool"
     assert desc["arguments"] == ["--verbose"]
     await engine.shutdown()

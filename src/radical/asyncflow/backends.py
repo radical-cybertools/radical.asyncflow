@@ -432,6 +432,9 @@ class LocalExecutionBackend:
         except Exception as e:
             logger.exception(f"Error handling task {task.get('uid')}: {e}")
             raise
+        finally:
+            # a finished task is the engine's to keep, not the backend's
+            self.tasks.pop(task["uid"], None)
 
     async def submit_tasks(self, tasks: list[dict[str, Any]]) -> list[asyncio.Task]:
         """Submit tasks for execution."""
@@ -439,11 +442,18 @@ class LocalExecutionBackend:
         submitted_tasks = []
 
         for task in tasks:
-            future = asyncio.create_task(self._handle_task(task))
-            submitted_tasks.append(future)
-
+            # Before create_task: an eager task factory runs a task that does
+            # not suspend to the end inside it, and its handler removes it
             self.tasks[task["uid"]] = task
-            self.tasks[task["uid"]]["future"] = future
+            coro = self._handle_task(task)
+            try:
+                future = asyncio.create_task(coro)
+            except BaseException:
+                self.tasks.pop(task["uid"], None)
+                coro.close()
+                raise
+            submitted_tasks.append(future)
+            task["future"] = future
 
         return submitted_tasks
 
