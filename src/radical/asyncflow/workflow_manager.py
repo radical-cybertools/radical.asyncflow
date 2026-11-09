@@ -676,9 +676,8 @@ class WorkflowEngine:
         # A dependency is unresolved while its future is pending; _on_done
         # releases the dependents registered here when it resolves.
         unresolved_count = 0
-        for dep, dep_fut in zip(
-            self.dependencies[comp_uid], self._dependency_futures[comp_uid]
-        ):
+        dep_futures = self._dependency_futures.get(comp_uid, ())
+        for dep, dep_fut in zip(self.dependencies[comp_uid], dep_futures):
             dep_uid = dep["uid"]
             if dep_uid not in self.components and dep_fut.done():
                 continue  # finished and released: resolved
@@ -1072,16 +1071,17 @@ class WorkflowEngine:
             }
 
             self.dependencies[comp_desc["uid"]] = comp_deps
-            # the futures themselves: a dependency may be released before
-            # this component runs (see _release_finished)
-            dep_futs = {
-                v.uid: v
-                for v in (*comp_desc["args"], *comp_desc["kwargs"].values())
-                if isinstance(v, asyncio.Future) and hasattr(v, "uid")
-            }
-            self._dependency_futures[comp_desc["uid"]] = [
-                dep_futs[d["uid"]] for d in comp_deps
-            ]
+            if comp_deps:
+                # the futures themselves: a dependency may be released before
+                # this component runs (see _release_finished)
+                dep_futs = {
+                    v.uid: v
+                    for v in (*comp_desc["args"], *comp_desc["kwargs"].values())
+                    if isinstance(v, asyncio.Future) and hasattr(v, "uid")
+                }
+                self._dependency_futures[comp_desc["uid"]] = [
+                    dep_futs[d["uid"]] for d in comp_deps
+                ]
 
             logger.debug(
                 "Registered %s: '%s' with id of %s",
@@ -1608,7 +1608,7 @@ class WorkflowEngine:
         # Get names of failed dependencies
         failed_dep_names = []
         dependencies = self.dependencies[comp_desc["uid"]]
-        dep_futures = self._dependency_futures[comp_desc["uid"]]
+        dep_futures = self._dependency_futures.get(comp_desc["uid"], ())
 
         for dep, dep_future in zip(dependencies, dep_futures):
             if dep_future.exception() is not None:
@@ -1693,7 +1693,7 @@ class WorkflowEngine:
 
                     # Verify dependencies are still met
                     dependencies = self.dependencies[comp_uid]
-                    dep_futures = self._dependency_futures[comp_uid]
+                    dep_futures = self._dependency_futures.get(comp_uid, ())
 
                     failed_deps = []
                     cancelled_deps = []
