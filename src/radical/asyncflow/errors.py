@@ -22,3 +22,16 @@ class DependencyFailureError(Exception):
         # Chain the exception if we have a root cause
         if root_cause:
             self.__cause__ = root_cause
+
+
+class ComponentReleasedError(LookupError):
+    """A component was looked up by uid after the engine released it.
+
+    The engine forgets a task or block once it has finished and its dependents were
+    notified, so a long-lived engine does not grow with every component. Its future
+    stays usable as a dependency.
+    """
+
+    def __init__(self, uid):
+        super().__init__(f"{uid} was released after it finished")
+        self.uid = uid

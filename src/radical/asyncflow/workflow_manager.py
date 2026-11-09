@@ -10,6 +10,7 @@ import signal
 import threading
 import time
 import uuid
+import weakref
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager, nullcontext
 from contextvars import ContextVar
@@ -23,6 +24,7 @@ import typeguard
 from .backends import NoopExecutionBackend
 from .backends import LocalExecutionBackend
 from .data import InputFile, OutputFile
+from .errors import ComponentReleasedError
 from .errors import DependencyFailureError
 from .utils import get_next_uid
 from .utils import get_event_loop_or_raise
@@ -34,6 +36,12 @@ EXECUTABLE = "executable"
 PROMPT = "prompt"
 
 logger = logging.getLogger(__name__)
+
+
+def _uid_number(uid: str) -> Optional[int]:
+    """The counter value in a uid like 'task.000042' (see get_next_uid)."""
+    num = uid.rpartition(".")[2]
+    return int(num) if num.isdigit() else None
 
 
 class _ComponentFuture(asyncio.Future):
@@ -201,6 +209,14 @@ class WorkflowEngine:
         self._dependents_map = defaultdict(set)
         self._dependency_count = {}
         self._component_change_event = asyncio.Event()
+
+        # Finished components are released (see _release_finished), so a
+        # long-lived engine does not grow per component.  A released future
+        # that something still references stays reachable here, by uid, as a
+        # dependency; a bit per uid number remembers which uids were released.
+        self._to_release: list[str] = []
+        self._released_futures = weakref.WeakValueDictionary()
+        self._released_uids = bytearray()
 
         # Block task registry: uid -> asyncio.Task for running execute_block coroutines
         self._block_asyncio_tasks: dict[str, asyncio.Task] = {}
@@ -553,6 +569,8 @@ class WorkflowEngine:
         unresolved_count = 0
         for dep in dependencies:
             dep_uid = dep["uid"]
+            if dep_uid not in self.components and self._is_released(dep_uid):
+                continue  # finished and released: resolved
             if (
                 dep_uid not in self.resolved
                 or not self.components[dep_uid]["future"].done()
@@ -1326,6 +1344,8 @@ class WorkflowEngine:
         self._block_asyncio_tasks.clear()
         self.resolved.clear()
         self.running.clear()
+        self._to_release.clear()
+        self._released_futures.clear()
         self._task_submit_times.clear()
         self._task_start_times.clear()
 
@@ -1353,6 +1373,62 @@ class WorkflowEngine:
         del self._dependents_map[comp_uid]
         if comp_uid in self._dependency_count:
             del self._dependency_count[comp_uid]
+        self._to_release.append(comp_uid)
+
+    def _release_finished(self) -> None:
+        """Forget the components whose dependents were notified.
+
+        Deferred to the top of the run loop: code that notified the dependents
+        may still read the component's record.  A component that is not done
+        (none should be) is kept.
+        """
+        to_release, self._to_release = self._to_release, []
+        for uid in to_release:
+            comp = self.components.get(uid)
+            if comp is None or not comp["future"].done():
+                continue
+            del self.components[uid]
+            self._released_futures[uid] = comp["future"]
+            self.dependencies.pop(uid, None)
+            self.resolved.discard(uid)
+            self.running.discard(uid)
+            self._dependency_count.pop(uid, None)
+            self._dependents_map.pop(uid, None)
+            num = _uid_number(uid)
+            if num is not None:
+                idx, bit = divmod(num, 8)
+                if idx >= len(self._released_uids):
+                    self._released_uids.extend(
+                        bytes(idx + 1 - len(self._released_uids))
+                    )
+                self._released_uids[idx] |= 1 << bit
+
+    def _is_released(self, uid: str) -> bool:
+        """Whether this engine released the component `uid`."""
+        num = _uid_number(uid)
+        if num is None:
+            return False
+        idx, bit = divmod(num, 8)
+        return idx < len(self._released_uids) and bool(
+            self._released_uids[idx] >> bit & 1
+        )
+
+    def _dep_future(self, uid: str) -> asyncio.Future:
+        """The future of dependency `uid`, also after it was released.
+
+        Raises:
+            ComponentReleasedError: `uid` was released and nothing references
+                its future any more.
+        """
+        comp = self.components.get(uid)
+        if comp is not None:
+            return comp["future"]
+        future = self._released_futures.get(uid)
+        if future is not None:
+            return future
+        if self._is_released(uid):
+            raise ComponentReleasedError(uid)
+        raise KeyError(uid)
 
     def _remove_member(self, block_uid: str, task_uid: str) -> None:
         """Remove a completed task from its parent block's member set."""
@@ -1383,7 +1459,7 @@ class WorkflowEngine:
         # Get names of failed dependencies
         failed_dep_names = []
         dependencies = self.dependencies[comp_desc["uid"]]
-        dep_futures = [self.components[dep["uid"]]["future"] for dep in dependencies]
+        dep_futures = [self._dep_future(dep["uid"]) for dep in dependencies]
 
         for dep, dep_future in zip(dependencies, dep_futures):
             if dep_future.exception() is not None:
@@ -1406,7 +1482,7 @@ class WorkflowEngine:
         """
         dependency_output_files = set()
         for dep in dependencies:
-            dep_desc = self.components[dep["uid"]]["description"]
+            dep_desc = dep
             for output_file in dep_desc["metadata"]["output_files"]:
                 dependency_output_files.add(Path(output_file).name)
         return dependency_output_files
@@ -1444,14 +1520,19 @@ class WorkflowEngine:
         """
         while not self._shutdown_event.is_set():
             try:
+                self._release_finished()
                 to_submit = []
 
                 # Process ready components
                 while self._ready_queue and not self._shutdown_event.is_set():
                     comp_uid = self._ready_queue.popleft()
 
-                    # Skip if already processed
-                    if comp_uid in self.resolved or comp_uid in self.running:
+                    # Skip if already processed (or released)
+                    if (
+                        comp_uid in self.resolved
+                        or comp_uid in self.running
+                        or comp_uid not in self.components
+                    ):
                         continue
 
                     # Check if future is already done (could be cancelled/failed)
@@ -1462,9 +1543,7 @@ class WorkflowEngine:
 
                     # Verify dependencies are still met
                     dependencies = self.dependencies[comp_uid]
-                    dep_futures = [
-                        self.components[dep["uid"]]["future"] for dep in dependencies
-                    ]
+                    dep_futures = [self._dep_future(dep["uid"]) for dep in dependencies]
 
                     failed_deps = []
                     cancelled_deps = []
@@ -1511,7 +1590,7 @@ class WorkflowEngine:
                         # implicit and explicit linking are independent.
                         if self._links_implicit_data and self.implicit_data_mode:
                             for dep in dependencies:
-                                dep_desc = self.components[dep["uid"]]["description"]
+                                dep_desc = dep
 
                                 # Link implicit data dependencies
                                 if not dep_desc["metadata"].get("output_files"):
@@ -1527,7 +1606,7 @@ class WorkflowEngine:
                             explicit_files_to_stage = []
 
                             for dep in dependencies:
-                                dep_desc = self.components[dep["uid"]]["description"]
+                                dep_desc = dep
 
                                 # Link explicit data dependencies
                                 for output_file in dep_desc["metadata"]["output_files"]:
@@ -2020,6 +2099,9 @@ class WorkflowEngine:
             task_dct = task.as_dict()
 
         if task_dct["uid"] not in self.components:
+            if self._is_released(task_dct["uid"]):
+                logger.debug(f"{task_dct['uid']} was released, skipping {state}")
+                return
             logger.warning(
                 f"Received an unknown task and will skip it: {task_dct['uid']}"
             )

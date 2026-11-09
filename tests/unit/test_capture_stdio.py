@@ -1,6 +1,5 @@
 """Unit tests for capture_stdio decorator parameter and _work_dir authority."""
 
-import asyncio
 import os
 
 import pytest
@@ -21,10 +20,9 @@ async def test_capture_stdio_stored_in_comp_desc():
     async def t():
         return "echo hello"
 
-    await t()
-    await asyncio.sleep(0.05)
-
-    desc = next(iter(engine.components.values()))["description"]
+    fut = t()
+    await fut
+    desc = fut.task
     assert desc["capture_stdio"] is True
     await engine.shutdown()
 
@@ -38,10 +36,9 @@ async def test_capture_stdio_default_false():
     async def t():
         return "echo hello"
 
-    await t()
-    await asyncio.sleep(0.05)
-
-    desc = next(iter(engine.components.values()))["description"]
+    fut = t()
+    await fut
+    desc = fut.task
     assert desc["capture_stdio"] is False
     await engine.shutdown()
 
@@ -55,10 +52,9 @@ async def test_capture_stdio_on_function_task_stored_false():
     async def t():
         return 42
 
-    await t()
-    await asyncio.sleep(0.05)
-
-    desc = next(iter(engine.components.values()))["description"]
+    fut = t()
+    await fut
+    desc = fut.task
     assert desc["capture_stdio"] is True
     await engine.shutdown()
 
@@ -73,10 +69,9 @@ async def test_capture_stdio_not_in_task_backend_specific_kwargs():
     async def t():
         return "echo hello"
 
-    await t()
-    await asyncio.sleep(0.05)
-
-    desc = next(iter(engine.components.values()))["description"]
+    fut = t()
+    await fut
+    desc = fut.task
     # top-level presence
     assert "capture_stdio" in desc
     # NOT nested inside task_backend_specific_kwargs

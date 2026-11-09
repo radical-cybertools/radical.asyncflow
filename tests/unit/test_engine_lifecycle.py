@@ -58,11 +58,12 @@ async def test_clear_internal_records_resets_resolved_and_running():
     async def work():
         return 42
 
-    work()
+    fut = work()
+    await fut
     await asyncio.sleep(0.1)
 
-    # Confirm something was processed (resolved is non-empty before shutdown)
-    assert len(engine.resolved) > 0
+    # Confirm something was processed (and released after it finished)
+    assert engine._is_released(fut.task["uid"])
 
     await engine.shutdown()
 
@@ -132,7 +133,9 @@ async def test_shutdown_of_one_engine_does_not_reset_another_engines_uids():
         )
 
     assert second.task["uid"] != first.task["uid"]
-    assert set(e1.components) == {first.task["uid"], second.task["uid"]}
+    # each uid has its own record: still registered, or released after it finished
+    for fut in (first, second):
+        assert fut.task["uid"] in e1.components or e1._is_released(fut.task["uid"])
 
     await e1.shutdown()
 

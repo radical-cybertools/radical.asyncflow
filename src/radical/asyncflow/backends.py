@@ -363,6 +363,9 @@ class LocalExecutionBackend:
         except Exception as e:
             logger.exception(f"Error handling task {task.get('uid')}: {e}")
             raise
+        finally:
+            # a finished task is the engine's to keep, not the backend's
+            self.tasks.pop(task["uid"], None)
 
     async def submit_tasks(self, tasks: list[dict[str, Any]]) -> list[asyncio.Task]:
         """Submit tasks for execution."""
