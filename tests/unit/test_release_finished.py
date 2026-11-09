@@ -1,8 +1,8 @@
 """Finished components are released, so a long-lived engine does not grow.
 
 Once a task or block is done and its dependents were notified, the engine forgets it.
-Its future stays usable as a dependency; a lookup by uid after nothing references the
-future any more names the release.
+Its future stays usable as a dependency, and a late report about it is recognised as one
+about a released task.
 """
 
 import asyncio
@@ -13,7 +13,7 @@ import weakref
 import pytest
 
 from radical.asyncflow import LocalExecutionBackend, WorkflowEngine
-from radical.asyncflow.errors import ComponentReleasedError, DependencyFailureError
+from radical.asyncflow.errors import DependencyFailureError
 
 
 async def _released(engine, uid, timeout=5.0):
@@ -26,7 +26,8 @@ async def _released(engine, uid, timeout=5.0):
 
 @pytest.mark.asyncio
 async def test_many_tasks_keep_the_engine_bounded():
-    engine = await WorkflowEngine.create(backend=await LocalExecutionBackend())
+    backend = await LocalExecutionBackend()
+    engine = await WorkflowEngine.create(backend=backend)
     try:
 
         @engine.function_task
@@ -45,8 +46,9 @@ async def test_many_tasks_keep_the_engine_bounded():
             assert len(getattr(engine, name)) <= 1, name
         assert len(engine._dependency_count) <= 1
         assert len(engine._dependents_map) <= 1
-        # only the future the test still holds is reachable by uid
-        assert set(engine._released_futures) <= {last.task["uid"]}
+        assert len(engine._dependency_futures) <= 1
+        # the backend drops a task when it finished (also under --eager-tasks)
+        assert not backend.tasks
 
         # nothing in the engine keeps a finished call's arguments: the whole
         # entry goes, description (with its args) and dependency list alike
@@ -149,8 +151,9 @@ async def test_pending_dependent_reads_a_released_dependency():
 
 
 @pytest.mark.asyncio
-async def test_lookup_of_a_released_uid_names_the_release(caplog):
+async def test_late_report_on_a_released_task_names_the_release(caplog):
     engine = await WorkflowEngine.create(backend=await LocalExecutionBackend())
+    other = await WorkflowEngine.create(backend=await LocalExecutionBackend())
     try:
 
         @engine.function_task
@@ -160,24 +163,41 @@ async def test_lookup_of_a_released_uid_names_the_release(caplog):
         fut = work()
         await fut
         uid = fut.task["uid"]
-        desc = dict(fut.task)
         await _released(engine, uid)
-
-        # still referenced: the future is found
-        assert engine._dep_future(uid) is fut
-        del fut
-        gc.collect()
-        with pytest.raises(ComponentReleasedError, match=f"{uid} was released"):
-            engine._dep_future(uid)
-        with pytest.raises(KeyError):
-            engine._dep_future("task.999999999")
+        assert not other._is_released(uid)
 
         # a late state report for a released task is not "unknown"
         with caplog.at_level(
             logging.DEBUG, logger="radical.asyncflow.workflow_manager"
         ):
-            engine.task_callbacks(desc, "DONE")
+            engine.task_callbacks(dict(fut.task), "DONE")
         assert any("was released" in r.getMessage() for r in caplog.records)
         assert not any("unknown task" in r.getMessage() for r in caplog.records)
+    finally:
+        await engine.shutdown()
+        await other.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_a_service_is_not_released():
+    """A service's future resolves when it is ready; the backend reports on it later, so
+    the engine keeps it."""
+    engine = await WorkflowEngine.create(backend=await LocalExecutionBackend())
+    try:
+
+        @engine.function_task(service=True)
+        async def service():
+            return "ready"
+
+        @engine.function_task
+        async def work():
+            return 1
+
+        svc = service()
+        await svc
+        fut = work()
+        await fut
+        await _released(engine, fut.task["uid"])
+        assert svc.task["uid"] in engine.components
     finally:
         await engine.shutdown()

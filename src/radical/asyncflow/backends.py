@@ -373,11 +373,12 @@ class LocalExecutionBackend:
         submitted_tasks = []
 
         for task in tasks:
+            # Before create_task: an eager task factory runs a task that does
+            # not suspend to the end inside it, and its handler removes it
+            self.tasks[task["uid"]] = task
             future = asyncio.create_task(self._handle_task(task))
             submitted_tasks.append(future)
-
-            self.tasks[task["uid"]] = task
-            self.tasks[task["uid"]]["future"] = future
+            task["future"] = future
 
         return submitted_tasks
 
