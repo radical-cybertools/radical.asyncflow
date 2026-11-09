@@ -985,8 +985,7 @@ class WorkflowEngine:
                 if isinstance(v, asyncio.Future) and hasattr(v, "uid")
             }
             self._dependency_futures[comp_desc["uid"]] = [
-                dep_futs.get(d["uid"]) or self.components[d["uid"]]["future"]
-                for d in comp_deps
+                dep_futs[d["uid"]] for d in comp_deps
             ]
 
             logger.debug(
@@ -1402,8 +1401,10 @@ class WorkflowEngine:
             comp = self.components.get(uid)
             if comp is None or comp["description"].get("is_service"):
                 continue
-            if not comp["future"].done():  # not expected: try again later
-                self._to_release.append(uid)
+            if not comp["future"].done():  # not expected: release it when done
+                comp["future"].add_done_callback(
+                    lambda _, uid=uid: self._to_release.append(uid)
+                )
                 continue
             del self.components[uid]
             self.dependencies.pop(uid, None)

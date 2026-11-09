@@ -172,7 +172,8 @@ AsyncFlow reports.
 
 !!! note
     A finished component is released: the engine drops it from `flow.components` once its
-    dependents were notified, so a long-lived engine does not grow with every task. Its future
+    dependents were notified, so a long-lived engine keeps no record per finished task (only one
+    bit per uid, to recognise a late report about a released task). Its future
     keeps the description (`future.task` or `future.block`) and still works as a dependency.
 
 !!! note
