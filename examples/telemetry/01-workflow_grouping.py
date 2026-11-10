@@ -152,7 +152,6 @@ async def main(out_dir: str = "telemetry-output") -> None:
     )
 
     await flow.shutdown()
-    await telemetry.stop()
 
     jsonl = next(Path(out_dir).glob("*.jsonl"), None)
     print(f"\nCheckpoint : {jsonl}")

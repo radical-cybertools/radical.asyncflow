@@ -33,6 +33,10 @@ async def flow():
     await flow.shutdown()
 
 
+async def _stop_nothing():
+    pass
+
+
 def _identity(decorator):
     @decorator
     async def consumer(x):
@@ -229,9 +233,11 @@ def _fail_step_for(flow, monkeypatch, step, name):
     """
     original = getattr(flow, step)
     if step == "_emit" and flow._telemetry is None:
-        # blocks open a span; nothing else of telemetry is used here
+        # blocks open a span and shutdown stops it; nothing else of telemetry is
+        # used here
         stand_in = types.SimpleNamespace(
-            span_scope=lambda *args, **kwargs: contextlib.nullcontext()
+            span_scope=lambda *args, **kwargs: contextlib.nullcontext(),
+            stop=_stop_nothing,
         )
         monkeypatch.setattr(flow, "_telemetry", stand_in)
 

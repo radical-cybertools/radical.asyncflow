@@ -26,13 +26,13 @@ telemetry = await flow.start_telemetry(
 )
 ```
 
-`start_telemetry()` returns a `TelemetryManager`. Stop it explicitly when done, or it stops automatically when the workflow engine shuts down:
+`start_telemetry()` returns a `TelemetryManager`. The workflow engine stops it when it shuts down, after the events of the components the shutdown cancels and before the execution backends shut down:
 
 ```python
 await flow.shutdown()  # also stops telemetry
-# or explicitly:
-await telemetry.stop()
 ```
+
+The manager stays readable after it stops (`summary()`, `task_spans()`, the checkpoint file). Calling `await telemetry.stop()` before `flow.shutdown()` drops the events of the components the shutdown cancels.
 
 ### Forwarding to an external backend
 

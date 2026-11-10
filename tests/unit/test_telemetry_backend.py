@@ -128,7 +128,7 @@ async def test_started_and_canceled_events_carry_the_backend_that_ran_the_task()
     engine.task_callbacks(task, "RUNNING")
     engine.task_callbacks(task, "CANCELED")
     assert fut.cancelled()
-    await telemetry.stop()
+    # shutdown() stops telemetry once the cancelled future has emitted TaskCanceled
     await engine.shutdown()
 
     backends = {e.event_type: e.backend for e in events if e.task_id == task["uid"]}
