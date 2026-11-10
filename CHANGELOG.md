@@ -99,6 +99,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   registers, and its body stops. A `cancel` bound before the task registered, such
   as `loop.call_later(t, fut.cancel)`, cancelled a running task only in the engine,
   never on the execution backend; it now behaves like `fut.cancel()` called later.
+- **A block cancelled before it starts stays unstarted** — a block in a batch with
+  tasks, cancelled while the backend took those tasks, or cancelled by another block
+  of its batch, still ran its body: to its first `await`, or past it under an eager
+  task factory, because the future's done callback cancels the block's `asyncio.Task`
+  only after that task's first step. The block now checks its future before it calls
+  the body. What depends on the block is released as before.
 - **An unknown `backend=` name is rejected when the function is decorated** — a task
   decorated with a `backend=` name that none of the engine's backends has raised a
   `KeyError` in the engine's run loop when it was submitted, and the whole engine shut
