@@ -136,8 +136,6 @@ class WorkflowEngine:
         loop (asyncio.AbstractEventLoop): The asyncio event loop (current running loop).
         backend: The execution backend used for task execution.
         dry_run (bool): Indicates whether the engine is in dry-run mode.
-        log (ru.Logger): Logger instance for logging workflow events.
-        prof (ru.Profiler): Profiler instance for profiling workflow execution.
     """
 
     @typeguard.typechecked

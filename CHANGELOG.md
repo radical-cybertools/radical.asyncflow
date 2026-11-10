@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Removed
+
+- **RADICAL-Pilot references** — RHAPSODY no longer ships `RadicalExecutionBackend`, so
+  every RADICAL-Pilot reference is removed from the README, docs and tutorial.
+  `examples/07-radical_execution_backend.py` is replaced by
+  `examples/07-dragon_executable_dependencies.py`, which runs the same executable-task
+  DAG on `DragonExecutionBackend`, and the HPC examples in the docs now use
+  `DragonExecutionBackend`. The backend data-linking hooks are unchanged.
+
+- **radical.utils leftovers** — the `WorkflowEngine` docstring no longer lists the
+  nonexistent `log` (`ru.Logger`) and `prof` (`ru.Profiler`) attributes, and
+  `docs/best_practice.md` replaces the unused `RADICAL_LOG_LVL` variable with
+  `init_default_logger(logging.DEBUG)`.
+
 
 ## [0.7.0] 2026-11-10
 
