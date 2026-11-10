@@ -51,6 +51,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Cancelling a task that waits for its dependencies** — its dependents
   stayed pending until the cancelled task's own dependencies finished, or
   forever if they never did. They are now cancelled at once.
+
+## [0.7.0] 2026-11-10
+
+### Fixed
+
 - **Cancelling a running task cancels it on its own backend** (#118) — with several
   backends, `cancel()` on a running task sent the cancel to the default backend, so a
   task routed elsewhere with `backend=` kept running and its future resolved only when
