@@ -51,6 +51,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Cancelling a task that waits for its dependencies** — its dependents
   stayed pending until the cancelled task's own dependencies finished, or
   forever if they never did. They are now cancelled at once.
+- **Every component gets a terminal telemetry event** (#120) — only a state the
+  backend reported emitted `TaskCompleted`, `TaskFailed` or `TaskCanceled`. A task
+  cancelled at shutdown, a task failed or cancelled because of a dependency, a pending
+  task cancelled with `cancel()`, and every block emitted `TaskCreated` and nothing
+  after it, so its span stayed open. Each component that emitted `TaskCreated` now
+  emits one terminal event when its future resolves, before a caller awaiting it
+  resumes. `TaskFailed` carries the exception's class name as `error_type` instead of
+  `"unknown"`. Use RHAPSODY 0.7.0 or later: 0.6.0 counts the terminal event of a
+  component that never started, such as a block or a dependent of a failed task, in
+  `tasks_running` as a running task ending.
+- **`shutdown()` stops telemetry** (#115) — telemetry started with
+  `start_telemetry()` kept running after `shutdown()`, and with the Dragon backend its
+  adapter's worker processes kept the process from exiting. `shutdown()` now stops it
+  after the terminal events of the components it cancels and before the execution
+  backends shut down, as RHAPSODY's `Session.close()` does. Calling
+  `telemetry.stop()` after `shutdown()` is no longer needed.
+
+## [0.7.0] 2026-11-10
+
+### Fixed
+
 - **Cancelling a running task cancels it on its own backend** (#118) — with several
   backends, `cancel()` on a running task sent the cancel to the default backend, so a
   task routed elsewhere with `backend=` kept running and its future resolved only when
@@ -59,23 +80,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   block's cascade and the future its body awaits, which sent the member's cancel
   twice. A cancel the backend refuses, fails on, or that cannot be sent (no running
   event loop) can be retried.
-- **Every component gets a terminal telemetry event** (#120) — only a state the
-  backend reported emitted `TaskCompleted`, `TaskFailed` or `TaskCanceled`. A task
-  cancelled at shutdown, a task failed or cancelled because of a dependency, a pending
-  task cancelled with `cancel()`, and every block emitted `TaskCreated` and nothing
-  after it, so its span stayed open. Each component that emitted `TaskCreated` now
-  emits one terminal event when its future resolves, before a caller awaiting it
-  resumes. `TaskFailed` carries the exception's class name as `error_type` instead of
-  `"unknown"`. RHAPSODY 0.6.0 counts the terminal event of a component that never
-  started, such as a block or a dependent of a failed task, in `tasks_running` as a
-  running task ending; RHAPSODY's main branch fixes that count.
-- **`shutdown()` stops telemetry** (#115) — telemetry started with
-  `start_telemetry()` kept running after `shutdown()`, and with the Dragon backend its
-  adapter's worker processes kept the process from exiting. `shutdown()` now stops it
-  after the terminal events of the components it cancels and before the execution
-  backends shut down, as RHAPSODY's `Session.close()` does. Calling
-  `telemetry.stop()` after `shutdown()` is no longer needed; with RHAPSODY 0.6.0 a
-  second `stop()` logs a warning.
 - **A component's uid is set when the call returns** — calling a task or block
   returned its future before the engine assigned the component's uid, so `future.id`
   did not exist until the next event-loop step. A caller that read it right after the
