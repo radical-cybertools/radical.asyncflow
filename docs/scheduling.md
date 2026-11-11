@@ -64,6 +64,21 @@ same key, such as Dask's, give it the same meaning.
 `FifoPolicy(capacity)` starts tasks by priority, then in the order they became ready,
 at most `capacity` at a time. Without priorities it is first in, first out.
 
+## LineagePolicy
+
+`LineagePolicy(capacity)` starts tasks by priority, then oldest lineage first, then in
+registration order. A task's lineage is the registration order of its oldest ancestor:
+a dependency or the enclosing block, transitively. So when a task completes, the
+dependents it releases start before unrelated newer work, and started workflows
+finish before new ones start. That lowers the mean workflow completion time, and the
+number of half-finished workflows whose intermediate results stay live, for about the
+same makespan.
+
+A workflow that keeps producing tasks holds newer workflows back for as long as it
+does. To share the backend between workflows instead, use `FairPolicy`. A dependency that
+every workflow shares (data loaded once and passed to all of them) puts them all in
+one lineage, and the order becomes registration order.
+
 ## Writing a policy
 
 Any object with these four methods works as a policy; one that lacks any of them is
