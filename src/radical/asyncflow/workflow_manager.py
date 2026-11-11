@@ -10,6 +10,7 @@ import signal
 import threading
 import time
 import uuid
+import weakref
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager, nullcontext
 from contextvars import ContextVar
@@ -34,6 +35,32 @@ EXECUTABLE = "executable"
 PROMPT = "prompt"
 
 logger = logging.getLogger(__name__)
+
+# The engine each policy serves, by id(policy), until the engine gives it back
+# (see WorkflowEngine._unbind_policy); the engine keeps its policy alive
+_POLICY_ENGINES: "weakref.WeakValueDictionary[int, WorkflowEngine]" = (
+    weakref.WeakValueDictionary()
+)
+# The tasks engines collected without a shutdown left in their policies, by
+# id(policy): (finalizer of the policy, [(weak policy, held, dispatched)]), given
+# back when the policy is used again, and forgotten when the policy is collected
+_ABANDONED: dict = {}
+# Registration order for policies, across engines, so a policy used by one engine
+# after another never sees the same order twice
+_SEQUENCE = count()
+
+
+def _abandon(policy_ref: Any, held: set, dispatched: set) -> None:
+    """Called when an engine is collected: notes the tasks its policy still holds."""
+    policy = policy_ref()
+    if policy is None or not (held or dispatched):
+        return
+    if id(policy) not in _ABANDONED:
+        _ABANDONED[id(policy)] = (
+            weakref.finalize(policy, _ABANDONED.pop, id(policy), None),
+            [],
+        )
+    _ABANDONED[id(policy)][1].append((policy_ref, held, dispatched))
 
 
 def _debug_enabled(environ: Mapping[str, str] = os.environ) -> bool:
@@ -209,6 +236,8 @@ class WorkflowEngine:
         implicit_data: bool = True,
         uid: Optional[str] = None,
         work_dir: Optional[str] = None,
+        *,
+        policy: Any = None,
     ) -> None:
         """Initialize the WorkflowEngine (sync part only).
 
@@ -221,9 +250,12 @@ class WorkflowEngine:
             uid: Optional unique identifier for this engine. Defaults to
                 ``asyncflow.session.{hex8}`` (UUID-based).
             work_dir: Working directory for output files (default: cwd)
+            policy: Optional ready-queue policy (see ``radical.asyncflow.policies``)
         """
         # Get the current running loop - assume it exists
         self.loop = get_event_loop_or_raise("WorkflowEngine")
+        if policy is not None:
+            self._check_policy(policy)
 
         self.uid = uid or f"asyncflow.session.{uuid.uuid4().hex[:8]}"
         self.work_dir = work_dir or os.getcwd()
@@ -266,6 +298,14 @@ class WorkflowEngine:
         self._wakeup: Optional[asyncio.Future] = None
         # Backend callbacks arriving on other threads are moved to this one.
         self._loop_thread_id = threading.get_ident()
+        # The policy; the tasks it holds (ready, not dispatched); the tasks it
+        # dispatched that the backend has not reported yet; and whether it changed
+        # since the run loop last called dispatch(): a task left it, or that
+        # dispatch() returned tasks
+        self._policy = policy
+        self._held: set[str] = set()
+        self._dispatched: set[str] = set()
+        self._changed = False
 
         # Block task registry: uid -> asyncio.Task for running execute_block coroutines
         self._block_asyncio_tasks: dict[str, asyncio.Task] = {}
@@ -299,6 +339,52 @@ class WorkflowEngine:
         self._task_start_times: dict[str, float] = {}
 
         self._setup_signal_handlers()
+        if policy is not None:
+            _POLICY_ENGINES[id(policy)] = self
+            try:  # a policy that cannot be weakly referenced is not tracked
+                policy_ref = weakref.ref(policy)
+            except TypeError:
+                pass
+            else:
+                weakref.finalize(
+                    self, _abandon, policy_ref, self._held, self._dispatched
+                )
+
+    @staticmethod
+    def _check_policy(policy: Any) -> None:
+        """Checks the policy's operations, and that no other engine uses it.
+
+        A policy holds the tasks of one engine: another engine would get them from
+        its dispatch. It is free again once its engine has shut down and holds no
+        task the backend still runs, or once that engine's loop has closed.
+        """
+        missing = [
+            op
+            for op in ("enqueue", "dispatch", "release", "runnable")
+            if not callable(getattr(policy, op, None))
+        ]
+        if missing:
+            raise TypeError(f"policy {policy!r} lacks the operations {missing}")
+        finalizer, abandoned = _ABANDONED.pop(id(policy), (None, ()))
+        if finalizer is not None:
+            finalizer.detach()
+        for policy_ref, held, dispatched in abandoned:
+            if policy_ref() is policy:  # an engine collected without a shutdown
+                for uid in [*held, *dispatched]:
+                    try:  # nothing reports them: they count as never run
+                        policy.release(uid, None)
+                    except Exception:
+                        logger.exception("Policy %r failed to release %s", policy, uid)
+        other = _POLICY_ENGINES.get(id(policy))
+        if other is None:
+            return
+        if other.loop.is_closed():
+            other._release_policy(state=None)  # nothing more reports to it
+            return
+        raise ValueError(
+            f"policy {policy!r} serves engine {other.uid} until it has shut down "
+            "and its backend has reported its tasks: give each engine its own"
+        )
 
     @property
     def backend(self):
@@ -543,6 +629,8 @@ class WorkflowEngine:
         implicit_data: bool = True,
         uid: Optional[str] = None,
         work_dir: Optional[str] = None,
+        *,
+        policy: Any = None,
     ) -> "WorkflowEngine":
         """Factory method to create and initialize a WorkflowEngine.
 
@@ -554,6 +642,12 @@ class WorkflowEngine:
             uid: Optional unique identifier for this engine. Defaults to
                 ``asyncflow.session.{hex8}`` (UUID-based).
             work_dir: Working directory for output files (default: cwd)
+            policy: Optional ready-queue policy, for example ``FifoPolicy(64)``
+                (see ``radical.asyncflow.policies``). Without one, every ready
+                task goes to the backend at once and the backend's own queue
+                decides the order. With one, the engine holds ready tasks in the
+                policy and submits those it dispatches. Blocks and services
+                bypass it. A policy serves one engine at a time.
 
         Returns:
             WorkflowEngine: Fully initialized workflow engine
@@ -561,6 +655,8 @@ class WorkflowEngine:
         Example:
             engine = await WorkflowEngine.create(dry_run=True)
         """
+        if policy is not None:  # before a backend is set up for nothing
+            cls._check_policy(policy)
         # Setup and validate backend first
         validated_backend = await cls._setup_execution_backend(backend, dry_run)
 
@@ -571,6 +667,7 @@ class WorkflowEngine:
             implicit_data=implicit_data,
             uid=uid,
             work_dir=work_dir,
+            policy=policy,
         )
 
         # Initialize async components
@@ -1019,6 +1116,9 @@ class WorkflowEngine:
                 comp_desc["uid"],
             )
 
+            if self._policy is not None:
+                self._stamp_order(comp_desc, comp_deps)
+
             # Update dependency tracking; wake the run loop only if it is ready
             if self._update_dependency_tracking(comp_desc["uid"]):
                 self._kick()
@@ -1084,6 +1184,30 @@ class WorkflowEngine:
             raise
 
         return comp_fut
+
+    def _stamp_order(self, comp_desc: dict, comp_deps: list) -> None:
+        """Records what a policy orders and routes tasks by.
+
+        ``_seq`` counts registrations. ``_lineage`` is the ``_seq`` of the oldest
+        ancestor: a dependency or the enclosing block, transitively. ``_scope`` is the
+        ``workflow_id`` the outermost enclosing component was called with, so a
+        block's members share the scope the block was called in. ``_backend`` is the
+        name of the backend the task runs on.
+        """
+        seq = lineage = next(_SEQUENCE)
+        for dep in comp_deps:  # the descriptions of the dependencies
+            lineage = min(lineage, dep.get("_lineage", seq))
+        scope = comp_desc["workflow_id"]
+        parent = self.components.get(self._workflow_id_ctx.get() or "")
+        if parent is not None and parent["type"] == BLOCK:
+            lineage = min(lineage, parent["description"].get("_lineage", seq))
+            scope = parent["description"].get("_scope")
+        comp_desc["_seq"] = seq
+        comp_desc["_lineage"] = lineage
+        comp_desc["_scope"] = scope
+        comp_desc["_backend"] = (
+            comp_desc["target_backend"] or self._default_backend_name
+        )
 
     def _unregister_component(
         self, comp_fut: asyncio.Future, comp_type: str, uid: str
@@ -1392,6 +1516,8 @@ class WorkflowEngine:
         self.running.clear()
         self._task_submit_times.clear()
         self._task_start_times.clear()
+        self._held.clear()
+        self._dispatched.clear()
 
     def _kick(self) -> None:
         """Wake the run loop if it is idle; a no-op while it is busy."""
@@ -1404,11 +1530,39 @@ class WorkflowEngine:
 
         Called by the completion handlers, the local cancel path, and the done callbacks
         of blocks and services.  Idempotent: dependents are released on the first call
-        only.
+        only.  A task the policy still holds leaves it; a dispatched task keeps its
+        slot until the backend reports it (see `task_callbacks`).
         """
         self.running.discard(comp_uid)
-        if self._notify_dependents(comp_uid):
+        kick = self._notify_dependents(comp_uid)
+        if self._held and comp_uid in self._held:
+            # Resolved while the policy held it (cancelled): it never runs
+            self._held.discard(comp_uid)
+            kick = self._release(comp_uid, None) or kick
+        if kick:
             self._kick()
+
+    def _release(self, uid: str, state: Optional[str], observed=None) -> bool:
+        """Gives a task back to the policy; returns True if it can dispatch now.
+
+        A policy that raises is logged and goes on: a backend callback, a cancel
+        or shutdown would otherwise stop half-way.
+        """
+        self._changed = True
+        try:
+            self._policy.release(uid, state, observed)
+            return self._policy.runnable()
+        except Exception:
+            logger.exception("Policy %r failed to release %s", self._policy, uid)
+            return False
+
+    def _runnable(self) -> bool:
+        """The policy's ``runnable()``; a policy that raises is logged, as idle."""
+        try:
+            return self._policy.runnable()
+        except Exception:
+            logger.exception("Policy %r failed to say if it is runnable", self._policy)
+            return False
 
     def _notify_dependents(self, comp_uid: str) -> bool:
         """Notify dependents that a component has completed and update ready queue.
@@ -1696,7 +1850,24 @@ class WorkflowEngine:
                         self.resolved.add(comp_uid)
                         continue
 
-                    to_submit.append(comp_desc)
+                    if (
+                        self._policy is not None
+                        and self.components[comp_uid]["type"] == TASK
+                        and not comp_desc["is_service"]
+                    ):
+                        # Plain tasks wait in the policy; blocks run in the
+                        # engine and services are long-lived, so both bypass it
+                        try:
+                            self._policy.enqueue(comp_uid, comp_desc)
+                        except Exception as e:  # the policy rejects the task
+                            self.handle_component_failure(
+                                comp_desc, self.components[comp_uid]["future"], e
+                            )
+                            self.resolved.add(comp_uid)
+                            continue
+                        self._held.add(comp_uid)
+                    else:
+                        to_submit.append(comp_desc)
                     if logger.isEnabledFor(logging.DEBUG):
                         logger.debug(
                             "Ready to submit: %s with resolved dependencies: %s",
@@ -1718,6 +1889,9 @@ class WorkflowEngine:
                             },
                         )
 
+                if self._policy is not None and not self._shutdown_event.is_set():
+                    self._dispatch(to_submit)
+
                 # Submit ready components
                 if to_submit:
                     await self.submit(to_submit)
@@ -1733,7 +1907,10 @@ class WorkflowEngine:
                         else:
                             self.running.add(comp_uid)
 
-                if self._ready_queue:
+                # Dispatch again only if the policy changed since dispatch(): a
+                # policy that says it can start a task but dispatches none does not
+                # keep the loop spinning
+                if self._ready_queue or (self._changed and self._runnable()):
                     # More work queued: yield to other coroutines, then continue.
                     await asyncio.sleep(0)
                 else:
@@ -1752,6 +1929,29 @@ class WorkflowEngine:
                 logger.exception(f"Error in run loop: {e}")
                 await self._handle_shutdown_signal(signal.SIGUSR1, source="internal")
                 break
+
+    def _dispatch(self, to_submit: list) -> None:
+        """Appends the tasks the policy dispatches now to ``to_submit``."""
+        changed = False  # a task of this engine was dispatched, or left the policy
+        for comp_desc in self._policy.dispatch():
+            uid = comp_desc["uid"]
+            if uid not in self._held:
+                if uid in self._dispatched:  # in flight already: a policy bug
+                    logger.warning("Policy %r dispatched %s again", self._policy, uid)
+                else:  # not this engine's, or dropped already
+                    self._release(uid, None)
+                continue
+            self._held.discard(uid)
+            changed = True
+            if self.components[uid]["future"].done():
+                # Resolved outside the engine while held: it never runs, and its
+                # dependents go on as they would without a policy
+                self._release(uid, None)
+                self._on_done(uid)
+                continue
+            self._dispatched.add(uid)
+            to_submit.append(comp_desc)
+        self._changed = changed  # the policy may have more to start
 
     async def submit(self, objects: list) -> None:
         """Manages asynchronous submission of tasks/blocks to the execution backend.
@@ -2117,6 +2317,27 @@ class WorkflowEngine:
         else:
             task_dct = task.as_dict()
 
+        if (
+            self._dispatched
+            and task_dct["uid"] in self._dispatched
+            and state in self.task_states_map.terminal_states
+        ):
+            # The task left the backend: the policy gets its slot back, with how it
+            # ended and the resource use the backend observed, if it reports any
+            self._dispatched.discard(task_dct["uid"])
+            states = self.task_states_map
+            outcome = (
+                "DONE"
+                if state == states.DONE
+                else "FAILED"
+                if state == states.FAILED
+                else "CANCELLED"
+            )
+            if self._release(task_dct["uid"], outcome, task_dct.get("observed")):
+                self._kick()
+            if not self._dispatched and self._shutdown_event.is_set():
+                self._unbind_policy()  # the backend has reported the last of them
+
         if task_dct["uid"] not in self.components:
             logger.warning(
                 f"Received an unknown task and will skip it: {task_dct['uid']}"
@@ -2281,10 +2502,40 @@ class WorkflowEngine:
 
         # Shutdown all registered execution backends
         if not skip_execution_backend and self._backends:
-            await asyncio.gather(*[b.shutdown() for b in self._backends.values()])
+            try:
+                await asyncio.gather(*[b.shutdown() for b in self._backends.values()])
+            finally:
+                self._release_policy()
             self._clear_internal_records()
             logger.debug("Shutting down execution backend completed")
         else:
+            # The backend runs on: its reports give back the slots of the tasks
+            # it took; the others never reach it
+            self._release_policy(keep=self.resolved)
             logger.warning("Skipping execution backend shutdown as requested")
 
         logger.info("Shutdown completed for all components.")
+
+    def _release_policy(
+        self, keep: Any = (), state: Optional[str] = "CANCELLED"
+    ) -> None:
+        """Takes this engine's tasks out of the policy, as the engine shuts down.
+
+        A task still in flight is released as ``state``, unless it is in ``keep``:
+        the backend took it and will report it. The policy is free for another
+        engine once it holds none of this engine's tasks.
+        """
+        if self._policy is None:
+            return
+        for uid in self._held:
+            self._release(uid, None)
+        self._held.clear()
+        for uid in [uid for uid in self._dispatched if uid not in keep]:
+            self._dispatched.discard(uid)
+            self._release(uid, state)
+        if not self._dispatched:
+            self._unbind_policy()
+
+    def _unbind_policy(self) -> None:
+        if _POLICY_ENGINES.get(id(self._policy)) is self:
+            del _POLICY_ENGINES[id(self._policy)]

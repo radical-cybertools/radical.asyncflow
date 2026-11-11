@@ -114,6 +114,7 @@ nav:
       - Asynchronous Workflows: async_workflows.md
       - Multi-Backend Routing & AI Tasks: multi_backend.md
       - Execution Backends & HPC Integration: exec_backends.md
+      - Scheduling Policies: scheduling.md
 
   - Composite Workflows: composite_workflow.md
 
