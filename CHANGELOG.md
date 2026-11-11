@@ -18,6 +18,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   dispatch until the backend reports it; one cancelled while the policy holds it
   leaves the policy at once. Without a policy nothing changes. See
   *Scheduling Policies* in the docs.
+- **Policy telemetry** — with a policy, `start_telemetry()` traces it and emits
+  `asyncflow.TaskDispatched` (time held in the policy, ordering key, placement,
+  charge, occupancy), `asyncflow.TaskReleased` (how the task ended, run time, the
+  `observed` usage the backend reported), `asyncflow.TaskRejected`,
+  `asyncflow.TaskStarving`,
+  `asyncflow.PolicyBlocked`/`PolicyUnblocked` and `asyncflow.PolicyLayout`, all
+  keyed by the task's uid. `radical.asyncflow.policy_telemetry.timeline()` joins
+  them with the task events into one row per task, `occupancy()` gives the
+  policy's occupancy over time, and `load_events()` reads a checkpoint file. A
+  policy can say more through optional `describe_dispatch`, `occupancy`, `layout`
+  and `blocked` methods. Without telemetry the engine calls the policy directly;
+  with it, an error in tracing is logged and never changes what the policy decides.
 
 ### Changed
 
