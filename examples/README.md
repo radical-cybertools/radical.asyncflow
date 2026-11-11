@@ -30,7 +30,7 @@ These examples require [RHAPSODY](https://radical-cybertools.github.io/rhapsody/
 |---------|-------------|
 | [05-dask_execution_backend.py](05-dask_execution_backend.py) | Parallel data analysis using `DaskExecutionBackend` — loads a dataset and analyzes batches in parallel with Dask workers. |
 | [06-dragon_execution_backend.py](06-dragon_execution_backend.py) | Dragon V3 batch processing — demonstrates `process_template` for single-process tasks, `process_templates` for multi-process parallel jobs, and native function execution. |
-| [07-radical_execution_backend.py](07-radical_execution_backend.py) | HPC execution using `RadicalExecutionBackend` — runs executable tasks with resource descriptions (ranks, GPUs) on RADICAL-Pilot. |
+| [07-dragon_executable_dependencies.py](07-dragon_executable_dependencies.py) | HPC execution using `DragonExecutionBackend` — runs dependent executable tasks (task1 → task2 → task3) with per-task `process_template(s)` resources across concurrent workflows. |
 
 ### Running
 
@@ -38,5 +38,5 @@ These examples require [RHAPSODY](https://radical-cybertools.github.io/rhapsody/
 pip install rhapsody-py
 python examples/05-dask_execution_backend.py
 dragon examples/06-dragon_execution_backend.py
-python examples/07-radical_execution_backend.py
+dragon examples/07-dragon_executable_dependencies.py
 ```
