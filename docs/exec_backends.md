@@ -86,9 +86,7 @@ from radical.asyncflow import WorkflowEngine
 mp.set_start_method("dragon")  # run the script with: dragon my_workflow.py
 
 # HPC backend configuration
-backend = await DragonExecutionBackend(
-    batch_kwargs={"num_nodes": 1}
-)  # (1)!
+backend = await DragonExecutionBackend(batch_kwargs={"num_nodes": 1})  # (1)!
 flow = await WorkflowEngine.create(backend=backend)
 ```
 
@@ -313,12 +311,13 @@ Pin processes to GPUs with Dragon's `Policy`, passed in each task's `process_tem
 ```python
 from dragon.infrastructure.policy import Policy
 
-gpu0 = Policy(placement=Policy.Placement.HOST_NAME, host_name="node001", gpu_affinity=[0])
+gpu0 = Policy(
+    placement=Policy.Placement.HOST_NAME, host_name="node001", gpu_affinity=[0]
+)
 
 
 @flow.function_task
-async def train(task_description={"process_template": {"policy": gpu0}}):
-    ...
+async def train(task_description={"process_template": {"policy": gpu0}}): ...
 ```
 
 See RHAPSODY's [Resource Specification Guide](https://radical-cybertools.github.io/rhapsody/getting-started/resource-specification/) for PMI, `libpmix.so` and GPU-affinity details.
