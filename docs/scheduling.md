@@ -64,6 +64,37 @@ same key, such as Dask's, give it the same meaning.
 `FifoPolicy(capacity)` starts tasks by priority, then in the order they became ready,
 at most `capacity` at a time. Without priorities it is first in, first out.
 
+## FairPolicy
+
+`FairPolicy(capacity, weights=None)` shares the backend between workflows, in the style
+of Linux's CFS. A workflow is the scope the task was called in (`workflow_scope`, or
+a `workflow_id` given at the call), also inside blocks, or else its lineage. Each
+workflow accrues virtual runtime, the time its tasks ran divided by its weight, and the
+workflow with the least goes next. A workflow with nothing queued that gets new work
+starts at no less than the current minimum, so it banks no credit while it has nothing
+to run; one that ran ahead keeps its debt while it is idle. A task that ends sooner
+than estimated, or never runs, gives no credit below the minimum. Within a workflow, tasks start by priority, then in the order
+they became ready.
+
+```python
+policy = FairPolicy(64, weights={"interactive": 4})
+
+async with flow.workflow_scope("interactive"):
+    answer = await analyse(sample)  # a fourfold share beside the bulk work
+```
+
+A weight's key also matches the ids that start with it and a `":"`, so `"sim"` weighs
+`"sim:0042"`; the longest matching key wins. Runtimes are measured from dispatch until
+the backend reports the task, and estimated per function from the tasks of that function
+that finished. The estimate is one number per function: when a function's runtimes vary a
+lot, a workflow of short chains gets somewhat less than its share (0.41 instead of 0.5
+in a simulation where one task in ten runs 100 times longer).
+
+Tasks called outside any scope are grouped by lineage, so each independent one is a
+workflow of its own, and work that shares one dependency (data loaded once and passed
+to every workflow) is a single workflow. Call related work in a `workflow_scope` to
+say what a workflow is.
+
 ## Writing a policy
 
 Any object with these four methods works as a policy; one that lacks any of them is

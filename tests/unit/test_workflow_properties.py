@@ -41,6 +41,7 @@ from hypothesis import event, example, given, note  # noqa: E402
 from hypothesis import strategies as st  # noqa: E402
 
 from radical.asyncflow import (  # noqa: E402
+    FairPolicy,
     FifoPolicy,
     NoopExecutionBackend,
     WorkflowEngine,
@@ -109,6 +110,7 @@ class Node:
 # Ready-queue policies by name: a factory from the capacity, and its capacity
 POLICIES = {
     "fifo": FifoPolicy,
+    "fair": FairPolicy,
 }
 
 
