@@ -18,6 +18,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   dispatch until the backend reports it; one cancelled while the policy holds it
   leaves the policy at once. Without a policy nothing changes. See
   *Scheduling Policies* in the docs.
+- **`LineagePolicy`** — a ready-queue policy that starts tasks by priority, then
+  oldest lineage first, so started workflows finish before new ones start.
 
 ### Changed
 

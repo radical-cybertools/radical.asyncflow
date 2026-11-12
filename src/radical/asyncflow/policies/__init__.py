@@ -29,5 +29,6 @@ meaning.
 
 from .base import Policy
 from .fifo import FifoPolicy
+from .lineage import LineagePolicy
 
-__all__ = ["Policy", "FifoPolicy"]
+__all__ = ["Policy", "FifoPolicy", "LineagePolicy"]
