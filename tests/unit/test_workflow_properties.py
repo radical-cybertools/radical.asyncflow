@@ -5,7 +5,9 @@ each node (a function, executable or prompt task, or a block), whether each depe
 is passed positionally, as a keyword or both, and faults: a body that raises, an empty
 command or prompt, a registration step that raises after the component is stored, a
 task the backend fails, a cancel before or after registration, and a shutdown while the
-workflow runs.
+workflow runs. Each example also picks a ready-queue policy, or none, and whether
+the backend yields inside submit_tasks, so that cancels land while the engine awaits a
+submission.
 
 For every example:
 - every future finishes within TIMEOUT seconds;
@@ -14,7 +16,9 @@ For every example:
   a DependencyFailureError naming them, and cancellation propagates;
 - a node that failed to register leaves no engine record; once every future is done
   the engine keeps no transient record, and after shutdown no record at all;
-- nothing is logged at ERROR.
+- nothing is logged at ERROR;
+- the backend never holds more tasks than the policy's capacity, and once every task
+  has left the backend the policy holds nothing.
 
 The Hypothesis profile comes from HYPOTHESIS_PROFILE: ci (default, the same 150
 examples on every run) or nightly (2,000 new ones each run), see tests/conftest.py.
@@ -36,9 +40,14 @@ pytest.importorskip("hypothesis")
 from hypothesis import event, example, given, note  # noqa: E402
 from hypothesis import strategies as st  # noqa: E402
 
-from radical.asyncflow import NoopExecutionBackend, WorkflowEngine  # noqa: E402
+from radical.asyncflow import (  # noqa: E402
+    FifoPolicy,
+    NoopExecutionBackend,
+    WorkflowEngine,
+)
 from radical.asyncflow.errors import DependencyFailureError  # noqa: E402
 from tests.harness import RECORDS, ErrorRecords, log_violations  # noqa: E402
+from tests.policy_harness import leftovers  # noqa: E402
 
 MAX_NODES = 16 if os.environ.get("HYPOTHESIS_PROFILE") == "nightly" else 8
 TIMEOUT = 5
@@ -77,6 +86,7 @@ TRANSIENT = (
     "_pending_registrations",
     "_block_members",
     "_block_asyncio_tasks",
+    "_held",
 )
 CANCELLED = ("cancelled",)
 
@@ -96,11 +106,19 @@ class Node:
     cancel_delay: int = 0  # loop iterations from registration to cancel_after
 
 
+# Ready-queue policies by name: a factory from the capacity, and its capacity
+POLICIES = {
+    "fifo": FifoPolicy,
+}
+
+
 @dataclass
 class Workflow:
     nodes: list
     completion: int  # loop iterations the backend takes per task; 0: within submit
     shutdown_ms: Optional[int]  # shut down this long after the calls; None: at the end
+    policy: Optional[tuple] = None  # (name in POLICIES, capacity)
+    submit_yields: bool = False  # the backend yields once inside submit_tasks
 
 
 @st.composite
@@ -138,10 +156,13 @@ def workflows(draw):
         node.inner = kind == BLOCK and draw(st.booleans())
         nodes.append(node)
     shutdown = draw(st.integers(0, 2)) == 2  # a third of the examples
+    name = draw(st.sampled_from((None, *POLICIES)))
     return Workflow(
         nodes,
         completion=draw(st.integers(0, 3)),
         shutdown_ms=draw(st.integers(0, 50)) if shutdown else None,
+        policy=(name, draw(st.integers(1, 3))) if name else None,
+        submit_yields=draw(st.booleans()),
     )
 
 
@@ -149,17 +170,31 @@ class FaultyNoopBackend(NoopExecutionBackend):
     """A NoopExecutionBackend that fails the tasks named in `failing`.
 
     With completion > 0 it completes each task that many loop iterations after
-    submit_tasks returns, so tasks are still running when cancelled or shut down.
+    submit_tasks returns, so tasks are still running when cancelled or shut down. With
+    submit_yields it yields once before it takes the tasks. It counts the tasks it
+    holds: submitted and not yet reported done, failed or cancelled.
     """
 
-    def __init__(self, failing, completion):
+    def __init__(self, failing, completion, submit_yields=False):
         super().__init__()
         self.failing = failing
         self.completion = completion
+        self.submit_yields = submit_yields
         self.inflight = {}
+        self.held = set()
+        self.most_held = 0
+
+    def _callback(self, task, state):
+        if state != "RUNNING":
+            self.held.discard(task["uid"])
+        self._callback_func(task, state)
 
     async def submit_tasks(self, tasks):
+        if self.submit_yields:
+            await asyncio.sleep(0)
         for task in tasks:
+            self.held.add(task["uid"])
+            self.most_held = max(self.most_held, len(self.held))
             if task["name"] in self.failing:
                 task["exception"] = InjectedError(f"{task['name']} backend")
                 state = "FAILED"
@@ -171,7 +206,7 @@ class FaultyNoopBackend(NoopExecutionBackend):
                 self.inflight[task["uid"]] = task
                 self._complete(self.completion, task, state)
             else:
-                self._callback_func(task, state)
+                self._callback(task, state)
 
     def _complete(self, iterations, task, state):
         if task["uid"] not in self.inflight:
@@ -181,15 +216,16 @@ class FaultyNoopBackend(NoopExecutionBackend):
             loop.call_soon(self._complete, iterations - 1, task, state)
             return
         del self.inflight[task["uid"]]
-        self._callback_func(task, state)
+        self._callback(task, state)
 
     async def cancel_task(self, uid):
         task = self.inflight.pop(uid, None)
         if task is not None:
-            self._callback_func(task, "CANCELED")
+            self._callback(task, "CANCELED")
 
     async def shutdown(self):
         self.inflight.clear()
+        self.held.clear()
 
 
 def inject_step_faults(flow, steps):
@@ -265,6 +301,12 @@ async def cancel_after(flow, i, node, fut, cancels):
         await asyncio.sleep(0)
     # The backend may finish a task it is running before it cancels it.
     running = node.kind != BLOCK and fut.uid in flow.running
+    policy = flow._policy
+    if policy is not None and not fut.done():
+        if fut.uid in flow._held:
+            event("a task cancelled while the policy held it")
+        elif fut.uid in policy._inflight and not running:
+            event("a task cancelled while the engine awaited its submission")
     cancels[i] = (fut.cancel(), running)
 
 
@@ -366,14 +408,15 @@ def records(flow, names):
 
 
 async def settle(flow):
-    """Waits until the run loop has processed every finished component.
+    """Waits until the run loop has processed every finished component, and the backend
+    has reported every task it took.
 
     It gives up only when the records have not changed for TIMEOUT seconds, so a slow
     machine makes it wait longer rather than fail.
     """
     loop = asyncio.get_running_loop()
     last, since = None, loop.time()
-    while left := records(flow, TRANSIENT):
+    while left := records(flow, TRANSIENT) | records(flow.backend, ("held",)):
         sizes = {name: len(entries) for name, entries in left.items()}
         if sizes != last:
             last, since = sizes, loop.time()
@@ -384,9 +427,13 @@ async def settle(flow):
 
 async def check_workflow(wf, work_dir):
     failing = {f"n{i}" for i, n in enumerate(wf.nodes) if n.fault == "backend_fails"}
+    backend = FaultyNoopBackend(failing, wf.completion, wf.submit_yields)
+    policy = POLICIES[wf.policy[0]](wf.policy[1]) if wf.policy else None
     flow = await WorkflowEngine.create(
-        backend=FaultyNoopBackend(failing, wf.completion), work_dir=work_dir
+        backend=backend, work_dir=work_dir, policy=policy
     )
+    if policy is not None:
+        event(f"policy {wf.policy[0]}")
     steps = {f"n{i}": n.step for i, n in enumerate(wf.nodes) if n.step}
     inject_step_faults(flow, steps)
 
@@ -451,10 +498,14 @@ async def check_workflow(wf, work_dir):
                 assert fut.uid not in flow.dependencies, f"{fut.uid} failed to register"
         await settle(flow)
         assert not records(flow, TRANSIENT), "records of finished components"
+        if policy is not None:
+            assert not leftovers(policy), f"the policy holds {leftovers(policy)}"
         await flow.shutdown()
     assert not records(flow, RECORDS), "records after shutdown"
     await asyncio.sleep(0.02)  # a registration that outlived shutdown would show now
     assert not records(flow, RECORDS), "records after shutdown"
+    if policy is not None:
+        assert backend.most_held <= wf.policy[1], "more tasks in flight than capacity"
 
 
 @pytest.fixture(scope="module")
@@ -504,6 +555,31 @@ def work_dir(tmp_path_factory):
         [Node([], EXECUTABLE, delay=20), Node([(0, "pos")], FUNCTION)],
         completion=0,
         shutdown_ms=5,
+    )
+)
+# A task cancelled while the engine awaits its submission keeps its slot until the
+# backend reports it, so the second task waits
+@example(
+    wf=Workflow(
+        [Node([], FUNCTION, fault="cancel_after", cancel_delay=1), Node([], FUNCTION)],
+        completion=3,
+        shutdown_ms=None,
+        policy=("fifo", 1),
+        submit_yields=True,
+    )
+)
+# A task cancelled while the policy holds it leaves the policy, and its dependent is
+# cancelled
+@example(
+    wf=Workflow(
+        [
+            Node([], FUNCTION),
+            Node([], FUNCTION, fault="cancel_after", cancel_delay=1),
+            Node([(1, "pos")], FUNCTION),
+        ],
+        completion=1,
+        shutdown_ms=None,
+        policy=("fifo", 1),
     )
 )
 def test_random_workflows(work_dir, wf):

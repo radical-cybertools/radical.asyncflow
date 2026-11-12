@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **Ready-queue policies** — `WorkflowEngine.create(policy=...)` takes a policy
+  that decides how many tasks are in flight and which ready task starts next.
+  `FifoPolicy(capacity)` starts tasks by priority, then in the order they became
+  ready. A task declares a priority as `task_description={"priority": n}` (larger
+  runs sooner, default 0). Any object with `enqueue`, `dispatch`, `release` and
+  `runnable` works as a policy, and it may reject a task by raising from
+  `enqueue`. Blocks and services bypass the policy. A task keeps its place from
+  dispatch until the backend reports it; one cancelled while the policy holds it
+  leaves the policy at once. Without a policy nothing changes. See
+  *Scheduling Policies* in the docs.
+
 ### Changed
 
 - **Per-task overhead** — runtime type checks on the per-task path
