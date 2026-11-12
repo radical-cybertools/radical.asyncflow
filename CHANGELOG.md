@@ -18,6 +18,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   dispatch until the backend reports it; one cancelled while the policy holds it
   leaves the policy at once. Without a policy nothing changes. See
   *Scheduling Policies* in the docs.
+- **`FairPolicy`** — a ready-queue policy that shares the backend between
+  workflows (by `workflow_scope`, or lineage), with optional weights, in the style
+  of Linux's CFS. Within a workflow, tasks start by priority.
 
 ### Changed
 

@@ -28,6 +28,7 @@ meaning.
 """
 
 from .base import Policy
+from .fair import FairPolicy
 from .fifo import FifoPolicy
 
-__all__ = ["Policy", "FifoPolicy"]
+__all__ = ["Policy", "FifoPolicy", "FairPolicy"]
