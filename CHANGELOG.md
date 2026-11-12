@@ -18,6 +18,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   dispatch until the backend reports it; one cancelled while the policy holds it
   leaves the policy at once. Without a policy nothing changes. See
   *Scheduling Policies* in the docs.
+- **Resource-aware admission** — `ResourcePolicy` starts a task when what it
+  declares as `task_description={"resources": {...}}` fits its backend's `Pool` of
+  `NodeShape`s: cores, GPU shares or whole GPUs, host and GPU memory. In `node` mode
+  it picks the node and GPUs and writes them into the task description as
+  `placement`. With a `MemoryModel`, memory a task does not declare is learned from
+  the peaks a backend reports under `observed`. Tasks start by priority, then oldest
+  first, and the first task that does not fit holds a reservation, so smaller tasks
+  do not pass it for ever. A demand that can never fit fails the task.
 
 ### Changed
 
