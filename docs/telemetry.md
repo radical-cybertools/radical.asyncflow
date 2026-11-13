@@ -272,6 +272,15 @@ def on_event(event):
 
 ---
 
+## Inference backends
+
+An AI backend such as `DragonVllmInferenceBackend` that you give to the engine gets telemetry like any other backend: `start_telemetry()` attaches every backend of the engine, which hands it its emitter and hosts its instrumentation. The batch spans (`chat <model>`), the per-task inference attributes and the inference metrics then appear next to the task telemetry. The batch span is not tagged with a workflow id, because one batch can serve tasks of several workflows; the task spans keep theirs. The details, the metric names and the attributes are in the [RHAPSODY telemetry reference](https://radical-cybertools.github.io/rhapsody/telemetry/reference/#inference-telemetry-experimental) (experimental; needs a RHAPSODY release that contains it).
+
+!!! note "Known limitation"
+    AsyncFlow always emits `TaskFailed` with `error_type="unknown"`, even when the task has an exception (for example the `TimeoutError` of an inference task that timed out). The cause is still visible as `error.type` on the task span.
+
+---
+
 ## Reading results after the run
 
 ```python
