@@ -2098,6 +2098,14 @@ class WorkflowEngine:
                     uid, self._task_submit_times.get(uid, now)
                 )
                 self._task_submit_times.pop(uid, None)
+                # TELEMETRY-LIMITATION(L9): TaskFailed always carries error_type="unknown",
+                # even when the task has an exception (for example the TimeoutError of a
+                # timed-out inference task), so failure causes are invisible in this event.
+                # RHAPSODY's Session uses the exception's type. Inference timeouts are still
+                # marked by error.type on the task span.
+                # Why not now: existing behaviour, reported and not changed here.
+                # Planned: use the type of the exception set on the task future.
+                # See the RHAPSODY docs, telemetry/reference.md#known-limitations.
                 self._emit(
                     "TaskFailed",
                     task_id=uid,

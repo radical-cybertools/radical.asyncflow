@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Documentation
+
+- **Telemetry: inference backends and a known limitation** — `docs/telemetry.md` describes the
+  telemetry an AI backend gets inside a `WorkflowEngine` (it needs a RHAPSODY release with
+  inference telemetry) and notes that `TaskFailed` always carries `error_type="unknown"`. The
+  code site is marked `TELEMETRY-LIMITATION(L9)`; no behaviour changes.
 
 ## [0.7.0] 2026-11-10
 
