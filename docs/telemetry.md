@@ -239,17 +239,22 @@ the policy runs on.
 
 | Event | When | Fields |
 |---|---|---|
-| `asyncflow.PolicyLayout` | once, at `start_telemetry()` | `policy`, `layout` (capacities), `starve_after` |
-| `asyncflow.TaskDispatched` | the policy dispatched the task | `held_seconds` (since `TaskQueued`), `order`, `key` (the ordering key: the declared `priority`, `lineage`, `seq` and `scope`, or what the policy reports), `placement`, `charge`, `waiting`, `inflight`, `occupancy`; `node_id` is the placement's host |
-| `asyncflow.TaskReleased` | the task left the policy | `state` (how it ended on the backend: `DONE`, `FAILED`, `CANCELLED`; null if the backend never got it), `dispatched` (false for a task cancelled while the policy held it), `held_seconds`, `run_seconds` (since dispatch), `observed` (the usage the backend reported), `waiting`, `inflight`, `occupancy` |
+| `asyncflow.PolicyLayout` | each time `start_telemetry()` runs | `policy`, `layout` (capacities), `starve_after` |
+| `asyncflow.TaskDispatched` | the policy dispatched the task and the engine submits it | `held_seconds` (since `TaskQueued`; null for a task queued before telemetry started), `order`, `key` (the ordering key: the declared `priority`, `lineage`, `seq` and `scope`, or what the policy reports), `placement`, `charge`, `waiting`, `inflight`, `occupancy` (all three after the dispatch round); `node_id` is the placement's host |
+| `asyncflow.TaskReleased` | the task left the policy | `state` (how it ended on the backend: `DONE`, `FAILED`, `CANCELLED`; null if the backend never got it), `dispatched` (false for a task that never reached the backend: cancelled while the policy held it, or dropped by the engine at dispatch), `held_seconds`, `run_seconds` (since dispatch; null when that is unknown), `observed` (the usage the backend reported), `waiting`, `inflight`, `occupancy` |
 | `asyncflow.TaskRejected` | `enqueue` raised | `error` |
 | `asyncflow.TaskStarving` | the oldest waiting task waited `policy_starve_after` seconds (default 60) while younger tasks were dispatched; once per task | `held_seconds`, `overtaken`, `waiting` |
 | `asyncflow.PolicyBlocked` / `asyncflow.PolicyUnblocked` | the policy says, through its `blocked()` method, that waiting tasks cannot start although capacity is free; on transitions | `reason` (the policy's, with the waiting task as `head`) / `blocked_seconds` |
 
-A policy can say more through optional methods: `describe_dispatch(desc)`, `occupancy()`,
-`layout()` and `blocked()` (see `radical.asyncflow.policy_telemetry`). The proxy calls them
-only while telemetry is on. Without them, `key` holds the description's ordering fields,
-`occupancy` is empty, and the layout is the policy's `capacity`.
+A policy can say more through optional methods: `describe_dispatch(desc)` (its `key` and
+`charge`; other keys are dropped with a warning), `occupancy()`, `layout()` and `blocked()`
+(see `radical.asyncflow.policy_telemetry`). The proxy calls them only while telemetry is on,
+and keeps a copy of what they return. Without them, `key` holds the description's ordering
+fields, `occupancy` is empty, and the layout is the policy's `capacity`.
+
+Starting telemetry again keeps what the proxy knows of the tasks in the policy. Telemetry
+started while tasks wait in the policy takes them on, with unknown times. RHAPSODY keeps
+every event in memory until telemetry stops; for a long run, bound its event log.
 
 `radical.asyncflow.policy_telemetry` joins the events by uid:
 
@@ -265,7 +270,7 @@ steps = occupancy(events)  # [{"t", "inflight", "waiting", "pool.cpus", ...}, ..
 `timeline()` uses the worker-side `observed["started"]` and `observed["ended"]` as
 `exec_start` and `exec_end` when the backend reports them. Otherwise `started` is when the
 backend accepted the task, which can be before it ran. `release_state` is the `state` the
-task left the policy with.
+task left the policy with, spelled as `state` is (`CANCELED`).
 
 ---
 

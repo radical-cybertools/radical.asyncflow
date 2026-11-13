@@ -1,6 +1,7 @@
 """Policy telemetry: the tracing proxy, its events, and joining them by uid."""
 
 import asyncio
+import copy
 import json
 import logging
 from collections import deque
@@ -11,6 +12,7 @@ from radical.asyncflow import FifoPolicy, NoopExecutionBackend, WorkflowEngine
 from radical.asyncflow.policy_telemetry import (
     POLICY_EVENTS,
     TracedPolicy,
+    inner_policy,
     load_events,
     occupancy,
     timeline,
@@ -26,14 +28,21 @@ class _Clock:
         return self.t
 
 
+# What every RHAPSODY event has besides its own fields, as the engine's _emit sets them
+_BASE_FIELDS = {"event_time", "node_id", "attributes"}
+
+
 class _Recorder:
-    """Stands in for the engine's _emit."""
+    """Stands in for the engine's _emit, and refuses a field the event does not have, as
+    RHAPSODY's make_event does."""
 
     def __init__(self):
         self.events = []
 
     def __call__(self, name, *, task_id, backend=None, workflow_id=None, **fields):
-        assert name in POLICY_EVENTS
+        unknown = set(fields) - set(POLICY_EVENTS[name]) - _BASE_FIELDS
+        if unknown:
+            raise TypeError(f"{name} has no fields {sorted(unknown)}")
         self.events.append(
             {
                 "event_type": name,
@@ -124,7 +133,8 @@ def test_dispatch_reports_held_time_order_and_key():
         1,
     )
     assert first["key"] == {"priority": 5, "lineage": 0, "seq": 0}
-    assert (first["waiting"], first["inflight"]) == (2, 1)
+    # counted after the dispatch round, as the occupancy snapshot is
+    assert (first["waiting"], first["inflight"]) == (1, 2)
     assert (second["waiting"], second["inflight"]) == (1, 2)
     assert first["policy"] == "_Slots"
 
@@ -160,7 +170,8 @@ def test_release_without_running_and_of_a_queued_task():
     assert (b["task_id"], b["dispatched"], b["state"]) == ("b", False, None)
     assert (b["held_seconds"], b["run_seconds"]) == (2.0, 0.0)
     assert (a["task_id"], a["dispatched"], a["state"]) == ("a", True, None)
-    assert traced.inner.queue == deque() and not traced.inner.inflight
+    policy = traced._trace_inner
+    assert policy.queue == deque() and not policy.inflight
 
 
 def test_rejected_task_is_reported_and_the_error_raised():
@@ -271,7 +282,7 @@ def test_hooks_add_fields_and_attributes_reach_the_policy():
 
 def test_layout_falls_back_to_capacity():
     traced, rec, _ = _traced(_Slots(7))
-    traced.emit_layout()
+    traced._trace_emit_layout()
     (layout,) = rec.of("asyncflow.PolicyLayout")
     assert layout["layout"] == {"capacity": 7}
 
@@ -326,7 +337,7 @@ def test_tracing_errors_never_change_what_the_policy_decides(caplog):
 
     caplog.set_level(logging.DEBUG, logger="radical.asyncflow.policy_telemetry")
     traced = TracedPolicy(Explained(1), Broken(), clock=_Clock())
-    traced.emit_layout()
+    traced._trace_emit_layout()
     traced.enqueue("a", _desc("a"))
     traced.enqueue("b", _desc("b", seq=1))
     assert [d["uid"] for d in traced.dispatch()] == ["a"]
@@ -339,6 +350,173 @@ def test_tracing_errors_never_change_what_the_policy_decides(caplog):
     assert len(errors) == 2  # the first failure of each proxy, with its traceback
     assert errors[0].exc_info is not None
     assert "the policy runs on" in errors[0].getMessage()
+
+
+# ---------------------------------------------------------------------------
+# Review findings (MTU-51): each test fails without its fix
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.no_engine_invariants  # the tracing errors are logged at ERROR
+@pytest.mark.parametrize("where", ["describe", "emit"])
+def test_one_failing_task_costs_only_its_own_event(where):
+    """A hook or an emit that fails for one task of a batch leaves the others' records
+    and events right, and no false TaskStarving follows."""
+
+    class Explained(_Slots):
+        def describe_dispatch(self, desc):
+            if where == "describe" and desc["uid"] == "a":
+                raise KeyError("a")
+            return {"charge": {"slots": 1}}
+
+    class Flaky(_Recorder):
+        def __call__(self, name, **fields):
+            if (
+                where == "emit"
+                and name == "asyncflow.TaskDispatched"
+                and fields["task_id"] == "a"
+            ):
+                raise RuntimeError("telemetry hiccup")
+            super().__call__(name, **fields)
+
+    rec, clock = Flaky(), _Clock()
+    traced = TracedPolicy(Explained(3), rec, clock=clock, starve_after=1.0)
+    for i, uid in enumerate("abc"):
+        traced.enqueue(uid, _desc(uid, seq=i))
+    assert [d["uid"] for d in traced.dispatch()] == ["a", "b", "c"]
+    dispatched = [e["task_id"] for e in rec.of("asyncflow.TaskDispatched")]
+    assert dispatched == (["b", "c"] if where == "emit" else ["a", "b", "c"])
+    clock.t += 30.0
+    traced.enqueue("d", _desc("d", seq=3))
+    traced.dispatch()
+    traced.release("b", "DONE")
+    (b,) = rec.of("asyncflow.TaskReleased")
+    assert (b["dispatched"], b["held_seconds"], b["run_seconds"]) == (True, 0.0, 30.0)
+    assert rec.of("asyncflow.TaskStarving") == []
+
+
+def test_unknown_describe_keys_are_dropped_with_one_warning(caplog):
+    class Chatty(_Slots):
+        def describe_dispatch(self, desc):
+            return {"charge": {"cpus": 1}, "pool": "cpu", "attributes": {}}
+
+    traced, rec, _ = _traced(Chatty(2))
+    traced.enqueue("a", _desc("a"))
+    traced.enqueue("b", _desc("b", seq=1))
+    traced.dispatch()
+    dispatched = rec.of("asyncflow.TaskDispatched")
+    assert [e["charge"] for e in dispatched] == [{"cpus": 1}] * 2
+    warned = [r for r in caplog.records if "describe_dispatch() returned" in r.message]
+    assert len(warned) == 1 and "'pool'" in warned[0].message
+
+
+def test_a_dispatch_that_returns_an_iterator_gives_the_engine_the_same_tasks():
+    class Gen(_Slots):
+        def dispatch(self):
+            return iter(super().dispatch())
+
+    traced, rec, _ = _traced(Gen(2))
+    traced.enqueue("a", _desc("a"))
+    out = traced.dispatch()
+    assert [d["uid"] for d in out] == ["a"] and isinstance(out, list)
+    assert [e["task_id"] for e in rec.of("asyncflow.TaskDispatched")] == ["a"]
+
+
+def test_attribute_writes_len_bool_copy_and_inner_reach_the_policy():
+    class Composite(_Slots):
+        def __init__(self):
+            super().__init__(2)
+            self.inner = "the composite's own"
+
+        def __len__(self):
+            return len(self.queue)
+
+    policy = Composite()
+    traced, _, _ = _traced(policy)
+    traced.capacity = 4
+    assert policy.capacity == 4 and "capacity" not in vars(traced)
+    assert traced.inner == "the composite's own" and inner_policy(traced) is policy
+    assert len(traced) == 0 and not traced
+    traced.enqueue("a", _desc("a"))
+    assert len(traced) == 1 and traced
+    assert inner_policy(copy.copy(traced)) is policy
+    del traced.inner
+    assert not hasattr(policy, "inner")
+
+
+def test_tasks_the_engine_drops_at_dispatch_are_not_reported_as_dispatched():
+    rec, clock = _Recorder(), _Clock()
+    traced = TracedPolicy(
+        _Slots(2), rec, clock=clock, submits=lambda desc: desc["uid"] != "gone"
+    )
+    traced.enqueue("gone", _desc("gone"))
+    traced.enqueue("kept", _desc("kept", seq=1))
+    traced.dispatch()
+    clock.t += 2.0
+    traced.release("gone", None)  # the engine releases what it does not submit
+    traced.release("kept", "DONE")
+    traced.release("stray", None)  # never known: nothing
+    assert [e["task_id"] for e in rec.of("asyncflow.TaskDispatched")] == ["kept"]
+    gone, kept = rec.of("asyncflow.TaskReleased")
+    assert (gone["task_id"], gone["dispatched"], gone["held_seconds"]) == (
+        "gone",
+        False,
+        2.0,
+    )
+    assert (kept["dispatched"], kept["run_seconds"]) == (True, 2.0)
+
+
+def test_hook_results_are_copied_so_later_changes_do_not_rewrite_events():
+    class Live(_Slots):
+        def __init__(self):
+            super().__init__(2)
+            self.used = {"cpus": 0}
+
+        def dispatch(self):
+            out = super().dispatch()
+            self.used["cpus"] += len(out)
+            return out
+
+        def occupancy(self):
+            return self.used  # the live dict
+
+    traced, rec, _ = _traced(Live())
+    traced.enqueue("a", _desc("a"))
+    traced.dispatch()
+    traced.release("a", "DONE")
+    traced._trace_inner.used["cpus"] = 0
+    (dispatched,) = rec.of("asyncflow.TaskDispatched")
+    assert dispatched["occupancy"] == {"cpus": 1}
+
+
+@pytest.mark.no_engine_invariants  # the policy's error is logged at ERROR
+def test_a_release_the_policy_raises_on_still_leaves_the_proxy():
+    class Raising(_Slots):
+        def release(self, uid, state, observed=None):
+            super().release(uid, state, observed)
+            raise RuntimeError("policy bug")
+
+    traced, rec, _ = _traced(Raising(1))
+    traced.enqueue("a", _desc("a"))
+    traced.dispatch()
+    with pytest.raises(RuntimeError, match="policy bug"):
+        traced.release("a", "DONE")
+    assert [e["task_id"] for e in rec.of("asyncflow.TaskReleased")] == ["a"]
+    assert not traced._trace_inflight
+
+
+def test_adopted_tasks_have_unknown_times():
+    traced, rec, clock = _traced(_Slots(1))
+    traced._trace_adopt(held={"q": _desc("q")}, inflight={"r": _desc("r", seq=1)})
+    traced._trace_inner.queue.append(_desc("q"))
+    traced._trace_inner.inflight.add("r")
+    clock.t += 5.0
+    traced.release("r", "DONE")
+    traced.dispatch()
+    (released,) = rec.of("asyncflow.TaskReleased")
+    assert (released["held_seconds"], released["run_seconds"]) == (None, None)
+    (dispatched,) = rec.of("asyncflow.TaskDispatched")
+    assert dispatched["task_id"] == "q" and dispatched["held_seconds"] is None
 
 
 # ---------------------------------------------------------------------------
@@ -460,7 +638,9 @@ async def test_engine_emits_the_policy_timeline(tmp_path):
     telemetry = await flow.start_telemetry(checkpoint_path=str(tmp_path))
     events = []
     telemetry.subscribe(events.append)
-    assert isinstance(flow._policy, TracedPolicy) and flow._policy.inner is policy
+    assert (
+        isinstance(flow._policy, TracedPolicy) and inner_policy(flow._policy) is policy
+    )
     try:
 
         @flow.function_task
@@ -482,8 +662,9 @@ async def test_engine_emits_the_policy_timeline(tmp_path):
     uids = [f.uid for f in futs]
     names = [e.event_type for e in events]
     assert names.count("asyncflow.PolicyLayout") == 1
-    assert names.count("asyncflow.TaskDispatched") == 3
-    assert names.count("asyncflow.TaskReleased") == 3
+    for name in ("asyncflow.TaskDispatched", "asyncflow.TaskReleased"):
+        ids = [e.task_id for e in events if e.event_type == name]
+        assert sorted(ids) == sorted(uids)  # once each
 
     rows = {r["uid"]: r for r in timeline(events)}
     assert set(uids) <= set(rows)
@@ -536,18 +717,23 @@ async def test_engine_releases_say_how_each_task_left_the_policy():
     await flow.shutdown()
     await telemetry.stop()
 
-    released = {
-        e.task_id: e for e in events if e.event_type == "asyncflow.TaskReleased"
-    }
-    assert {u: (e.state, e.dispatched) for u, e in released.items()} == {
-        done.uid: ("DONE", True),
-        failed.uid: ("FAILED", True),
-        held.uid: (None, False),
-        running.uid: ("CANCELLED", True),
-    }
+    released = [
+        (e.task_id, e.state, e.dispatched)
+        for e in events
+        if e.event_type == "asyncflow.TaskReleased"
+    ]
+    assert sorted(released) == sorted(
+        [
+            (done.uid, "DONE", True),
+            (failed.uid, "FAILED", True),
+            (held.uid, None, False),
+            (running.uid, "CANCELLED", True),
+        ]
+    )  # one each
     rows = {r["uid"]: r for r in timeline(events)}
     assert rows[held.uid]["release_state"] is None
     assert "dispatched" not in rows[held.uid]
+    assert rows[running.uid]["release_state"] == "CANCELED"  # as `state` spells it
 
 
 @pytest.mark.asyncio
@@ -561,3 +747,168 @@ async def test_a_traced_policy_is_free_for_another_engine_after_shutdown():
 
     second = await WorkflowEngine.create(backend=ParkingBackend(), policy=policy)
     await second.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_a_second_start_telemetry_keeps_what_the_proxy_knows():
+    pytest.importorskip("rhapsody.telemetry", reason="RHAPSODY telemetry not installed")
+    backend = ParkingBackend()
+    policy = FifoPolicy(1)
+    flow = await WorkflowEngine.create(backend=backend, policy=policy)
+    first = await flow.start_telemetry()
+
+    @flow.function_task
+    async def job(i):
+        return i
+
+    a, b = job(0), job(1)
+    await until(lambda: len(backend.parked) == 1)
+    await asyncio.sleep(0.2)
+    second = await flow.start_telemetry()  # started again
+    events = []
+    second.subscribe(events.append)
+    assert inner_policy(flow._policy) is policy
+    backend.finish(a.uid)
+    await until(lambda: b.uid in backend.parked)
+    backend.finish(b.uid)
+    await asyncio.gather(a, b)
+    await flow.shutdown()
+    await second.stop()
+    await first.stop()
+
+    released = [e.task_id for e in events if e.event_type == "asyncflow.TaskReleased"]
+    assert sorted(released) == sorted([a.uid, b.uid])
+    (held_b,) = [
+        e.held_seconds
+        for e in events
+        if e.event_type == "asyncflow.TaskDispatched" and e.task_id == b.uid
+    ]
+    assert held_b >= 0.2
+
+
+@pytest.mark.asyncio
+async def test_telemetry_started_with_tasks_in_the_policy_adopts_them():
+    pytest.importorskip("rhapsody.telemetry", reason="RHAPSODY telemetry not installed")
+    backend = ParkingBackend()
+    flow = await WorkflowEngine.create(backend=backend, policy=FifoPolicy(1))
+
+    @flow.function_task
+    async def job(i):
+        return i
+
+    a, b = job(0), job(1)
+    await until(lambda: len(backend.parked) == 1)
+    telemetry = await flow.start_telemetry()
+    events = []
+    telemetry.subscribe(events.append)
+    backend.finish(a.uid)
+    await until(lambda: b.uid in backend.parked)
+    backend.finish(b.uid)
+    await asyncio.gather(a, b)
+    await flow.shutdown()
+    await telemetry.stop()
+
+    released = {
+        e.task_id: e for e in events if e.event_type == "asyncflow.TaskReleased"
+    }
+    assert set(released) == {a.uid, b.uid}
+    assert released[a.uid].run_seconds is None  # in flight before tracing
+    (dispatched,) = [e for e in events if e.event_type == "asyncflow.TaskDispatched"]
+    assert dispatched.task_id == b.uid and dispatched.held_seconds is None
+
+
+@pytest.mark.asyncio
+async def test_a_policy_dispatching_an_iterator_runs_under_tracing():
+    pytest.importorskip("rhapsody.telemetry", reason="RHAPSODY telemetry not installed")
+
+    class GenFifo(FifoPolicy):
+        def dispatch(self):
+            return iter(super().dispatch())
+
+    backend = ParkingBackend()
+    flow = await WorkflowEngine.create(backend=backend, policy=GenFifo(2))
+    telemetry = await flow.start_telemetry()
+
+    @flow.function_task
+    async def job(i):
+        return i
+
+    f = job(0)
+    await until(lambda: f.uid in backend.parked)
+    backend.finish(f.uid)
+    await asyncio.wait_for(f, 5.0)
+    await flow.shutdown()
+    await telemetry.stop()
+
+
+@pytest.mark.asyncio
+async def test_a_task_resolved_while_held_is_not_reported_as_dispatched():
+    pytest.importorskip("rhapsody.telemetry", reason="RHAPSODY telemetry not installed")
+    backend = ParkingBackend()
+    flow = await WorkflowEngine.create(backend=backend, policy=FifoPolicy(1))
+    telemetry = await flow.start_telemetry()
+    events = []
+    telemetry.subscribe(events.append)
+
+    @flow.function_task
+    async def job(i):
+        return i
+
+    a, b = job(0), job(1)
+    await until(lambda: len(backend.parked) == 1)
+    b.set_result("resolved by user code while held")
+    backend.finish(a.uid)
+    await a
+    await asyncio.sleep(0.05)
+    await flow.shutdown()
+    await telemetry.stop()
+
+    assert b.uid not in [t["uid"] for t in backend.parked.values()]
+    ours = [e for e in events if e.task_id == b.uid]
+    assert "asyncflow.TaskDispatched" not in [e.event_type for e in ours]
+    released = [e for e in ours if e.event_type == "asyncflow.TaskReleased"]
+    assert [(e.state, e.dispatched) for e in released] == [(None, False)]
+
+
+@pytest.mark.asyncio
+async def test_another_engine_cannot_take_a_traced_policy():
+    pytest.importorskip("rhapsody.telemetry", reason="RHAPSODY telemetry not installed")
+    first = await WorkflowEngine.create(backend=ParkingBackend(), policy=FifoPolicy(1))
+    telemetry = await first.start_telemetry()
+    try:
+        with pytest.raises(ValueError, match="give each engine its own"):
+            await WorkflowEngine.create(backend=ParkingBackend(), policy=first._policy)
+    finally:
+        await first.shutdown()
+        await telemetry.stop()
+
+
+@pytest.mark.asyncio
+async def test_unknown_describe_keys_do_not_stop_real_events(tmp_path):
+    """With RHAPSODY's own event classes, a describe_dispatch() key the event lacks used
+    to make every TaskDispatched fail."""
+    pytest.importorskip("rhapsody.telemetry", reason="RHAPSODY telemetry not installed")
+
+    class Pooled(FifoPolicy):
+        def describe_dispatch(self, desc):
+            return {"charge": {"cpus": 1}, "pool": "cpu"}
+
+    backend = ParkingBackend()
+    flow = await WorkflowEngine.create(backend=backend, policy=Pooled(2))
+    telemetry = await flow.start_telemetry()
+    events = []
+    telemetry.subscribe(events.append)
+
+    @flow.function_task
+    async def job(i):
+        return i
+
+    futs = [job(i) for i in range(3)]
+    for _ in futs:
+        await until(lambda: backend.parked)
+        backend.finish()
+    await asyncio.gather(*futs)
+    await flow.shutdown()
+    await telemetry.stop()
+    dispatched = [e for e in events if e.event_type == "asyncflow.TaskDispatched"]
+    assert len(dispatched) == 3 and all(e.charge == {"cpus": 1} for e in dispatched)

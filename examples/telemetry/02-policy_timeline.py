@@ -72,6 +72,7 @@ def make_policy(name: str):
 
 
 async def run(replicas: int, out: Path, observe: bool, policy: str) -> Path:
+    before = set(out.glob("*.jsonl"))  # a reused --out keeps earlier runs' files
     kwargs = {"observe_peaks": True} if observe else {}
     backend = await ConcurrentExecutionBackend(
         ProcessPoolExecutor(max_workers=CORES), **kwargs
@@ -98,7 +99,7 @@ async def run(replicas: int, out: Path, observe: bool, policy: str) -> Path:
     await asyncio.gather(*steered)
     await telemetry.stop()
     await flow.shutdown()
-    (path,) = out.glob("*.jsonl")
+    (path,) = set(out.glob("*.jsonl")) - before
     return path
 
 

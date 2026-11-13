@@ -4,22 +4,25 @@ With telemetry on (``WorkflowEngine.start_telemetry()``) and a policy set, the e
 wraps its policy in a :class:`TracedPolicy`. The proxy forwards every operation and
 emits, next to the engine's own task events:
 
-- ``asyncflow.TaskDispatched``: the policy dispatched the task. ``held_seconds`` is
-  its time in the policy since ``enqueue``; ``key`` is the policy's ordering key or
-  reason; ``placement`` and ``charge`` say where and with what the policy admitted it;
-  ``waiting``, ``inflight`` and ``occupancy`` describe the policy after the change.
+- ``asyncflow.TaskDispatched``: the policy dispatched the task and the engine submits
+  it. ``held_seconds`` is its time in the policy since ``enqueue`` (None for a task
+  queued before tracing started); ``key`` is the policy's ordering key or reason;
+  ``placement`` and ``charge`` say where and with what the policy admitted it;
+  ``waiting``, ``inflight`` and ``occupancy`` describe the policy after the dispatch
+  round.
 - ``asyncflow.TaskReleased``: the task left the policy. ``state`` and ``observed``
   are what the engine passed to ``release``: how the task ended on the backend
   (``"DONE"``, ``"FAILED"``, ``"CANCELLED"``, or None if the backend never got it)
   and the resource use it reported. ``run_seconds`` is the time since dispatch.
-  ``dispatched`` is False for a task that left while still queued (cancelled).
+  ``dispatched`` is False for a task that never reached the backend: cancelled while
+  queued, or dispatched by the policy and dropped by the engine.
 - ``asyncflow.TaskRejected``: ``enqueue`` raised; the engine fails the task.
 - ``asyncflow.TaskStarving``: the oldest waiting task waited ``starve_after`` seconds
   and younger tasks were dispatched before it. Once per task.
 - ``asyncflow.PolicyBlocked`` / ``asyncflow.PolicyUnblocked``: the policy reports,
   through its optional ``blocked()`` hook, that waiting tasks cannot start although
   capacity is free. Emitted on transitions only.
-- ``asyncflow.PolicyLayout``: the policy's capacities, once at start.
+- ``asyncflow.PolicyLayout``: the policy's capacities, each time telemetry starts.
 
 Without telemetry the engine calls the bare policy, so tracing costs nothing then.
 
@@ -30,24 +33,30 @@ backend's reports. :func:`timeline` builds one row per task from such events, an
 events back from a telemetry checkpoint file.
 
 A policy may implement these optional hooks to say more; the proxy calls them only
-when traced:
+when traced, and stores a copy of what they return:
 
-- ``describe_dispatch(desc) -> dict``: fields for ``TaskDispatched`` (``key``,
-  ``charge``, ...), called after ``dispatch()`` returned ``desc``.
+- ``describe_dispatch(desc) -> dict``: ``key`` and ``charge`` for ``TaskDispatched``,
+  called after ``dispatch()`` returned ``desc``. Other keys are dropped, with a
+  warning.
 - ``occupancy() -> dict``: what the policy has admitted, for example the cores and
   memory in use per pool. Called once per dispatch round and per release, so it
   should not walk every task.
-- ``layout() -> dict``: the capacities, once.
+- ``layout() -> dict``: the capacities.
 - ``blocked() -> dict | None``: why waiting tasks cannot start now, or None.
 
 Without hooks, ``key`` holds the declared ``priority`` and the description's
 ``_lineage``, ``_seq`` and ``_scope``, and ``occupancy`` is empty: ``waiting`` and
 ``inflight`` are always there. Events name the backend in ``_backend``. Tracing
-never changes what the policy decides: an error in it is logged.
+never changes what the policy decides: an error in it is logged, and costs at most
+that one event.
+
+Telemetry keeps every event in memory until it stops (RHAPSODY's event log); for a
+long run, bound it on RHAPSODY's side.
 """
 
 from __future__ import annotations
 
+import copy
 import dataclasses
 import json
 import logging
@@ -60,6 +69,7 @@ from typing import Any, Optional
 __all__ = [
     "POLICY_EVENTS",
     "TracedPolicy",
+    "inner_policy",
     "load_events",
     "occupancy",
     "policy_events",
@@ -72,7 +82,7 @@ logger = logging.getLogger(__name__)
 POLICY_EVENTS = {
     "asyncflow.TaskDispatched": {
         "policy": str,
-        "held_seconds": float,
+        "held_seconds": (object, None),
         "order": int,
         "key": (object, None),
         "placement": (object, None),
@@ -85,8 +95,8 @@ POLICY_EVENTS = {
         "policy": str,
         "state": (object, None),
         "dispatched": (bool, True),
-        "held_seconds": float,
-        "run_seconds": float,
+        "held_seconds": (object, None),
+        "run_seconds": (object, None),
         "observed": (object, None),
         "waiting": int,
         "inflight": int,
@@ -113,6 +123,9 @@ POLICY_EVENTS = {
     },
 }
 
+# The TaskDispatched fields a policy's describe_dispatch() may set
+HOOK_FIELDS = ("key", "charge")
+
 _event_classes: dict = {}
 
 
@@ -125,6 +138,22 @@ def policy_events() -> dict:
         for name, fields in POLICY_EVENTS.items():
             _event_classes[name] = define_event(name, **fields)
     return _event_classes
+
+
+def inner_policy(policy: Any) -> Any:
+    """The policy a :class:`TracedPolicy` traces, or ``policy`` itself."""
+    return policy._trace_inner if isinstance(policy, TracedPolicy) else policy
+
+
+def _copy(value: Any) -> Any:
+    """A deep copy of what a hook or a backend handed over, so later changes to it do
+    not rewrite past events; the value itself if it cannot be copied."""
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    try:
+        return copy.deepcopy(value)
+    except Exception:
+        return value
 
 
 # Indices into a queued task's record
@@ -142,14 +171,21 @@ class TracedPolicy:
         starve_after: Seconds the oldest waiting task may wait, overtaken, before
             ``TaskStarving``; None disables it.
         clock: Wall-clock time, as the other telemetry events use.
+        submits: Whether the engine submits a description that ``dispatch()``
+            returned. One it drops (its future was resolved while held, or it is not
+            this engine's) gets no ``TaskDispatched``.
 
-    Other attributes are read from the wrapped policy, so ``engine._policy.state()``
-    still works while traced. The proxy's own attributes start with ``_trace``, so
-    they hide none of the policy's.
+    Attribute reads and writes go to the wrapped policy, as do ``len()`` and
+    ``bool()``, so ``engine._policy.state()`` still works while traced. The proxy's
+    own attributes start with ``_trace``, so they hide none of the policy's;
+    :func:`inner_policy` returns the wrapped policy.
 
     Tracing never changes what the policy decides: if emitting an event or a hook
-    raises, the proxy logs it and returns what the policy returned.
+    raises, the proxy logs it and returns what the policy returned. Each event is
+    guarded on its own, so one failure costs at most that event.
     """
+
+    _trace_proxy = True  # marks the proxy without going through __getattr__
 
     def __init__(
         self,
@@ -159,146 +195,258 @@ class TracedPolicy:
         default_backend: Optional[str] = None,
         starve_after: Optional[float] = 60.0,
         clock: Callable[[], float] = time.time,
+        submits: Optional[Callable[[dict], bool]] = None,
     ):
-        self.inner = policy
-        self._trace_emit = emit
-        self._trace_backend = default_backend
-        self._trace_starve_after = starve_after
+        self._trace_inner = policy
+        self._trace_rebind(
+            emit, default_backend=default_backend, starve_after=starve_after
+        )
         self._trace_clock = clock
+        self._trace_submits = submits
         self._trace_name = type(policy).__name__
-        # uid -> [enqueue time, desc, overtaken, starving reported], in enqueue order
+        # uid -> [enqueue time or None, desc, overtaken, starving reported], in order
         self._trace_queued: OrderedDict = OrderedDict()
-        # uid -> (enqueue time, dispatch time, desc)
+        # uid -> (enqueue time or None, dispatch time or None, desc)
         self._trace_inflight: dict = {}
+        # uid -> (enqueue time or None, desc): dispatched, but the engine drops it
+        self._trace_dropped: dict = {}
         self._trace_order = 0
         self._trace_blocked: Optional[tuple] = None  # (since, reason) while blocked
         self._trace_errors = 0
+        self._trace_dropped_keys: set = set()  # describe_dispatch keys warned about
         self._trace_describe = getattr(policy, "describe_dispatch", None)
         self._trace_occupancy = getattr(policy, "occupancy", None)
         self._trace_blocked_hook = getattr(policy, "blocked", None)
 
     def __getattr__(self, name):
         # Only called for attributes TracedPolicy lacks
-        return getattr(self.inner, name)
+        if name.startswith("_trace"):  # not set yet (copying, unpickling)
+            raise AttributeError(name)
+        return getattr(self._trace_inner, name)
+
+    def __setattr__(self, name, value):
+        if name.startswith("_trace"):
+            object.__setattr__(self, name, value)
+        else:
+            setattr(self._trace_inner, name, value)
+
+    def __delattr__(self, name):
+        if name.startswith("_trace"):
+            object.__delattr__(self, name)
+        else:
+            delattr(self._trace_inner, name)
+
+    def __len__(self) -> int:
+        return len(self._trace_inner)
+
+    def __bool__(self) -> bool:
+        return bool(self._trace_inner)
 
     def __repr__(self) -> str:
-        return f"TracedPolicy({self.inner!r})"
+        return f"TracedPolicy({self._trace_inner!r})"
 
     # -- the policy operations -------------------------------------------------
 
     def enqueue(self, uid: str, desc: dict) -> None:
         try:
-            self.inner.enqueue(uid, desc)
+            self._trace_inner.enqueue(uid, desc)
         except Exception as e:
-            try:
-                self._trace_event(
-                    "asyncflow.TaskRejected",
-                    uid,
-                    desc,
-                    error=f"{type(e).__name__}: {e}",
-                )
-            except Exception:
-                self._trace_failed()
+            self._trace_guard(
+                self._trace_event,
+                "asyncflow.TaskRejected",
+                uid,
+                desc,
+                error=f"{type(e).__name__}: {e}",
+            )
             raise
-        self._trace_queued[uid] = [self._trace_clock(), desc, 0, False]
+        self._trace_guard(self._trace_note_enqueue, uid, desc)
 
     def runnable(self) -> bool:
-        return self.inner.runnable()
+        return self._trace_inner.runnable()
 
     def dispatch(self) -> list:
-        out = self.inner.dispatch()
-        try:
-            self._trace_dispatch(out)
-        except Exception:
-            self._trace_failed()
+        out = self._trace_inner.dispatch()
+        if not isinstance(out, list):
+            out = list(out)  # an iterator is read once: the engine gets the same tasks
+        self._trace_guard(self._trace_dispatch, out)
         return out
 
     def release(
         self, uid: str, state: Optional[str], observed: Optional[dict] = None
     ) -> Any:
-        result = self.inner.release(uid, state, observed)
         try:
-            self._trace_release(uid, state, observed)
-        except Exception:
-            self._trace_failed()
-        return result
+            return self._trace_inner.release(uid, state, observed)
+        finally:  # the engine counts the task as gone, also when the policy raised
+            self._trace_guard(self._trace_release, uid, state, observed)
+
+    # -- set up by the engine --------------------------------------------------
+
+    def _trace_rebind(
+        self,
+        emit: Callable[..., None],
+        *,
+        default_backend: Optional[str],
+        starve_after: Optional[float],
+    ) -> None:
+        """Emit to ``emit`` from now on: telemetry was started (again)."""
+        self._trace_emit = emit
+        self._trace_backend = default_backend
+        self._trace_starve_after = starve_after
+
+    def _trace_adopt(self, held: dict, inflight: dict) -> None:
+        """Take on the tasks the policy held or had in flight before tracing started
+        (``{uid: desc}`` each).
+
+        Their times in the policy are unknown, so their
+        ``held_seconds`` and ``run_seconds`` are None.
+        """
+        for uid, desc in held.items():
+            self._trace_queued.setdefault(uid, [None, desc, 0, False])
+        for uid, desc in inflight.items():
+            self._trace_inflight.setdefault(uid, (None, None, desc))
 
     # -- what the proxy emits --------------------------------------------------
 
+    def _trace_note_enqueue(self, uid: str, desc: dict) -> None:
+        self._trace_queued[uid] = [self._trace_clock(), desc, 0, False]
+
     def _trace_dispatch(self, out: list) -> None:
+        # First the records of every task, which cannot fail half-way; then one guarded
+        # event per task, so one failure costs only its own event.
         now = self._trace_clock()
-        queued = self._trace_queued
-        if out:
-            inflight = self._trace_inflight
+        queued, inflight = self._trace_queued, self._trace_inflight
+        new = []
+        for desc in out:
+            uid = desc["uid"]
+            if uid in inflight:  # in flight already (a policy bug): nothing changes
+                continue
+            oldest = next(iter(queued), None)
+            rec = queued.pop(uid, None)
+            t_enqueue = rec[_T] if rec is not None else None
+            if rec is not None and oldest is not None and oldest != uid:
+                queued[oldest][_OVERTAKEN] += 1
+            if not self._trace_will_submit(desc):
+                if rec is not None:
+                    self._trace_dropped[uid] = (t_enqueue, desc)
+                continue
+            inflight[uid] = (t_enqueue, now, desc)
+            new.append((uid, desc, t_enqueue))
+        if new:
             occupancy = self._trace_snapshot()
-            for desc in out:
-                uid = desc["uid"]
-                oldest = next(iter(queued), None)
-                rec = queued.pop(uid, None)
-                if rec is None:  # queued before tracing started
-                    t_enqueue = now
-                else:
-                    t_enqueue = rec[_T]
-                    if oldest is not None and oldest != uid:
-                        queued[oldest][_OVERTAKEN] += 1
-                inflight[uid] = (t_enqueue, now, desc)
-                placement = desc.get("placement")
-                fields = {
-                    "event_time": now,
-                    "node_id": placement.get("host")
-                    if isinstance(placement, dict)
-                    else None,
-                    "held_seconds": now - t_enqueue,
-                    "order": self._trace_order,
-                    "key": _default_key(desc),
-                    "placement": placement,
-                    "waiting": len(queued),
-                    "inflight": len(inflight),
-                    "occupancy": occupancy,
-                }
-                if self._trace_describe is not None:
-                    fields.update(self._trace_describe(desc) or ())
-                self._trace_event("asyncflow.TaskDispatched", uid, desc, **fields)
+            waiting, n_inflight = len(queued), len(inflight)
+            for uid, desc, t_enqueue in new:
+                self._trace_guard(
+                    self._trace_dispatched,
+                    uid,
+                    desc,
+                    t_enqueue,
+                    now,
+                    occupancy,
+                    waiting,
+                    n_inflight,
+                )
                 self._trace_order += 1
         if queued and self._trace_starve_after is not None:
-            self._trace_check_starving(now)
+            self._trace_guard(self._trace_check_starving, now)
         if self._trace_blocked_hook is not None:
-            self._trace_check_blocked(now)
+            self._trace_guard(self._trace_check_blocked, now)
+
+    def _trace_will_submit(self, desc: dict) -> bool:
+        if self._trace_submits is None:
+            return True
+        try:
+            return bool(self._trace_submits(desc))
+        except Exception:
+            self._trace_failed()
+            return True
+
+    def _trace_dispatched(
+        self, uid, desc, t_enqueue, now, occupancy, waiting, n_inflight
+    ) -> None:
+        placement = _copy(desc.get("placement"))
+        fields = {
+            "event_time": now,
+            "node_id": placement.get("host") if isinstance(placement, dict) else None,
+            "held_seconds": None if t_enqueue is None else now - t_enqueue,
+            "order": self._trace_order,
+            "key": _default_key(desc),
+            "placement": placement,
+            "waiting": waiting,
+            "inflight": n_inflight,
+            "occupancy": occupancy,
+        }
+        if self._trace_describe is not None:
+            fields.update(self._trace_hook_fields(desc))
+        self._trace_event("asyncflow.TaskDispatched", uid, desc, **fields)
+
+    def _trace_hook_fields(self, desc: dict) -> dict:
+        """What ``describe_dispatch(desc)`` adds; a hook that raises adds nothing."""
+        try:
+            extra = self._trace_describe(desc)
+        except Exception:
+            self._trace_failed()
+            return {}
+        if not extra:
+            return {}
+        if not isinstance(extra, dict):
+            extra = {"": extra}
+        unknown = set(extra) - set(HOOK_FIELDS) - self._trace_dropped_keys
+        if unknown:
+            self._trace_dropped_keys |= unknown
+            logger.warning(
+                "Policy %r: describe_dispatch() returned %s, which TaskDispatched does "
+                "not have; they are dropped. Return %s.",
+                self._trace_inner,
+                sorted(map(repr, unknown)),
+                " and ".join(HOOK_FIELDS),
+            )
+        return {k: _copy(v) for k, v in extra.items() if k in HOOK_FIELDS}
 
     def _trace_release(
         self, uid: str, state: Optional[str], observed: Optional[dict]
     ) -> None:
         rec = self._trace_inflight.pop(uid, None)
-        if rec is None:
-            queued = self._trace_queued.pop(uid, None)
-            if queued is None:  # released already, or never seen
-                return
-            t_enqueue, t_dispatch, desc = queued[_T], None, queued[_DESC]
-        else:
+        if rec is not None:
             t_enqueue, t_dispatch, desc = rec
+            dispatched = True
+        else:
+            dropped = self._trace_dropped.pop(uid, None)
+            if dropped is not None:
+                t_enqueue, desc = dropped
+            else:
+                queued = self._trace_queued.pop(uid, None)
+                if queued is None:  # released already, or never seen
+                    return
+                t_enqueue, desc = queued[_T], queued[_DESC]
+            t_dispatch, dispatched = None, False
         now = self._trace_clock()
+        until = t_dispatch if dispatched else now
         self._trace_event(
             "asyncflow.TaskReleased",
             uid,
             desc,
             event_time=now,
             state=state,
-            dispatched=t_dispatch is not None,
-            held_seconds=(t_dispatch or now) - t_enqueue,
-            run_seconds=0.0 if t_dispatch is None else now - t_dispatch,
-            observed=observed,
+            dispatched=dispatched,
+            held_seconds=None
+            if t_enqueue is None or until is None
+            else until - t_enqueue,
+            run_seconds=(None if t_dispatch is None else now - t_dispatch)
+            if dispatched
+            else 0.0,
+            observed=_copy(observed),
             waiting=len(self._trace_queued),
             inflight=len(self._trace_inflight),
             occupancy=self._trace_snapshot(),
         )
 
-    def emit_layout(self) -> None:
+    def _trace_emit_layout(self) -> None:
         """Emit ``asyncflow.PolicyLayout`` with the policy's capacities."""
         try:
-            hook = getattr(self.inner, "layout", None)
-            layout = hook() if hook is not None else None
+            hook = getattr(self._trace_inner, "layout", None)
+            layout = _copy(hook()) if hook is not None else None
             if layout is None:
-                capacity = getattr(self.inner, "capacity", None)
+                capacity = getattr(self._trace_inner, "capacity", None)
                 layout = {"capacity": capacity} if capacity is not None else {}
             self._trace_emit(
                 "asyncflow.PolicyLayout",
@@ -314,7 +462,8 @@ class TracedPolicy:
     def _trace_check_starving(self, now: float) -> None:
         uid, rec = next(iter(self._trace_queued.items()))
         if (
-            not rec[_REPORTED]
+            rec[_T] is not None
+            and not rec[_REPORTED]
             and rec[_OVERTAKEN]
             and now - rec[_T] >= self._trace_starve_after
         ):
@@ -330,7 +479,7 @@ class TracedPolicy:
             )
 
     def _trace_check_blocked(self, now: float) -> None:
-        reason = self._trace_blocked_hook()
+        reason = _copy(self._trace_blocked_hook())
         if self._trace_blocked is not None:
             since, was = self._trace_blocked
             if reason is not None and _head(reason) == _head(was):
@@ -360,8 +509,16 @@ class TracedPolicy:
     # -- helpers ---------------------------------------------------------------
 
     def _trace_snapshot(self) -> Optional[dict]:
+        """A copy of what the policy's ``occupancy()`` reports; None without the hook or
+        when it raises."""
         hook = self._trace_occupancy
-        return hook() if hook is not None else None
+        if hook is None:
+            return None
+        try:
+            return _copy(hook())
+        except Exception:
+            self._trace_failed()
+            return None
 
     def _trace_event(self, name: str, uid: str, desc: dict, **fields) -> None:
         self._trace_emit(
@@ -379,17 +536,25 @@ class TracedPolicy:
             **fields,
         )
 
+    def _trace_guard(self, fn: Callable, *args, **kwargs) -> Any:
+        """``fn(*args, **kwargs)``; None, logged, if it raises."""
+        try:
+            return fn(*args, **kwargs)
+        except Exception:
+            self._trace_failed()
+            return None
+
     def _trace_failed(self) -> None:
         """Logs a tracing error: the first with its traceback, the others briefly."""
         self._trace_errors += 1
         if self._trace_errors == 1:
             logger.exception(
-                "Policy telemetry for %r failed; the policy runs on", self.inner
+                "Policy telemetry for %r failed; the policy runs on", self._trace_inner
             )
         else:
             logger.debug(
                 "Policy telemetry for %r failed again (%d)",
-                self.inner,
+                self._trace_inner,
                 self._trace_errors,
                 exc_info=True,
             )
@@ -458,7 +623,8 @@ def timeline(events: Iterable) -> list[dict]:
     ``observed`` (``"started"``, ``"ended"``), when it did. Otherwise ``started`` is
     when the backend accepted the task, which may be before it ran.
     ``release_state`` is the ``state`` the task left the policy with, None for one the
-    backend never got. Rows are ordered by creation.
+    backend never got, spelled as ``state`` is (``"CANCELED"``). Rows are ordered by
+    creation.
     """
     rows: dict = {}
     for event in events:
@@ -491,7 +657,9 @@ def timeline(events: Iterable) -> list[dict]:
                 row["node"] = e["node_id"]
         elif etype == "asyncflow.TaskReleased":
             row["run_seconds"] = e.get("run_seconds")
-            row["release_state"] = e.get("state")
+            # The policy protocol spells it as futures do; task events as RHAPSODY does
+            state = e.get("state")
+            row["release_state"] = "CANCELED" if state == "CANCELLED" else state
             if not e.get("dispatched", True):
                 row.setdefault("held_seconds", e.get("held_seconds"))
             observed = e.get("observed")

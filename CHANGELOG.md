@@ -29,7 +29,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   policy's occupancy over time, and `load_events()` reads a checkpoint file. A
   policy can say more through optional `describe_dispatch`, `occupancy`, `layout`
   and `blocked` methods. Without telemetry the engine calls the policy directly;
-  with it, an error in tracing is logged and never changes what the policy decides.
+  with it, an error in tracing is logged, costs at most its own event, and never
+  changes what the policy decides. `policy_telemetry.inner_policy()` returns the
+  policy behind the proxy.
 
 ### Changed
 

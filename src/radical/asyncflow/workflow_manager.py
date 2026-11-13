@@ -50,6 +50,14 @@ _ABANDONED: dict = {}
 _SEQUENCE = count()
 
 
+def _untraced(policy: Any) -> Any:
+    """The policy itself when given another engine's tracing proxy (its ``_policy`` with
+    telemetry on), so the one-engine-per-policy check sees the policy."""
+    if getattr(type(policy), "_trace_proxy", False):
+        return policy._trace_inner
+    return policy
+
+
 def _abandon(policy_ref: Any, held: set, dispatched: set) -> None:
     """Called when an engine is collected: notes the tasks its policy still holds."""
     policy = policy_ref()
@@ -254,6 +262,7 @@ class WorkflowEngine:
         """
         # Get the current running loop - assume it exists
         self.loop = get_event_loop_or_raise("WorkflowEngine")
+        policy = _untraced(policy)
         if policy is not None:
             self._check_policy(policy)
 
@@ -527,16 +536,42 @@ class WorkflowEngine:
             from .policy_telemetry import TracedPolicy, policy_events  # noqa: PLC0415
 
             self._tel_events.update(policy_events())
-            policy = self._policy
-            if isinstance(policy, TracedPolicy):  # started again
-                policy = policy.inner
-            self._policy = TracedPolicy(
-                policy,
-                self._emit,
-                default_backend=self._default_backend_name,
-                starve_after=policy_starve_after,
-            )
-            self._policy.emit_layout()
+            if isinstance(self._policy, TracedPolicy):
+                # Started again: keep what the proxy knows of the tasks in the policy
+                self._policy._trace_rebind(
+                    self._emit,
+                    default_backend=self._default_backend_name,
+                    starve_after=policy_starve_after,
+                )
+            else:
+
+                def submits(desc: dict) -> bool:
+                    # What _dispatch() submits of what the policy dispatched
+                    uid = desc["uid"]
+                    return (
+                        uid in self._held and not self.components[uid]["future"].done()
+                    )
+
+                traced = TracedPolicy(
+                    self._policy,
+                    self._emit,
+                    default_backend=self._default_backend_name,
+                    starve_after=policy_starve_after,
+                    submits=submits,
+                )
+                described = {
+                    uid: self.components[uid]["description"]
+                    for uid in (*self._held, *self._dispatched)
+                    if uid in self.components
+                }
+                traced._trace_adopt(
+                    held={u: described[u] for u in self._held if u in described},
+                    inflight={
+                        u: described[u] for u in self._dispatched if u in described
+                    },
+                )
+                self._policy = traced
+            self._policy._trace_emit_layout()
 
         return self._telemetry
 
@@ -681,6 +716,7 @@ class WorkflowEngine:
         Example:
             engine = await WorkflowEngine.create(dry_run=True)
         """
+        policy = _untraced(policy)
         if policy is not None:  # before a backend is set up for nothing
             cls._check_policy(policy)
         # Setup and validate backend first
