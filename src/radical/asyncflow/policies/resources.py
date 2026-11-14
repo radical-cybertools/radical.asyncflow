@@ -11,10 +11,10 @@ when the backend reports it done, failed or cancelled::
     flow = await WorkflowEngine.create(backend=backend, policy=policy)
 
     @flow.function_task
-    async def fold(seq, task_description={"resources": {"gpus": 0.25, "gpu_mem": 9}}):
+    async def fold(seq, task_description={"demand": {"gpus": 0.25, "gpu_mem": 9}}):
         ...  # host memory is learned: declare it if no backend reports peaks
 
-A task declares its demand under ``task_description["resources"]``: ``cpus``
+A task declares its demand under ``task_description["demand"]``: ``cpus``
 (default 1), ``gpus`` (below 1, a share of one device; from 1, whole devices),
 ``host_mem`` and ``gpu_mem`` (GiB; ``gpu_mem`` is per device). Undeclared memory
 counts as zero, unless the policy has a :class:`MemoryModel`, which learns it.
@@ -25,9 +25,11 @@ Modes:
   still chooses the node, and the application the GPU.
 - ``node``: the demand must fit one node, and a GPU share one GPU. The policy
   chooses them, worst fit first so load spreads, and writes the choice into the
-  task description as ``placement``: ``{"node": index, "host": name, "gpus":
-  [device, ...]}``. A backend that understands ``placement`` places the task
-  there; others ignore it.
+  task description as ``placement``: ``{"node_id": name, "host": name, "cores":
+  cpus, "gpu_ids": [device, ...]}``, with the names RHAPSODY's telemetry reads.
+  ``node_id`` and ``host`` are the node's :attr:`NodeShape.name`, None for a
+  node without one. A backend that understands ``placement`` places the task
+  there; others, and every backend when the name is None, ignore it.
 
 Memory is learned from the peaks the backend reports for each task, as
 ``observed`` in its description (``{"host_mem": ..., "gpu_mem": ...}``, GiB,
@@ -131,13 +133,13 @@ class _Demand:
 
 
 def _demand(desc: dict) -> _Demand:
-    """Read ``task_description["resources"]``; one core when none is declared."""
-    res = (desc.get("task_backend_specific_kwargs") or {}).get("resources") or {}
+    """Read ``task_description["demand"]``; one core when none is declared."""
+    res = (desc.get("task_backend_specific_kwargs") or {}).get("demand") or {}
     if not isinstance(res, dict):
-        raise ValueError(f"resources must be a dict, not {res!r}")
+        raise ValueError(f"demand must be a dict, not {res!r}")
     unknown = set(res) - {"cpus", "gpus", "host_mem", "gpu_mem"}
     if unknown:
-        raise ValueError(f"unknown resources {sorted(unknown)}")
+        raise ValueError(f"unknown demand keys {sorted(unknown)}")
     cpus = _non_negative("cpus", res.get("cpus", 1))
     gpus = _non_negative("gpus", res.get("gpus", 0))
     if gpus > 1 and gpus != int(gpus):
@@ -486,13 +488,12 @@ class Pool:
             n.gpu_mem[g] -= sign * c.gpu_mem
 
     def placement(self, c: _Charge) -> Optional[dict]:
+        """Where node mode runs a charge, with the keys RHAPSODY's telemetry reads."""
         if c.node is None:
             return None
-        return {
-            "node": c.node,
-            "host": self.nodes[c.node].shape.name,
-            "gpus": list(c.gpus),
-        }
+        name = self.nodes[c.node].shape.name
+        cores = int(c.cpus) if c.cpus == int(c.cpus) else c.cpus
+        return {"node_id": name, "host": name, "cores": cores, "gpu_ids": list(c.gpus)}
 
     def state(self) -> dict:
         """Free capacity, summed and per node, for logs and debugging."""
@@ -636,8 +637,6 @@ class ResourcePolicy:
                 f"{desc.get('name')}: {d.cpus} cpus, {d.gpus} gpus, {host} GiB host"
                 f" and {gpu_mem} GiB per gpu can never fit {where}"
             )
-        # Taken out, so a backend does not read it as its own setting (Dask does)
-        (desc.get("task_backend_specific_kwargs") or {}).pop("resources", None)
         pid = id(pool)
         key = _queue_key(d)
         heapq.heappush(self._queues[pid].setdefault(key, []), (rank, uid))
@@ -777,7 +776,7 @@ class ResourcePolicy:
                     "%s: the backend reported no peak memory, so with other tasks of "
                     "unknown memory at most %d run per node until it does; declare "
                     "host_mem and gpu_mem "
-                    "in task_description['resources'] to lift the limit",
+                    "in task_description['demand'] to lift the limit",
                     d.kind.split("|", 1)[0],
                     pool.unknown_per_node,
                 )

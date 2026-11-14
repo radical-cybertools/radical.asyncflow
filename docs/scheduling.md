@@ -85,18 +85,15 @@ async def fold(seq): ...
 
 
 fold_needs = {"gpus": 0.25, "gpu_mem": 9, "host_mem": 8}
-await fold(seq, task_description={"resources": fold_needs})
+await fold(seq, task_description={"demand": fold_needs})
 ```
 
-**Demand.** A task declares it as `task_description["resources"]`: `cpus` (default 1),
+**Demand.** A task declares it as `task_description["demand"]`: `cpus` (default 1),
 `gpus` (below 1, a share of one device; from 1, whole devices),
 `host_mem` and `gpu_mem` (GiB; `gpu_mem` is per device). Undeclared memory counts as
 zero, unless the policy has a `MemoryModel`. A demand that can never fit fails the
 task with a `ValueError`. A `task_description` given at the call replaces the
-decorator's `resources` whole, so give the whole demand there. For a backend with a
-pool, the policy takes `resources` out of the description before the backend sees it,
-so a backend with a setting of the same name, such as Dask's worker resources, does
-not read it; for a backend without a pool it passes the description on unchanged.
+decorator's `demand` whole, so give the whole demand there.
 
 **Pools.** `NodeShape(cpus, gpus=0, host_mem=None, gpu_mem=None, cpu_overcommit=1.0,
 name=None)` describes a node; memory left as None is not counted. `Pool(nodes,
@@ -110,9 +107,12 @@ backend included. Tasks for a backend without a pool are not held back.
   chooses the node, and the application the GPU.
 - `node`: the demand must fit one node, and a GPU share one GPU. The policy chooses
   them, the emptiest first so load spreads, and writes the choice into the task
-  description as `placement`: `{"node": index, "host": name, "gpus": [device, ...]}`.
-  A backend that understands `placement` runs the task there; others ignore it.
-  RHAPSODY's Dragon backend understands it from its `feature/dragon-placement` branch.
+  description as `placement`: `{"node_id": name, "host": name, "cores": cpus,
+  "gpu_ids": [device, ...]}`, with the names RHAPSODY's telemetry reads. `node_id` and
+  `host` are the node's `NodeShape.name`, None for a node without one. A backend that
+  understands `placement` runs the task there; others ignore it, and so does every
+  backend when the name is None. RHAPSODY's Dragon backend understands it once its
+  placement change is merged.
   Give each node the host name the backend knows it by; names must differ.
 
 **Learned memory.** With a `MemoryModel(min_samples=3, headroom=1.1)`, memory a task

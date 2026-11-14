@@ -56,7 +56,7 @@ class Clock:
 
 class PolicyMachine(RuleBasedStateMachine):
     counted = True  # the policy has a capacity
-    declares = False  # tasks declare their demand as task_description["resources"]
+    declares = False  # tasks declare their demand as task_description["demand"]
 
     def make_policy(self, capacity, data, clock):
         """The policy under test; ``data`` draws anything else it needs."""
@@ -86,7 +86,7 @@ class PolicyMachine(RuleBasedStateMachine):
             uid, order = next(self.uids), next(self.order)
             kwargs = {"priority": prio}
             if self.declares:
-                kwargs["resources"] = dict(demand)
+                kwargs["demand"] = dict(demand)
             desc = {
                 "uid": uid,
                 "name": name,

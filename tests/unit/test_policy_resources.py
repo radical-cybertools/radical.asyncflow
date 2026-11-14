@@ -19,9 +19,9 @@ from tests.policy_harness import ParkingBackend, leftovers, until
 _uid = itertools.count()
 
 
-def task(name="f", backend=None, priority=None, **resources):
+def task(name="f", backend=None, priority=None, **demand):
     uid = f"task.{next(_uid):06d}"
-    kwargs = {"resources": resources} if resources else {}
+    kwargs = {"demand": demand} if demand else {}
     if priority is not None:
         kwargs["priority"] = priority
     return {
@@ -102,13 +102,13 @@ def test_one_pool_for_two_backends_is_rejected():
 
 
 @pytest.mark.parametrize(
-    "resources",
+    "demand",
     [{"cpu": 1}, {"gpus": 1.5}, {"host_mem": -1}, {"cpus": math.nan}],
 )
-def test_bad_demand_is_rejected(resources):
+def test_bad_demand_is_rejected(demand):
     p = ResourcePolicy(Pool([NodeShape(8, 2, 64, 40)]))
     with pytest.raises(ValueError):
-        enqueue(p, task(**resources))
+        enqueue(p, task(**demand))
     assert is_idle(p)
 
 
@@ -120,7 +120,7 @@ def test_bad_priority_is_rejected():
 
 
 @pytest.mark.parametrize(
-    ("mode", "resources"),
+    ("mode", "demand"),
     [
         ("node", {"cpus": 5}),  # every node has 4
         ("node", {"gpus": 2}),  # every node has 1 GPU
@@ -129,10 +129,10 @@ def test_bad_priority_is_rejected():
         ("aggregate", {"gpus": 3}),  # the pool has 2 GPUs
     ],
 )
-def test_demand_that_can_never_fit_is_rejected(mode, resources):
+def test_demand_that_can_never_fit_is_rejected(mode, demand):
     p = ResourcePolicy(Pool([NodeShape(4, 1, 32, 16)] * 2, mode=mode))
     with pytest.raises(ValueError, match="can never fit"):
-        enqueue(p, task(**resources))
+        enqueue(p, task(**demand))
 
 
 # ---------------------------------------------------------------------------
@@ -157,11 +157,13 @@ def test_node_mode_places_each_task_on_a_node_it_fits():
     a, b, c = enqueue(p, *(task(cpus=3) for _ in range(3)))
     assert uids(p.dispatch()) == [a["uid"], b["uid"]]
     assert {a["placement"]["host"], b["placement"]["host"]} == {"n0", "n1"}
-    assert a["placement"]["gpus"] == []
+    assert a["placement"]["gpu_ids"] == []
+    assert a["placement"]["node_id"] == a["placement"]["host"]
+    assert a["placement"]["cores"] == 3
     assert p.dispatch() == []  # one core left on each node: c fits neither
     p.release(b["uid"], "DONE")
     (d,) = p.dispatch()
-    assert d is c and c["placement"]["node"] == b["placement"]["node"]
+    assert d is c and c["placement"]["node_id"] == b["placement"]["node_id"]
 
 
 def test_node_mode_shares_gpus_by_slices_and_memory():
@@ -170,7 +172,7 @@ def test_node_mode_shares_gpus_by_slices_and_memory():
     admitted = p.dispatch()
     # by slices 4 per GPU fit, by memory 4 (36 of 40 GiB): 8 on 2 GPUs
     assert uids(admitted) == uids(tasks[:8])
-    per_gpu = [sum(t["placement"]["gpus"] == [g] for t in admitted) for g in (0, 1)]
+    per_gpu = [sum(t["placement"]["gpu_ids"] == [g] for t in admitted) for g in (0, 1)]
     assert per_gpu == [4, 4]
     assert p.dispatch() == []
 
@@ -179,7 +181,7 @@ def test_whole_gpus_take_whole_devices():
     p = ResourcePolicy(Pool([NodeShape(8, 4, 64, 40)], mode="node"))
     a, b, c = enqueue(p, task(gpus=2), task(gpus=0.5), task(gpus=2))
     assert uids(p.dispatch()) == [a["uid"], b["uid"]]
-    assert len(set(a["placement"]["gpus"]) | set(b["placement"]["gpus"])) == 3
+    assert len(set(a["placement"]["gpu_ids"]) | set(b["placement"]["gpu_ids"])) == 3
     assert p.dispatch() == []  # one free device left: c needs two
     p.release(b["uid"], "DONE")
     assert uids(p.dispatch()) == [c["uid"]]
@@ -196,13 +198,25 @@ def test_aggregate_mode_charges_gpu_memory_on_every_device():
     assert uids(p.dispatch()) == [shares[2]["uid"]]
 
 
-def test_the_demand_is_taken_out_of_what_the_backend_reads():
-    """A backend that has a setting of the same name (Dask) does not read it."""
+def test_the_description_keeps_the_demand():
+    """The backend sees what the task declared; tasks without a pool go unchanged."""
     pooled = ResourcePolicy({"a": Pool(NodeShape(4))})
-    a, other = enqueue(pooled, task(backend="a", cpus=2), task(backend="dask", GPU=1))
-    assert "resources" not in a["task_backend_specific_kwargs"]
-    assert other["task_backend_specific_kwargs"]["resources"] == {"GPU": 1}
+    a, other = enqueue(pooled, task(backend="a", cpus=2), task(backend="b", gpus=1))
+    assert a["task_backend_specific_kwargs"]["demand"] == {"cpus": 2}
+    assert other["task_backend_specific_kwargs"]["demand"] == {"gpus": 1}
     assert uids(pooled.dispatch()) == [other["uid"], a["uid"]]
+
+
+def test_a_node_without_a_name_places_nothing_a_backend_can_use():
+    p = ResourcePolicy(Pool([NodeShape(4, 1)], mode="node"))
+    (a,) = enqueue(p, task(cpus=0.5, gpus=1))
+    p.dispatch()
+    assert a["placement"] == {
+        "node_id": None,
+        "host": None,
+        "cores": 0.5,
+        "gpu_ids": [0],
+    }
 
 
 def test_node_mode_needs_distinct_host_names():
@@ -508,12 +522,12 @@ async def test_engine_places_tasks_and_learns_memory():
         async def fold(i):
             return i
 
-        gpu = {"resources": {"gpus": 0.5, "gpu_mem": 15, "host_mem": 1}}
+        gpu = {"demand": {"gpus": 0.5, "gpu_mem": 15, "host_mem": 1}}
         folds = [fold(i, task_description=gpu) for i in range(4)]
         await until(lambda: len(backend.parked) == 4)
         placed = [t["placement"] for t in backend.descs]
-        assert all(p["host"] == "n0" for p in placed)
-        assert sorted(g for p in placed for g in p["gpus"]) == [0, 0, 1, 1]
+        assert all(p["node_id"] == p["host"] == "n0" for p in placed)
+        assert sorted(g for p in placed for g in p["gpu_ids"]) == [0, 0, 1, 1]
 
         plain = [fold(10 + i) for i in range(3)]  # memory not declared
         await until(lambda: len(backend.parked) == 5)
@@ -545,7 +559,7 @@ async def test_engine_fails_a_task_whose_demand_can_never_fit():
         async def job(*deps):
             return None
 
-        too_big = job(task_description={"resources": {"gpus": 2}})
+        too_big = job(task_description={"demand": {"gpus": 2}})
         dependent = job(too_big)
         fine = job()
         await asyncio.wait([too_big, dependent], timeout=2.0)
@@ -595,7 +609,7 @@ async def test_engine_cancel_of_a_waiting_task_frees_its_reservation():
 
         small = job("small")
         await until(lambda: backend.parked)
-        big = job("big", task_description={"resources": {"cpus": 4}})
+        big = job("big", task_description={"demand": {"cpus": 4}})
         others = [job(f"o{i}") for i in range(3)]
         await until(lambda: policy.state()[None]["reserved_for"] is not None)
         assert [arg for _, arg in backend.submitted] == ["small"]
@@ -780,20 +794,20 @@ def test_a_task_without_a_pool_needs_a_valid_priority_too():
 
 
 @pytest.mark.parametrize(
-    ("mode", "resources"),
+    ("mode", "demand"),
     [
         ("node", {"gpus": 0.5, "gpu_mem": 20}),  # 16 GiB per GPU
         ("aggregate", {"gpus": 0.5, "gpu_mem": 20}),  # no GPU has 20
         ("aggregate", {"gpus": 2, "gpu_mem": 10, "cpus": 1}),  # 2 x 10 of 2 x 16: fits
     ],
 )
-def test_gpu_memory_that_can_never_fit_is_rejected(mode, resources):
+def test_gpu_memory_that_can_never_fit_is_rejected(mode, demand):
     p = ResourcePolicy(Pool([NodeShape(4, 1, 32, 16)] * 2, mode=mode))
-    if resources.get("gpus") == 2:
-        enqueue(p, task(**resources))
+    if demand.get("gpus") == 2:
+        enqueue(p, task(**demand))
         return
     with pytest.raises(ValueError, match="can never fit"):
-        enqueue(p, task(**resources))
+        enqueue(p, task(**demand))
 
 
 def test_node_mode_checks_each_gpu_memory():
@@ -830,7 +844,7 @@ def test_node_mode_spreads_gpu_shares():
     p = ResourcePolicy(Pool([NodeShape(64, 2)], mode="node"))
     a, b = enqueue(p, task(gpus=0.25), task(gpus=0.25))
     p.dispatch()
-    assert {a["placement"]["gpus"][0], b["placement"]["gpus"][0]} == {0, 1}
+    assert {a["placement"]["gpu_ids"][0], b["placement"]["gpu_ids"][0]} == {0, 1}
 
 
 def test_a_task_that_fits_beside_a_reservation_starts_when_it_arrives():
@@ -960,13 +974,13 @@ class ResourceMachine(PolicyMachine):
             if d["uid"] in without:
                 continue
             c, s, devices, h, g = demand_of(d)
-            i = d["placement"]["node"] if self.pool.mode == "node" else 0
+            i = int(d["placement"]["node_id"][1:]) if self.pool.mode == "node" else 0
             cpu[i] -= c
             host[i] -= h
             if self.pool.mode == "aggregate":
                 sl[0][0] -= s
                 gm[0][0] -= g * devices
-            for j in d.get("placement", {}).get("gpus", []):
+            for j in d.get("placement", {}).get("gpu_ids", []):
                 sl[i][j] -= min(s, GPU_SLICES)
                 gm[i][j] -= g
         return cpu, host, sl, gm
