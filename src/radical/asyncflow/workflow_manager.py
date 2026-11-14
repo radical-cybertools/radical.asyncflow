@@ -27,6 +27,7 @@ from .data import InputFile, OutputFile
 from .errors import DependencyFailureError
 from .utils import get_next_uid
 from .utils import get_event_loop_or_raise
+from .utils import observed_attributes
 
 TASK = "task"
 BLOCK = "block"
@@ -2446,7 +2447,10 @@ class WorkflowEngine:
                     workflow_id=task_dct.get("workflow_id"),
                     event_time=now,
                     duration_seconds=now - start,
-                    attributes=tel_attrs,
+                    attributes={
+                        **tel_attrs,
+                        **observed_attributes(task_dct.get("observed")),
+                    },
                 )
         elif state == self.task_states_map.RUNNING:
             # NOTE: with asyncio future the running state is
@@ -2495,7 +2499,10 @@ class WorkflowEngine:
                     event_time=now,
                     duration_seconds=now - start,
                     error_type="unknown",
-                    attributes=tel_attrs,
+                    attributes={
+                        **tel_attrs,
+                        **observed_attributes(task_dct.get("observed")),
+                    },
                 )
 
     async def shutdown(self, skip_execution_backend: bool = False) -> None:

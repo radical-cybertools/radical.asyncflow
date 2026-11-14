@@ -33,6 +33,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   with it, an error in tracing is logged, costs at most its own event, and never
   changes what the policy decides. `policy_telemetry.inner_policy()` returns the
   policy behind the proxy.
+- **What a task used, in the task events** — when the backend reports `observed`
+  (RHAPSODY's `observe_peaks`), the engine's `TaskCompleted` and `TaskFailed` carry
+  it, flattened with RHAPSODY's names and memory in bytes: `memory_peak_bytes`,
+  `memory_peak_rank_max_bytes`, `memory_growth_bytes`, `gpu_memory_peak_bytes`,
+  `cpu_seconds`, `cpu_loadavg`, `exec_start`, `exec_end`, `exec_host`/`exec_hosts`,
+  `ranks`, `killed_signal`, `timed_out` and `resource_usage_scope`.
 
 ### Changed
 

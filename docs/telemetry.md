@@ -228,6 +228,30 @@ TaskStarted              ← worker begins execution (RHAPSODY Backend)
 TaskCompleted | TaskFailed | TaskCanceled (RHAPSODY Backend)
 ```
 
+### What the task used
+
+When the backend reports what a task used (RHAPSODY's `observe_peaks`), the engine's
+`TaskCompleted` and `TaskFailed` carry it in their attributes, memory in bytes, with the
+names RHAPSODY gives the tasks a Session runs:
+
+| Attribute | From `observed` |
+|---|---|
+| `memory_peak_bytes` | `host_mem`: the task's peak host memory (for a pool task, the worker's) |
+| `memory_peak_rank_max_bytes` | `host_mem_max`: the largest rank's peak |
+| `memory_growth_bytes` | `host_mem_growth`: what a pool task added to its worker |
+| `gpu_memory_peak_bytes` | `gpu_mem` |
+| `cpu_seconds`, `ranks`, `timed_out` | the same keys |
+| `exec_start`, `exec_end` | `started`, `ended`: when it ran, on the worker |
+| `exec_host`, `exec_hosts` | `host`, `hosts`: where it ran |
+| `killed_signal` | `killed`: the signal that ended a task whose process or worker died |
+| `cpu_loadavg` | `cpu_seconds` over the run: the average number of busy cores |
+| `resource_usage_scope` | `"worker"` when the figures were taken in a pool worker earlier tasks also used (`approximate`), else `"job"` |
+
+A figure the backend did not report is absent. A task killed before it could measure
+itself has its times, host and `killed_signal`, but no memory figure. On RHAPSODY
+releases that copy these attributes onto the task span, they show in traces too; the
+events and the checkpoint file always have them.
+
 ### Policy events
 
 With a ready-queue policy (`WorkflowEngine.create(policy=...)`), `start_telemetry()` also
