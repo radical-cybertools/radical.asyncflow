@@ -353,7 +353,7 @@ def test_tracing_errors_never_change_what_the_policy_decides(caplog):
 
 
 # ---------------------------------------------------------------------------
-# Review findings (MTU-51): each test fails without its fix
+# Review findings: each test fails without its fix
 # ---------------------------------------------------------------------------
 
 
