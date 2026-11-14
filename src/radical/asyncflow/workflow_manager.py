@@ -27,6 +27,7 @@ from .data import InputFile, OutputFile
 from .errors import DependencyFailureError
 from .utils import get_next_uid
 from .utils import get_event_loop_or_raise
+from .utils import observed_attributes
 
 TASK = "task"
 BLOCK = "block"
@@ -48,6 +49,14 @@ _ABANDONED: dict = {}
 # Registration order for policies, across engines, so a policy used by one engine
 # after another never sees the same order twice
 _SEQUENCE = count()
+
+
+def _untraced(policy: Any) -> Any:
+    """The policy itself when given another engine's tracing proxy (its ``_policy`` with
+    telemetry on), so the one-engine-per-policy check sees the policy."""
+    if getattr(type(policy), "_trace_proxy", False):
+        return policy._trace_inner
+    return policy
 
 
 def _abandon(policy_ref: Any, held: set, dispatched: set) -> None:
@@ -254,6 +263,7 @@ class WorkflowEngine:
         """
         # Get the current running loop - assume it exists
         self.loop = get_event_loop_or_raise("WorkflowEngine")
+        policy = _untraced(policy)
         if policy is not None:
             self._check_policy(policy)
 
@@ -303,6 +313,8 @@ class WorkflowEngine:
         # since the run loop last called dispatch(): a task left it, or that
         # dispatch() returned tasks
         self._policy = policy
+        # Its key in _POLICY_ENGINES: start_telemetry() may wrap the policy
+        self._policy_id = id(policy)
         self._held: set[str] = set()
         self._dispatched: set[str] = set()
         self._changed = False
@@ -428,6 +440,7 @@ class WorkflowEngine:
         span_processors: list | None = None,
         metric_readers: list | None = None,
         resource: object | None = None,
+        policy_starve_after: float | None = 60.0,
     ) -> Any:
         """Create and start a RHAPSODY TelemetryManager for this workflow engine.
 
@@ -450,6 +463,12 @@ class WorkflowEngine:
             resource:               Optional ``opentelemetry.sdk.resources.Resource``.
                                     When None, ``Resource.create()`` reads
                                     ``OTEL_SERVICE_NAME`` from the environment automatically.
+            policy_starve_after:    With a policy: seconds the oldest waiting task may
+                                    wait while younger ones are dispatched before
+                                    ``asyncflow.TaskStarving``. None = never.
+
+        With a policy, the engine also emits the policy's decisions (see
+        ``radical.asyncflow.policy_telemetry``) by tracing the policy from now on.
 
         Returns:
             The active TelemetryManager instance.
@@ -511,6 +530,49 @@ class WorkflowEngine:
             "TaskFailed": TaskFailed,
             "TaskCanceled": TaskCanceled,
         }
+
+        # Trace the policy only now: without telemetry the engine calls it directly,
+        # so the policy events cost nothing then.
+        if self._policy is not None:
+            from .policy_telemetry import TracedPolicy, policy_events  # noqa: PLC0415
+
+            self._tel_events.update(policy_events())
+            if isinstance(self._policy, TracedPolicy):
+                # Started again: keep what the proxy knows of the tasks in the policy
+                self._policy._trace_rebind(
+                    self._emit,
+                    default_backend=self._default_backend_name,
+                    starve_after=policy_starve_after,
+                )
+            else:
+
+                def submits(desc: dict) -> bool:
+                    # What _dispatch() submits of what the policy dispatched
+                    uid = desc["uid"]
+                    return (
+                        uid in self._held and not self.components[uid]["future"].done()
+                    )
+
+                traced = TracedPolicy(
+                    self._policy,
+                    self._emit,
+                    default_backend=self._default_backend_name,
+                    starve_after=policy_starve_after,
+                    submits=submits,
+                )
+                described = {
+                    uid: self.components[uid]["description"]
+                    for uid in (*self._held, *self._dispatched)
+                    if uid in self.components
+                }
+                traced._trace_adopt(
+                    held={u: described[u] for u in self._held if u in described},
+                    inflight={
+                        u: described[u] for u in self._dispatched if u in described
+                    },
+                )
+                self._policy = traced
+            self._policy._trace_emit_layout()
 
         return self._telemetry
 
@@ -655,6 +717,7 @@ class WorkflowEngine:
         Example:
             engine = await WorkflowEngine.create(dry_run=True)
         """
+        policy = _untraced(policy)
         if policy is not None:  # before a backend is set up for nothing
             cls._check_policy(policy)
         # Setup and validate backend first
@@ -2384,7 +2447,10 @@ class WorkflowEngine:
                     workflow_id=task_dct.get("workflow_id"),
                     event_time=now,
                     duration_seconds=now - start,
-                    attributes=tel_attrs,
+                    attributes={
+                        **tel_attrs,
+                        **observed_attributes(task_dct.get("observed")),
+                    },
                 )
         elif state == self.task_states_map.RUNNING:
             # NOTE: with asyncio future the running state is
@@ -2433,7 +2499,10 @@ class WorkflowEngine:
                     event_time=now,
                     duration_seconds=now - start,
                     error_type="unknown",
-                    attributes=tel_attrs,
+                    attributes={
+                        **tel_attrs,
+                        **observed_attributes(task_dct.get("observed")),
+                    },
                 )
 
     async def shutdown(self, skip_execution_backend: bool = False) -> None:
@@ -2537,5 +2606,5 @@ class WorkflowEngine:
             self._unbind_policy()
 
     def _unbind_policy(self) -> None:
-        if _POLICY_ENGINES.get(id(self._policy)) is self:
-            del _POLICY_ENGINES[id(self._policy)]
+        if _POLICY_ENGINES.get(self._policy_id) is self:
+            del _POLICY_ENGINES[self._policy_id]
