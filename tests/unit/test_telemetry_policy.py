@@ -555,6 +555,62 @@ def test_timeline_prefers_the_worker_side_times():
     assert row["observed"]["host_mem"] == 1.0
 
 
+@pytest.mark.parametrize(
+    "planned, observed, node_id, elsewhere",
+    [
+        ("n1", {"host": "n1"}, "n1", False),
+        ("n1", {"host": "n2"}, "n2", True),
+        ("n1.cluster.org", {"host": "n1"}, "n1", False),  # names without their domain
+        ("n1", {"hosts": ["n1", "n2"]}, None, False),  # a job on several hosts
+        ("n3", {"hosts": ["n1", "n2"]}, None, True),
+        ("localhost", {"host": "n1"}, "n1", None),  # a one-node Dragon runtime's name
+        ("n1", {"host_mem": 1.0}, None, None),  # the backend did not say where
+        (None, {"host": "n1"}, "n1", None),  # the policy did not place it
+    ],
+)
+def test_release_names_where_the_task_ran_and_where_it_was_planned(
+    planned, observed, node_id, elsewhere
+):
+    traced, rec, _ = _traced(_Slots(1))
+    placement = {"host": planned} if planned else None
+    traced.enqueue("a", _desc("a", placement=placement))
+    traced.dispatch()
+    traced.release("a", "DONE", observed)
+    (released,) = rec.of("asyncflow.TaskReleased")
+    assert released["node_id"] == node_id
+    assert released["planned_node"] == planned
+    assert released["placed_elsewhere"] is elsewhere
+
+
+def test_timeline_node_is_where_the_task_ran_first():
+    def events(uid, plan, observed, elsewhere):
+        return [
+            {"event_type": "TaskCreated", "task_id": uid, "event_time": 1.0},
+            {
+                "event_type": "asyncflow.TaskDispatched",
+                "task_id": uid,
+                "event_time": 2.0,
+                "node_id": plan,
+            },
+            {
+                "event_type": "asyncflow.TaskReleased",
+                "task_id": uid,
+                "event_time": 3.0,
+                "observed": observed,
+                "planned_node": plan,
+                "placed_elsewhere": elsewhere,
+            },
+        ]
+
+    rows = timeline(
+        events("a", "n1", {"host": "n2"}, True)
+        + events("b", "n1", {"host_mem": 1.0}, None)
+        + events("c", "n1", {"hosts": ["n1", "n2"]}, False)
+    )
+    got = [(r["node"], r["planned_node"], r["placed_elsewhere"]) for r in rows]
+    assert got == [("n2", "n1", True), ("n1", "n1", None), ("n1,n2", "n1", False)]
+
+
 def test_occupancy_is_a_step_function_keeping_the_last_point_per_time():
     events = [
         {

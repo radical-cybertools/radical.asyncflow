@@ -15,7 +15,10 @@ emits, next to the engine's own task events:
   (``"DONE"``, ``"FAILED"``, ``"CANCELLED"``, or None if the backend never got it)
   and the resource use it reported. ``run_seconds`` is the time since dispatch.
   ``dispatched`` is False for a task that never reached the backend: cancelled while
-  queued, or dispatched by the policy and dropped by the engine.
+  queued, or dispatched by the policy and dropped by the engine. ``node_id`` is the
+  host the task ran on, from ``observed``; ``planned_node`` the host the policy placed
+  it on, and ``placed_elsewhere`` True when it ran on another one (None when either
+  is unknown).
 - ``asyncflow.TaskRejected``: ``enqueue`` raised; the engine fails the task.
 - ``asyncflow.TaskStarving``: the oldest waiting task waited ``starve_after`` seconds
   and younger tasks were dispatched before it. Once per task.
@@ -98,6 +101,8 @@ POLICY_EVENTS = {
         "held_seconds": (object, None),
         "run_seconds": (object, None),
         "observed": (object, None),
+        "planned_node": (object, None),
+        "placed_elsewhere": (object, None),
         "waiting": int,
         "inflight": int,
         "occupancy": (object, None),
@@ -421,11 +426,17 @@ class TracedPolicy:
             t_dispatch, dispatched = None, False
         now = self._trace_clock()
         until = t_dispatch if dispatched else now
+        placement = desc.get("placement")
+        planned = placement.get("host") if isinstance(placement, dict) else None
+        ran = _observed_hosts(observed)
         self._trace_event(
             "asyncflow.TaskReleased",
             uid,
             desc,
             event_time=now,
+            node_id=ran[0] if len(ran) == 1 else None,
+            planned_node=planned,
+            placed_elsewhere=_placed_elsewhere(planned, ran),
             state=state,
             dispatched=dispatched,
             held_seconds=None
@@ -560,6 +571,34 @@ class TracedPolicy:
             )
 
 
+def _observed_hosts(observed) -> list:
+    """The hosts the backend says a task ran on: ``observed`` ``host`` or ``hosts``."""
+    if not isinstance(observed, dict):
+        return []
+    if observed.get("host"):
+        return [str(observed["host"])]
+    hosts = observed.get("hosts")
+    return [str(h) for h in hosts if h] if isinstance(hosts, (list, tuple)) else []
+
+
+_LOCAL_NAMES = {"localhost", "localhost.localdomain", "127.0.0.1", "::1"}
+
+
+def _short(host: str) -> str:
+    return host.split(".", 1)[0].lower()
+
+
+def _placed_elsewhere(planned, ran: list) -> Optional[bool]:
+    """Whether a task ran on none of the hosts its policy placed it on; None if unknown.
+
+    Names are compared without their domain. A plan that names the node ``localhost``
+    (a one-node Dragon runtime does) cannot be compared with a host name.
+    """
+    if not planned or not ran or str(planned).lower() in _LOCAL_NAMES:
+        return None
+    return _short(str(planned)) not in {_short(h) for h in ran}
+
+
 def _head(reason) -> Optional[str]:
     return reason.get("head") if isinstance(reason, dict) else None
 
@@ -621,7 +660,10 @@ def timeline(events: Iterable) -> list[dict]:
 
     ``exec_start`` and ``exec_end`` are the worker-side times the backend reported in
     ``observed`` (``"started"``, ``"ended"``), when it did. Otherwise ``started`` is
-    when the backend accepted the task, which may be before it ran.
+    when the backend accepted the task, which may be before it ran. ``node`` is where
+    the task ran when the backend reported it (several hosts joined by commas), else
+    where the policy placed it; ``planned_node`` is the policy's host, and
+    ``placed_elsewhere`` says whether the task ran elsewhere (None when unknown).
     ``release_state`` is the ``state`` the task left the policy with, None for one the
     backend never got, spelled as ``state`` is (``"CANCELED"``). Rows are ordered by
     creation.
@@ -654,7 +696,8 @@ def timeline(events: Iterable) -> list[dict]:
             if e.get("charge") is not None:
                 row["charge"] = e["charge"]
             if e.get("node_id") is not None:
-                row["node"] = e["node_id"]
+                row["planned_node"] = e["node_id"]
+                row.setdefault("node", e["node_id"])
         elif etype == "asyncflow.TaskReleased":
             row["run_seconds"] = e.get("run_seconds")
             # The policy protocol spells it as futures do; task events as RHAPSODY does
@@ -669,8 +712,13 @@ def timeline(events: Iterable) -> list[dict]:
                     row["exec_start"] = observed["started"]
                 if observed.get("ended") is not None:
                     row["exec_end"] = observed["ended"]
-                if observed.get("host") is not None:
-                    row.setdefault("node", observed["host"])
+                ran = _observed_hosts(observed)
+                if ran:
+                    row["node"] = ",".join(ran)
+            if e.get("planned_node") is not None:
+                row["planned_node"] = e["planned_node"]
+            if "placed_elsewhere" in e:
+                row["placed_elsewhere"] = e["placed_elsewhere"]
     return sorted(
         rows.values(),
         key=lambda r: min(

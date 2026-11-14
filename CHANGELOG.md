@@ -21,7 +21,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Policy telemetry** — with a policy, `start_telemetry()` traces it and emits
   `asyncflow.TaskDispatched` (time held in the policy, ordering key, placement,
   charge, occupancy), `asyncflow.TaskReleased` (how the task ended, run time, the
-  `observed` usage the backend reported), `asyncflow.TaskRejected`,
+  `observed` usage the backend reported, where it ran against where the policy placed
+  it), `asyncflow.TaskRejected`,
   `asyncflow.TaskStarving`,
   `asyncflow.PolicyBlocked`/`PolicyUnblocked` and `asyncflow.PolicyLayout`, all
   keyed by the task's uid. `radical.asyncflow.policy_telemetry.timeline()` joins

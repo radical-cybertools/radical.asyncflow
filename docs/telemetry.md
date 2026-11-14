@@ -241,7 +241,7 @@ the policy runs on.
 |---|---|---|
 | `asyncflow.PolicyLayout` | each time `start_telemetry()` runs | `policy`, `layout` (capacities), `starve_after` |
 | `asyncflow.TaskDispatched` | the policy dispatched the task and the engine submits it | `held_seconds` (since `TaskQueued`; null for a task queued before telemetry started), `order`, `key` (the ordering key: the declared `priority`, `lineage`, `seq` and `scope`, or what the policy reports), `placement`, `charge`, `waiting`, `inflight`, `occupancy` (all three after the dispatch round); `node_id` is the placement's host |
-| `asyncflow.TaskReleased` | the task left the policy | `state` (how it ended on the backend: `DONE`, `FAILED`, `CANCELLED`; null if the backend never got it), `dispatched` (false for a task that never reached the backend: cancelled while the policy held it, or dropped by the engine at dispatch), `held_seconds`, `run_seconds` (since dispatch; null when that is unknown), `observed` (the usage the backend reported), `waiting`, `inflight`, `occupancy` |
+| `asyncflow.TaskReleased` | the task left the policy | `state` (how it ended on the backend: `DONE`, `FAILED`, `CANCELLED`; null if the backend never got it), `dispatched` (false for a task that never reached the backend: cancelled while the policy held it, or dropped by the engine at dispatch), `held_seconds`, `run_seconds` (since dispatch; null when that is unknown), `observed` (the usage the backend reported), `planned_node` (the policy's host), `placed_elsewhere` (true when the task ran on another host; null when unknown), `waiting`, `inflight`, `occupancy`; `node_id` = the host the task ran on, from `observed` |
 | `asyncflow.TaskRejected` | `enqueue` raised | `error` |
 | `asyncflow.TaskStarving` | the oldest waiting task waited `policy_starve_after` seconds (default 60) while younger tasks were dispatched; once per task | `held_seconds`, `overtaken`, `waiting` |
 | `asyncflow.PolicyBlocked` / `asyncflow.PolicyUnblocked` | the policy says, through its `blocked()` method, that waiting tasks cannot start although capacity is free; on transitions | `reason` (the policy's, with the waiting task as `head`) / `blocked_seconds` |
@@ -269,8 +269,12 @@ steps = occupancy(events)  # [{"t", "inflight", "waiting", "pool.cpus", ...}, ..
 
 `timeline()` uses the worker-side `observed["started"]` and `observed["ended"]` as
 `exec_start` and `exec_end` when the backend reports them. Otherwise `started` is when the
-backend accepted the task, which can be before it ran. `release_state` is the `state` the
-task left the policy with, spelled as `state` is (`CANCELED`).
+backend accepted the task, which can be before it ran. `node` is where the task ran when the
+backend reported it in `observed` (hosts joined by commas for a job on several), else where the
+policy placed it; `planned_node` is the policy's host and `placed_elsewhere` whether the task ran
+elsewhere. Host names are compared without their domain, and a plan that names `localhost` (a
+one-node Dragon runtime does) is not compared. `release_state` is the `state` the task left the
+policy with, spelled as `state` is (`CANCELED`).
 
 ---
 
