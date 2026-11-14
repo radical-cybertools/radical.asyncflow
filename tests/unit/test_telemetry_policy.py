@@ -582,6 +582,29 @@ def test_release_names_where_the_task_ran_and_where_it_was_planned(
     assert released["placed_elsewhere"] is elsewhere
 
 
+@pytest.mark.parametrize(
+    "placement, planned",
+    [
+        ({"node_id": "n1", "host": "n1", "cores": 1, "gpu_ids": [0]}, "n1"),
+        ({"node_id": "n1"}, "n1"),  # telemetry's name alone
+        ({"host": "n1"}, "n1"),  # a policy that writes only a host
+        ({"node_id": "n1", "host": "n1.cluster.org"}, "n1"),  # node_id first
+        ({"node_id": None, "host": None, "cores": 1}, None),  # a node without a name
+        ({"cores": 2}, None),
+    ],
+)
+def test_the_planned_node_is_the_placements_node_id_else_its_host(placement, planned):
+    traced, rec, _ = _traced(_Slots(1))
+    traced.enqueue("a", _desc("a", placement=placement))
+    traced.dispatch()
+    traced.release("a", "DONE", {"host": "n1"})
+    (dispatched,) = rec.of("asyncflow.TaskDispatched")
+    (released,) = rec.of("asyncflow.TaskReleased")
+    assert dispatched["node_id"] == released["planned_node"] == planned
+    assert dispatched["placement"] == placement
+    assert released["placed_elsewhere"] is (False if planned else None)
+
+
 def test_timeline_node_is_where_the_task_ran_first():
     def events(uid, plan, observed, elsewhere):
         return [

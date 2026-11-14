@@ -16,9 +16,10 @@ emits, next to the engine's own task events:
   and the resource use it reported. ``run_seconds`` is the time since dispatch.
   ``dispatched`` is False for a task that never reached the backend: cancelled while
   queued, or dispatched by the policy and dropped by the engine. ``node_id`` is the
-  host the task ran on, from ``observed``; ``planned_node`` the host the policy placed
-  it on, and ``placed_elsewhere`` True when it ran on another one (None when either
-  is unknown).
+  host the task ran on, from ``observed``; ``planned_node`` the node the policy placed
+  it on (``placement["node_id"]``, else ``placement["host"]``), and
+  ``placed_elsewhere`` True when it ran on another one (None when either is
+  unknown).
 - ``asyncflow.TaskRejected``: ``enqueue`` raised; the engine fails the task.
 - ``asyncflow.TaskStarving``: the oldest waiting task waited ``starve_after`` seconds
   and younger tasks were dispatched before it. Once per task.
@@ -371,7 +372,7 @@ class TracedPolicy:
         placement = _copy(desc.get("placement"))
         fields = {
             "event_time": now,
-            "node_id": placement.get("host") if isinstance(placement, dict) else None,
+            "node_id": _planned_node(placement),
             "held_seconds": None if t_enqueue is None else now - t_enqueue,
             "order": self._trace_order,
             "key": _default_key(desc),
@@ -426,8 +427,7 @@ class TracedPolicy:
             t_dispatch, dispatched = None, False
         now = self._trace_clock()
         until = t_dispatch if dispatched else now
-        placement = desc.get("placement")
-        planned = placement.get("host") if isinstance(placement, dict) else None
+        planned = _planned_node(desc.get("placement"))
         ran = _observed_hosts(observed)
         self._trace_event(
             "asyncflow.TaskReleased",
@@ -569,6 +569,18 @@ class TracedPolicy:
                 self._trace_errors,
                 exc_info=True,
             )
+
+
+def _planned_node(placement) -> Optional[str]:
+    """The node a policy placed a task on: ``placement`` ``node_id``, else ``host``.
+
+    ``node_id`` is the name RHAPSODY's telemetry reads; ``host`` is what a policy
+    that writes only a host name gives.
+    """
+    if not isinstance(placement, dict):
+        return None
+    node = placement.get("node_id")
+    return node if node is not None else placement.get("host")
 
 
 def _observed_hosts(observed) -> list:
