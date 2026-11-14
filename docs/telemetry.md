@@ -228,6 +228,78 @@ TaskStarted              ← worker begins execution (RHAPSODY Backend)
 TaskCompleted | TaskFailed | TaskCanceled (RHAPSODY Backend)
 ```
 
+### What the task used
+
+When the backend reports what a task used (RHAPSODY's `observe_peaks`), the engine's
+`TaskCompleted` and `TaskFailed` carry it in their attributes, memory in bytes, with the
+names RHAPSODY gives the tasks a Session runs:
+
+| Attribute | From `observed` |
+|---|---|
+| `memory_peak_bytes` | `host_mem`: the task's peak host memory (for a pool task, the worker's) |
+| `memory_peak_rank_max_bytes` | `host_mem_max`: the largest rank's peak |
+| `memory_growth_bytes` | `host_mem_growth`: what a pool task added to its worker |
+| `gpu_memory_peak_bytes` | `gpu_mem` |
+| `cpu_seconds`, `ranks`, `timed_out` | the same keys |
+| `exec_start`, `exec_end` | `started`, `ended`: when it ran, on the worker |
+| `exec_host`, `exec_hosts` | `host`, `hosts`: where it ran |
+| `killed_signal` | `killed`: the signal that ended a task whose process or worker died |
+| `cpu_loadavg` | `cpu_seconds` over the run: the average number of busy cores |
+| `resource_usage_scope` | `"worker"` when the figures were taken in a pool worker earlier tasks also used (`approximate`), else `"job"` |
+
+A figure the backend did not report is absent. A task killed before it could measure
+itself has its times, host and `killed_signal`, but no memory figure. On RHAPSODY
+releases that copy these attributes onto the task span, they show in traces too; the
+events and the checkpoint file always have them.
+
+### Policy events
+
+With a ready-queue policy (`WorkflowEngine.create(policy=...)`), `start_telemetry()` also
+traces the policy. Without telemetry the engine calls the policy directly, so these events
+cost nothing then. Every event carries the task's uid as `task_id`, the same uid the
+engine's and the backend's events carry, and names the backend the task runs on. Tracing
+never changes what the policy decides: if emitting an event fails, the engine logs it and
+the policy runs on.
+
+| Event | When | Fields |
+|---|---|---|
+| `asyncflow.PolicyLayout` | each time `start_telemetry()` runs | `policy`, `layout` (capacities), `starve_after` |
+| `asyncflow.TaskDispatched` | the policy dispatched the task and the engine submits it | `held_seconds` (since `TaskQueued`; null for a task queued before telemetry started), `order`, `key` (the ordering key: the declared `priority`, `lineage`, `seq` and `scope`, or what the policy reports), `placement`, `charge`, `waiting`, `inflight`, `occupancy` (all three after the dispatch round); `node_id` is the placement's host |
+| `asyncflow.TaskReleased` | the task left the policy | `state` (how it ended on the backend: `DONE`, `FAILED`, `CANCELLED`; null if the backend never got it), `dispatched` (false for a task that never reached the backend: cancelled while the policy held it, or dropped by the engine at dispatch), `held_seconds`, `run_seconds` (since dispatch; null when that is unknown), `observed` (the usage the backend reported), `planned_node` (the policy's host), `placed_elsewhere` (true when the task ran on another host; null when unknown), `waiting`, `inflight`, `occupancy`; `node_id` = the host the task ran on, from `observed` |
+| `asyncflow.TaskRejected` | `enqueue` raised | `error` |
+| `asyncflow.TaskStarving` | the oldest waiting task waited `policy_starve_after` seconds (default 60) while younger tasks were dispatched; once per task | `held_seconds`, `overtaken`, `waiting` |
+| `asyncflow.PolicyBlocked` / `asyncflow.PolicyUnblocked` | the policy says, through its `blocked()` method, that waiting tasks cannot start although capacity is free; on transitions | `reason` (the policy's, with the waiting task as `head`) / `blocked_seconds` |
+
+A policy can say more through optional methods: `describe_dispatch(desc)` (its `key` and
+`charge`; other keys are dropped with a warning), `occupancy()`, `layout()` and `blocked()`
+(see `radical.asyncflow.policy_telemetry`). The proxy calls them only while telemetry is on,
+and keeps a copy of what they return. Without them, `key` holds the description's ordering
+fields, `occupancy` is empty, and the layout is the policy's `capacity`.
+
+Starting telemetry again keeps what the proxy knows of the tasks in the policy. Telemetry
+started while tasks wait in the policy takes them on, with unknown times. RHAPSODY keeps
+every event in memory until telemetry stops; for a long run, bound its event log.
+
+`radical.asyncflow.policy_telemetry` joins the events by uid:
+
+```python
+from radical.asyncflow.policy_telemetry import load_events, occupancy, timeline
+
+events = load_events("telemetry/session.jsonl")  # or the events a subscriber collected
+for row in timeline(events):  # one row per task
+    print(row["uid"], row["ready"], row["dispatched"], row["started"], row["ended"])
+steps = occupancy(events)  # [{"t", "inflight", "waiting", "pool.cpus", ...}, ...]
+```
+
+`timeline()` uses the worker-side `observed["started"]` and `observed["ended"]` as
+`exec_start` and `exec_end` when the backend reports them. Otherwise `started` is when the
+backend accepted the task, which can be before it ran. `node` is where the task ran when the
+backend reported it in `observed` (hosts joined by commas for a job on several), else where the
+policy placed it; `planned_node` is the policy's host and `placed_elsewhere` whether the task ran
+elsewhere. Host names are compared without their domain, and a plan that names `localhost` (a
+one-node Dragon runtime does) is not compared. `release_state` is the `state` the task left the
+policy with, spelled as `state` is (`CANCELED`).
+
 ---
 
 ## Subscribing to events
