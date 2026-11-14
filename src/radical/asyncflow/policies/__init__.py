@@ -29,5 +29,13 @@ meaning.
 
 from .base import Policy
 from .fifo import FifoPolicy
+from .resources import MemoryModel, NodeShape, Pool, ResourcePolicy
 
-__all__ = ["Policy", "FifoPolicy"]
+__all__ = [
+    "Policy",
+    "FifoPolicy",
+    "ResourcePolicy",
+    "Pool",
+    "NodeShape",
+    "MemoryModel",
+]

@@ -42,7 +42,10 @@ from hypothesis import strategies as st  # noqa: E402
 
 from radical.asyncflow import (  # noqa: E402
     FifoPolicy,
+    NodeShape,
     NoopExecutionBackend,
+    Pool,
+    ResourcePolicy,
     WorkflowEngine,
 )
 from radical.asyncflow.errors import DependencyFailureError  # noqa: E402
@@ -109,6 +112,9 @@ class Node:
 # Ready-queue policies by name: a factory from the capacity, and its capacity
 POLICIES = {
     "fifo": FifoPolicy,
+    # one core per task: a node, or nodes of one core each, of `capacity` cores
+    "resource-node": lambda c: ResourcePolicy(Pool([NodeShape(c)], mode="node")),
+    "resource-aggregate": lambda c: ResourcePolicy(Pool([NodeShape(1)] * c)),
 }
 
 
@@ -500,6 +506,9 @@ async def check_workflow(wf, work_dir):
         assert not records(flow, TRANSIENT), "records of finished components"
         if policy is not None:
             assert not leftovers(policy), f"the policy holds {leftovers(policy)}"
+        if isinstance(policy, ResourcePolicy):
+            free = policy.state()[None]["cpu_free"]
+            assert free == pytest.approx(wf.policy[1]), f"{free} cores free"
         await flow.shutdown()
     assert not records(flow, RECORDS), "records after shutdown"
     await asyncio.sleep(0.02)  # a registration that outlived shutdown would show now
