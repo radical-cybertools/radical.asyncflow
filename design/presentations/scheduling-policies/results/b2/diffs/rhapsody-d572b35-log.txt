@@ -1,0 +1,11 @@
+*   d572b35 Merge feature/dragon-observed-peaks 8a74e99 (experimental, local)
+|\  
+| * 8a74e99 dragon: read peaks from Batch's Task.rusage when Dragon reports it
+| * dd30837 dragon: report task peak memory as task["observed"] (observe_peaks)
+* |   11bba32 Merge feature/dragon-placement bb7e76b (experimental, local)
+|\ \  
+| * | bb7e76b docs: say how to see the Dragon placement warnings
+| * | 06c2f78 dragon: count reachable GPUs with nvidia-smi when libcuda won't load
+| * | 7325bdf dragon: warn when a GPU placement cannot reach its GPUs
+* | | 14faf2f Merge feature/dragon-placement into experiment/dragon-priority (experimental, local)
+|\| | 

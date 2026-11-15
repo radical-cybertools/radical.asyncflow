@@ -1,0 +1,106 @@
+% Beamer theme modelled on a lecture deck: white slides,
+% Arial, a plain title at the top left, grey bullets, and lavender table headers.
+% Sizes are the lecture's, scaled from its 10 in wide page to Beamer's 16 cm.
+% Compile with LuaLaTeX (fontspec): latexmk -lualatex
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{beamerthemelecture}[2026/10/22]
+
+\RequirePackage{fontspec}
+\setsansfont{Arial}
+\setmonofont{Menlo}[Scale=MatchLowercase]
+% File names, paths, branches, commands and code identifiers
+\newcommand{\code}[1]{\texttt{#1}}
+\RequirePackage{array}
+\RequirePackage{colortbl}
+\RequirePackage{tikz}
+\usetikzlibrary{arrows.meta,calc}
+
+\definecolor{titleink}{HTML}{202124}
+\definecolor{bodyink}{HTML}{595959}
+\definecolor{boxline}{HTML}{C3C2B7}
+\definecolor{boxblue}{HTML}{E8F1FC}
+\definecolor{boxgray}{HTML}{F3F2EE}
+\definecolor{boxtext}{HTML}{0B0B0B}
+\definecolor{labelgray}{HTML}{52514E}
+\definecolor{tablehead}{HTML}{D9D2E9}
+\definecolor{tablerule}{HTML}{9E9E9E}
+
+% Page furniture
+\setbeamertemplate{navigation symbols}{}
+\setbeamersize{text margin left=0.45cm, text margin right=0.45cm}
+\setbeamercolor{normal text}{fg=bodyink, bg=white}
+\setbeamercolor{structure}{fg=bodyink}
+\setbeamercolor{frametitle}{fg=titleink}
+\setbeamercolor{title}{fg=black}
+\setbeamercolor{subtitle}{fg=bodyink}
+\setbeamercolor{author}{fg=bodyink}
+\setbeamerfont{frametitle}{size=\fontsize{17}{20}\selectfont}
+\setbeamerfont{title}{size=\fontsize{25}{30}\selectfont}
+\setbeamerfont{subtitle}{size=\fontsize{12}{15}\selectfont}
+\setbeamerfont{author}{size=\fontsize{7.5}{9}\selectfont}
+\setbeamerfont{itemize/enumerate subbody}{size=}   % sub-bullets keep the parent's size
+\AtBeginDocument{\frenchspacing}                    % one space after a colon or full stop
+
+\setbeamertemplate{frametitle}{%
+  \vspace*{0.2cm}%
+  {\usebeamerfont{frametitle}\usebeamercolor[fg]{frametitle}\insertframetitle\par}%
+  \vspace*{0.25cm}}
+
+\setbeamertemplate{footline}{%
+  \hfill{\fontsize{6}{7}\selectfont\color{labelgray}\insertframenumber}%
+  \hspace*{0.35cm}\vspace*{0.25cm}}
+
+\setbeamertemplate{title page}{%
+  \vfill
+  \centering
+  {\usebeamerfont{title}\usebeamercolor[fg]{title}\inserttitle\par}%
+  \vspace{0.55cm}
+  {\usebeamerfont{subtitle}\usebeamercolor[fg]{subtitle}\insertsubtitle\par}%
+  \vspace{0.45cm}
+  {\usebeamerfont{author}\usebeamercolor[fg]{author}\insertauthor\par}%
+  \vfill}
+
+% Section divider: one large centred line, as in the lecture's section layout
+\newcommand{\divider}[1]{%
+  \begin{frame}[c]
+    \centering{\fontsize{22}{26}\selectfont\color{black}#1\par}
+  \end{frame}}
+
+% Bullets: filled circle, then hollow circle, as in the lecture
+\setbeamertemplate{itemize item}{%
+  \tikz[baseline=-0.55ex]\fill[bodyink] (0,0) circle (0.2em);}
+\setbeamertemplate{itemize subitem}{%
+  \tikz[baseline=-0.55ex]\draw[bodyink, line width=0.4pt] (0,0) circle (0.18em);}
+\setbeamertemplate{enumerate item}{\insertenumlabel.}
+\setlength{\leftmargini}{1.5em}
+\setlength{\leftmarginii}{1.5em}
+\makeatletter
+\def\@listi{\leftmargin\leftmargini \topsep 2pt \parsep 0pt \itemsep 2.5pt}
+\let\@listI\@listi
+\def\@listii{\leftmargin\leftmarginii \topsep 1pt \parsep 0pt \itemsep 1.5pt}
+\makeatother
+
+% Body text one step smaller than \normalsize, for slides with a diagram or table
+\newcommand{\bodysmall}{\fontsize{9.5}{11.4}\selectfont}
+
+% Tables: full grey grid, lavender header row, bold first column, top-aligned cells
+\arrayrulecolor{tablerule}
+\setlength{\tabcolsep}{4pt}
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+\newcolumntype{B}[1]{>{\raggedright\arraybackslash\bfseries}p{#1}}
+\newcommand{\head}{\rowcolor{tablehead}}
+\newenvironment{lecturetable}[1]{%
+  \par\vspace{4pt}\noindent\renewcommand{\arraystretch}{1.5}\color{titleink}#1}{\par}
+
+% Diagrams: rounded boxes with a thin warm-grey outline, small grey labels
+\tikzset{
+  box/.style={draw=boxline, line width=0.5pt, rounded corners=2.5pt, fill=white,
+              text=boxtext, align=center, font=\fontsize{7}{8.4}\selectfont, inner sep=2pt},
+  bluebox/.style={box, fill=boxblue},
+  graybox/.style={box, fill=boxgray},
+  arrow/.style={-{Stealth[length=3.5pt, width=3pt]}, draw=labelgray, line width=0.6pt},
+  label/.style={font=\fontsize{6}{7}\selectfont, text=labelgray, inner sep=1pt},
+  caption/.style={font=\fontsize{6}{7.2}\selectfont, text=labelgray, align=center},
+  heading/.style={font=\fontsize{7}{8.4}\selectfont\bfseries, text=boxtext},
+  note/.style={font=\fontsize{7}{8.4}\selectfont, text=boxtext},
+}

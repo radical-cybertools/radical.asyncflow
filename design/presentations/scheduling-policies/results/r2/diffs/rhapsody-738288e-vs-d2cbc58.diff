@@ -1,0 +1,261 @@
+diff --git a/src/rhapsody/backends/execution/dragon.py b/src/rhapsody/backends/execution/dragon.py
+index 970d234..ad2781a 100644
+--- a/src/rhapsody/backends/execution/dragon.py
++++ b/src/rhapsody/backends/execution/dragon.py
+@@ -1,5 +1,6 @@
+ import asyncio
+ import contextlib
++import inspect
+ import logging
+ import os
+ import shutil
+@@ -22,9 +23,11 @@ try:
+     from dragon.native.process import ProcessTemplate
+     from dragon.workflows.batch import Batch
+     from dragon.workflows.batch import TaskCancelledError
++    from dragon.workflows.batch import batch as dragon_batch_module
+ 
+ except ImportError as e:  # pragma: no cover - environment without Dragon
+     dragon = None
++    dragon_batch_module = None
+     Node = None
+     System = None
+     ProcessTemplate = None
+@@ -122,6 +125,25 @@ class TaskStateMapper:
+     terminal_states = {DONE, FAILED, CANCELED}
+ 
+ 
++def _set_client_grouping(defaults: tuple, logger: logging.Logger) -> Optional[tuple]:
++    """Set the (linger_sec, max_batch_size) defaults of Batch's client grouping.
++
++    Dragon 0.14.1's Batch client compiles submissions that arrive within 5 ms of each other
++    (up to 256) together, and reports their completions only when all of them are done.
++    ``_drain_client_task_batch`` is called without those arguments, so its defaults decide.
++    Returns the previous defaults, or None when this Dragon has no such function.
++    """
++    fn = getattr(dragon_batch_module, "_drain_client_task_batch", None)
++    old = getattr(fn, "__defaults__", None)
++    if fn is None or old is None or len(old) != 2:
++        logger.warning(
++            "This Dragon has no Batch client grouping to change; compile_each_task ignored"
++        )
++        return None
++    fn.__defaults__ = defaults
++    return old
++
++
+ # ============================================================================
+ # Main Backend Class — Dragon.Batch API (event-driven, HPC-scale)
+ # ============================================================================
+@@ -160,6 +182,18 @@ class DragonExecutionBackend(BaseBackend):
+             on a Slurm allocation of part of a node. When True (the default), the pools are
+             sized from the CPUs Dragon may use instead, and a warning says so. When False,
+             Batch's sizing is kept and only the warning is logged.
++        compile_each_task: Experimental. Dragon 0.14.1's Batch compiles submissions that
++            arrive within 5 ms of each other together and reports them only when all are
++            done. When True, Batch's client grouping defaults are set to no linger and one
++            task per compile while this backend lives (restored at shutdown). This changes
++            module state shared by every Batch client in the process. A Dragon whose Batch
++            takes ``client_linger_sec``/``client_max_batch_size`` can get the same through
++            ``batch_kwargs`` instead.
++
++    Note on priority:
++        A task description may carry an integer ``priority`` (larger runs sooner). It is
++        passed to ``Batch.options(priority=...)`` when the installed Dragon accepts it, and
++        ignored otherwise.
+ 
+     Note on working directory:
+         DragonExecutionBackend does not support a backend-level working directory.
+@@ -190,6 +224,7 @@ class DragonExecutionBackend(BaseBackend):
+         batch_kwargs: Optional[dict] = None,
+         name: Optional[str] = "dragon",
+         size_pool_to_affinity: bool = True,
++        compile_each_task: bool = False,
+     ):
+         if not Batch:
+             raise RuntimeError(DRAGON_BATCH_INIT_ERROR)
+@@ -203,8 +238,17 @@ class DragonExecutionBackend(BaseBackend):
+                 "task_logs is disabled: task['stdout']/task['stderr'] will be empty "
+                 "for capture_stdio=False tasks; output goes directly to the console."
+             )
++        self._saved_client_grouping = None
++        if compile_each_task:
++            self._saved_client_grouping = _set_client_grouping((0.0, 1), self.logger)
+         with _pool_sized_to_affinity(size_pool_to_affinity, self.logger):
+             self.batch = Batch(**effective_kwargs)
++        try:
++            self._batch_takes_priority = (
++                "priority" in inspect.signature(self.batch.options).parameters
++            )
++        except (TypeError, ValueError, AttributeError):
++            self._batch_takes_priority = False
+ 
+         self._backend_state = BackendMainStates.INITIALIZED
+         self._callback_func: Callable = lambda t, s: None
+@@ -507,12 +551,16 @@ class DragonExecutionBackend(BaseBackend):
+         # Build task options once and reuse across all submission paths.
+         # Dragon 0.14.1-rc requires metadata (name, timeout, stdio paths) to go through
+         # Batch.options() rather than as direct kwargs to process/job/function.
+-        task_opts = self.batch.options(
+-            name=name,
+-            timeout=timeout,
+-            stdout=stdout_path,
+-            stderr=stderr_path,
+-        )
++        option_kwargs = {
++            "name": name,
++            "timeout": timeout,
++            "stdout": stdout_path,
++            "stderr": stderr_path,
++        }
++        priority = task.get("priority")
++        if priority is not None and self._batch_takes_priority:
++            option_kwargs["priority"] = int(priority)
++        task_opts = self.batch.options(**option_kwargs)
+ 
+         # Single decision tree - no redundant checks
+         if process_templates_config is not None:
+@@ -647,6 +695,10 @@ class DragonExecutionBackend(BaseBackend):
+             except Exception as e:
+                 self.logger.warning(f"Failed to remove Dragon task_logs directory: {e}")
+ 
++        if self._saved_client_grouping is not None:
++            _set_client_grouping(self._saved_client_grouping, self.logger)
++            self._saved_client_grouping = None
++
+         self._task_registry.clear()
+         self._pending_tuids.clear()
+         self._cancelled_tuids.clear()
+diff --git a/tests/unit/test_backend_execution_dragon_priority.py b/tests/unit/test_backend_execution_dragon_priority.py
+new file mode 100644
+index 0000000..ac55516
+--- /dev/null
++++ b/tests/unit/test_backend_execution_dragon_priority.py
+@@ -0,0 +1,127 @@
++"""DragonExecutionBackend passes task priorities to Batch and can compile each task on its own.
++
++These tests swap Batch, Node, System and Dragon's batch module for fakes, so they run where Dragon
++is absent.
++"""
++
++import asyncio
++import types
++from unittest.mock import patch
++
++import pytest
++
++from rhapsody.backends.execution import dragon as dragon_module
++from rhapsody.backends.execution.dragon import DragonExecutionBackend
++
++
++class FakeNode:
++    def __init__(self, h_uid):
++        self.hostname = h_uid
++        self.num_cpus = 8
++        self.cpus = list(range(8))
++
++
++class FakeSystem:
++    nodes = ["n0"]
++
++
++class FakeTask:
++    def __init__(self, uid):
++        self.uid = uid
++
++
++class FakeOptions:
++    def __init__(self, batch, kwargs):
++        self.batch, self.kwargs = batch, kwargs
++
++    def function(self, target, *args, **kwargs):
++        self.batch.submitted.append(self.kwargs)
++        return FakeTask(f"t{len(self.batch.submitted)}")
++
++
++class FakeBatch:
++    """A Batch whose options() takes a priority, like the experimental Dragon branch."""
++
++    def __init__(self, **kwargs):
++        self.num_workers, self.num_managers = 4, 2
++        self.submitted = []
++
++    def options(self, name=None, timeout=None, stdout=None, stderr=None, priority=0):
++        return FakeOptions(self, {"name": name, "priority": priority})
++
++    def join(self, timeout=None):
++        pass
++
++    def destroy(self, timeout=None):
++        pass
++
++    def log_dir(self):
++        raise RuntimeError("no task logs")
++
++
++class FakeBatchWithoutPriority(FakeBatch):
++    """A Batch as in dragonhpc 0.14.1: options() has no priority."""
++
++    def options(self, name=None, timeout=None, stdout=None, stderr=None):
++        return FakeOptions(self, {"name": name})
++
++
++def _drain(first, q, item_type, linger_sec=0.005, max_batch_size=256):
++    return [first], None
++
++
++@pytest.fixture
++def fake_batch_module():
++    module = types.SimpleNamespace(_drain_client_task_batch=_drain)
++    _drain.__defaults__ = (0.005, 256)
++    with patch.multiple(
++        dragon_module, Node=FakeNode, System=FakeSystem, dragon_batch_module=module
++    ):
++        yield module
++    _drain.__defaults__ = (0.005, 256)
++
++
++def _function_task(uid, **extra):
++    return {"uid": uid, "name": uid, "function": lambda: 0, "args": [], "kwargs": {}, **extra}
++
++
++def test_priority_reaches_batch_options(fake_batch_module):
++    with patch.object(dragon_module, "Batch", FakeBatch):
++        backend = DragonExecutionBackend()
++        asyncio.run(backend.build_task(_function_task("a", priority=7)))
++        asyncio.run(backend.build_task(_function_task("b")))
++    assert backend.batch.submitted == [{"name": "a", "priority": 7}, {"name": "b", "priority": 0}]
++
++
++def test_priority_ignored_when_batch_cannot_take_it(fake_batch_module):
++    with patch.object(dragon_module, "Batch", FakeBatchWithoutPriority):
++        backend = DragonExecutionBackend()
++        asyncio.run(backend.build_task(_function_task("a", priority=7)))
++    assert backend.batch.submitted == [{"name": "a"}]
++
++
++def test_compile_each_task_sets_and_restores_client_grouping(fake_batch_module):
++    with patch.object(dragon_module, "Batch", FakeBatch):
++        backend = DragonExecutionBackend(compile_each_task=True)
++        assert fake_batch_module._drain_client_task_batch.__defaults__ == (0.0, 1)
++        asyncio.run(backend.shutdown())
++    assert fake_batch_module._drain_client_task_batch.__defaults__ == (0.005, 256)
++
++
++def test_client_grouping_untouched_by_default(fake_batch_module):
++    with patch.object(dragon_module, "Batch", FakeBatch):
++        DragonExecutionBackend()
++    assert fake_batch_module._drain_client_task_batch.__defaults__ == (0.005, 256)
++
++
++def test_compile_each_task_without_grouping_function_warns(caplog):
++    with patch.multiple(
++        dragon_module,
++        Node=FakeNode,
++        System=FakeSystem,
++        Batch=FakeBatch,
++        dragon_batch_module=types.SimpleNamespace(),
++    ):
++        backend = DragonExecutionBackend(compile_each_task=True)
++    assert backend._saved_client_grouping is None
++    assert "compile_each_task ignored" in caplog.text

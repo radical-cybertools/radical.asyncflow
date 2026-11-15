@@ -1,0 +1,1858 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index e138456..32ee057 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -23,10 +23,25 @@
+   on its process template(s). `Batch.function()` takes no policy, so a placed
+   function task without templates runs as one placed Dragon process and returns
+   its value through `<work_dir>/<uid>.result`. A host or GPU that Dragon does not
+-  have fails only that task (Dragon would abort the runtime on an unknown host). A
++  have fails only that task (Dragon would abort the runtime on an unknown host).
++  The first GPU placement also counts the GPUs the backend's node can reach, once
++  (libcuda, or `nvidia-smi -L` when the backend's Python cannot load libcuda), and
++  warns when that is fewer than Dragon lists (a Slurm job without `--gres`). A
+   user-set template `policy` wins, with a warning; tasks without a placement are
+   unchanged.
+ 
++- **`DragonExecutionBackend(observe_peaks=True)`** reports each task's peak memory as
++  `task["observed"] = {"host_mem": GiB, "gpu_mem": GiB per GPU}`, which AsyncFlow's
++  `ResourcePolicy` learns memory demand from. Executable tasks run under a small launcher
++  (`rhapsody.backends.execution._peak`) that reaps the command with `wait4` for its peak RSS
++  and, when `pynvml` is installed, samples its per-process GPU memory through NVML; a job sums
++  its ranks. Native function tasks share pool workers, so they report the worker's RSS growth
++  during the call, marked `"approximate": True`. Off by default. With a Dragon whose Batch
++  tasks report their processes' resource usage (`Task.rusage`), executable peaks are read from
++  there instead of running the launcher; `peak_source` (`"auto"`, `"dragon"`, `"launcher"`)
++  chooses. See
++  `docs/getting-started/resource-specification.md#peak-memory-observe_peaks`.
++
+ ## [0.6.0] 2026-10-19
+ 
+ ### Fixed
+diff --git a/docs/getting-started/resource-specification.md b/docs/getting-started/resource-specification.md
+index cb0a607..4c3db41 100644
+--- a/docs/getting-started/resource-specification.md
++++ b/docs/getting-started/resource-specification.md
+@@ -325,6 +325,64 @@ and pins it to those GPUs with
+ Dragon aborts the whole runtime on an unknown host and silently drops unknown GPU
+ ids, so a bad placement fails only its own task, with a `ValueError`.
+ 
++Dragon lists a node's GPUs from `nvidia-smi -L` or `lspci`, not from the GPUs the
++job may use: in a Slurm job without `--gres` (or `--gpus`) it still lists GPU 0,
++and a task pinned there runs without a GPU. On the first placement that asks for
++GPUs, the backend counts the GPUs its own node can reach, once, in a subprocess:
++through libcuda with the backend's Python, or with `nvidia-smi -L` when that Python
++cannot load libcuda (which also gets its own warning, since Python function tasks
++it runs may not reach CUDA either). If fewer GPUs are reachable than Dragon lists,
++it logs a warning; the tasks still run.
++
++These warnings go to the `rhapsody` logger. Under Dragon, a handler you put on
++the root logger may never see them, so call `rhapsody.enable_logging()` before
++creating the backend, or attach your handler to `logging.getLogger("rhapsody")`.
++
+ A `policy` you set yourself in `process_template` or a `process_templates` entry
+ wins over the placement, and the backend logs a warning. Tasks without
+ `placement`, or with `host` set to `None`, are submitted as before.
++
++### Peak memory (`observe_peaks`)
++
++With `observe_peaks=True`, the backend reports each task's peak memory as
++`task["observed"] = {"host_mem": GiB, "gpu_mem": GiB per GPU}` when the task is DONE or
++FAILED. AsyncFlow's `ResourcePolicy` learns the memory demand of a kind of task from it.
++
++```python
++backend = await DragonExecutionBackend(observe_peaks=True)  # peak_source="auto"
++```
++
++Executable tasks take their peaks from one of two sources, chosen by `peak_source`:
++
++- `"dragon"`: a Dragon whose Batch tasks carry their processes' resource usage
++  (`Task.rusage`; stock dragonhpc 0.14.1 does not) reports `max_rss` with each exit code. No
++  extra process runs. It reports no GPU memory.
++- `"launcher"`: each command runs under a small launcher that reaps it with `wait4` and samples
++  NVML every 0.2 s. Works on stock Dragon, and also measures GPU memory.
++- `"auto"` (the default) uses Dragon's rusage when the Dragon in use reports it, and the
++  launcher otherwise. Pass `peak_source="launcher"` for GPU tasks.
++
++| Task | How | `host_mem` | `gpu_mem` |
++|------|-----|------------|-----------|
++| Executable (process, `process_template`) | Dragon's `Task.rusage`, or the launcher | `ru_maxrss`: the largest single process of the command's tree | launcher only: largest per-GPU sum over the tree's processes; needs `pynvml` |
++| Executable job (`process_templates`) | per rank, as above | sum over ranks (an upper bound) | launcher only: per GPU, summed over the ranks that share it |
++| Native function | the call is wrapped in the pool worker | worker RSS growth during the call, marked `"approximate": True` (Linux only) | not measured |
++| Function with `process_template(s)` | Dragon's `Task.rusage` only | as for an executable | not measured |
++
++Limits:
++
++- `ru_maxrss` keeps, across `exec`, the resident size of the process that forked the command.
++  So the smallest `host_mem` reported is about 10 MiB with the launcher, and the resident size
++  of Dragon's Local Services (about 140 MiB) with Dragon's rusage. Larger peaks are exact.
++- `gpu_mem` is `None` without `pynvml`, without a GPU, or when NVML never listed the task's
++  processes on a GPU. NVML reports host PIDs, so a task in its own PID namespace (some
++  containers) is not seen.
++- GPU memory is sampled every 0.2 s, so a GPU peak that lasts less than that can be missed
++  or under-stated: a 0.3 s task that allocated 1 GiB reported 12 MiB.
++- The launcher writes one small record per process to `<work_dir>/rhapsody-peaks.<tag>/<uid>/`,
++  which must be on a file system the nodes share. A job reports nothing unless every rank wrote
++  its record.
++- A native function's figure misses memory the allocator kept from earlier calls in the same
++  worker, and counts other threads of the worker.
++- A task cancelled with `cancel_task()` reports nothing. A Dragon `timeout` ends as FAILED and
++  still reports: the launcher passes the signal to the command and reaps it.
+diff --git a/src/rhapsody/backends/execution/_peak.py b/src/rhapsody/backends/execution/_peak.py
+new file mode 100644
+index 0000000..7e77cf4
+--- /dev/null
++++ b/src/rhapsody/backends/execution/_peak.py
+@@ -0,0 +1,342 @@
++"""Run a command and report its peak memory.
++
++Usage::
++
++    python -m rhapsody.backends.execution._peak --out-dir DIR [--interval S] -- CMD [ARG ...]
++
++The command runs as a child of this process, which reaps it with ``os.wait4`` to read its peak
++resident set size (``ru_maxrss``: the largest single process of the command's tree, not a sum).
++The kernel carries the RSS of this process at fork (about 10 MiB) into the child's ``ru_maxrss``
++across ``exec``, so that is the smallest peak reported. When ``pynvml`` is importable, a thread also samples, every ``--interval`` seconds, the memory that
++NVML reports for the command's processes on each GPU. This process then writes
++``DIR/<host>.<pid>.json``::
++
++    {"host_mem": GiB, "gpu_mem": GiB per GPU or null, "gpu_mem_devices": {uuid: GiB}, ...}
++
++and exits the way the command did: the same exit code, or the same signal. Signals sent to this
++process are forwarded to the command; on Linux the command is also killed if this process dies.
++
++The module needs only the standard library (and optionally ``pynvml``), so ``DragonExecutionBackend``
++runs it by path, without importing rhapsody, to keep the per-task start cost small.
++
++Function tasks have no process of their own; :func:`measured_call` gives them an approximate figure.
++"""
++
++import argparse
++import errno
++import json
++import os
++import resource
++import signal
++import socket
++import sys
++import threading
++from typing import Any
++from typing import Callable
++from typing import NamedTuple
++from typing import Optional
++
++GIB = float(1 << 30)
++# ru_maxrss is in KiB on Linux and in bytes on macOS.
++MAXRSS_UNIT = 1 if sys.platform == "darwin" else 1024
++FORWARDED_SIGNALS = (
++    signal.SIGTERM,
++    signal.SIGINT,
++    signal.SIGHUP,
++    signal.SIGQUIT,
++    signal.SIGUSR1,
++    signal.SIGUSR2,
++)
++PR_SET_PDEATHSIG = 1
++
++
++def _die_with_parent_hook() -> Callable[[], None]:
++    """Return a function the child calls before exec: on Linux, ask for SIGKILL when we die.
++
++    Dragon delivers a kill to this process only, so without it a SIGKILLed launcher would leave the
++    command running. Loaded before fork so the child does no library lookup.
++    """
++    if not sys.platform.startswith("linux"):
++        return lambda: None
++    try:
++        import ctypes
++
++        prctl = ctypes.CDLL(None, use_errno=True).prctl
++    except (OSError, AttributeError):
++        return lambda: None
++    parent = os.getpid()
++
++    def hook() -> None:
++        prctl(PR_SET_PDEATHSIG, signal.SIGKILL, 0, 0, 0)
++        if os.getppid() != parent:  # the parent died before prctl took effect
++            os._exit(128 + signal.SIGKILL)
++
++    return hook
++
++
++def spawn(cmd: list[str]) -> int:
++    """Fork and exec ``cmd``, keeping this process's stdio, environment and file descriptors."""
++    before_exec = _die_with_parent_hook()
++    pid = os.fork()
++    if pid == 0:  # pragma: no cover - runs in the child, which execs or exits
++        try:
++            before_exec()
++            os.execvp(cmd[0], cmd)  # noqa: S606 - runs the task command as given
++        except OSError as exc:
++            os.write(2, f"{cmd[0]}: {exc.strerror}\n".encode())
++            os._exit(127 if exc.errno == errno.ENOENT else 126)
++        os._exit(127)
++    return pid
++
++
++def descendants(pid: int) -> set[int]:
++    """``pid`` and its live descendants, from ``/proc/<pid>/task/<tid>/children`` on Linux.
++
++    Elsewhere, or if the kernel lacks the ``children`` file, only ``pid`` itself.
++    """
++    found = {pid}
++    todo = [pid]
++    while todo:
++        p = todo.pop()
++        try:
++            tids = os.listdir(f"/proc/{p}/task")
++        except OSError:
++            continue
++        for tid in tids:
++            try:
++                with open(f"/proc/{p}/task/{tid}/children") as f:
++                    kids = [int(c) for c in f.read().split()]
++            except (OSError, ValueError):
++                continue
++            for k in kids:
++                if k not in found:
++                    found.add(k)
++                    todo.append(k)
++    return found
++
++
++def load_nvml():
++    """Return an initialized ``pynvml`` module, or None if it is missing or NVML has no GPUs."""
++    try:
++        import pynvml
++    except ImportError:
++        return None
++    try:
++        pynvml.nvmlInit()
++        if pynvml.nvmlDeviceGetCount() == 0:
++            pynvml.nvmlShutdown()
++            return None
++    except Exception:  # NVMLError: no driver, no permission, ...
++        return None
++    return pynvml
++
++
++class GpuSampler(threading.Thread):
++    """Samples the GPU memory NVML reports for a process tree; keeps the peak per device.
++
++    ``peak`` maps device UUID to the largest sum of ``usedGpuMemory`` (bytes) seen at one sample
++    for the tree's processes on that device. A device appears only once the tree was seen on it.
++    """
++
++    def __init__(
++        self,
++        nvml,
++        pid: int,
++        interval: float,
++        tree: Callable[[int], set[int]] = descendants,
++    ):
++        super().__init__(name="peak-gpu-sampler", daemon=True)
++        self.nvml = nvml
++        self.pid = pid
++        self.interval = interval
++        self.tree = tree
++        self.peak: dict[str, int] = {}
++        self.samples = 0
++        self._stop_event = threading.Event()
++        self._devices = []
++        for i in range(nvml.nvmlDeviceGetCount()):
++            handle = nvml.nvmlDeviceGetHandleByIndex(i)
++            uuid = nvml.nvmlDeviceGetUUID(handle)
++            self._devices.append((uuid.decode() if isinstance(uuid, bytes) else uuid, handle))
++
++    def sample(self) -> None:
++        pids = self.tree(self.pid)
++        for uuid, handle in self._devices:
++            try:
++                procs = self.nvml.nvmlDeviceGetComputeRunningProcesses(handle)
++            except Exception:  # noqa: S112 - NVMLError: device busy, lost, unsupported
++                continue
++            mine = [p for p in procs if p.pid in pids]
++            if mine:
++                # usedGpuMemory is None when NVML cannot tell (e.g. without permission).
++                used = sum(p.usedGpuMemory or 0 for p in mine)
++                self.peak[uuid] = max(self.peak.get(uuid, 0), used)
++        self.samples += 1
++
++    def run(self) -> None:
++        while True:
++            self.sample()
++            if self._stop_event.wait(self.interval):
++                return
++
++    def stop(self) -> None:
++        self._stop_event.set()
++        if self.is_alive():
++            self.join()
++
++
++def report(rusage, gpu: Optional[GpuSampler], exit_code: int) -> dict:
++    """Build the peaks record from the child's rusage and, if any, the GPU sampler."""
++    devices = {u: b / GIB for u, b in gpu.peak.items()} if gpu else {}
++    return {
++        "host_mem": rusage.ru_maxrss * MAXRSS_UNIT / GIB,
++        # None when GPUs were not sampled or the tree never showed up on one: "not observed"
++        # keeps asyncflow from learning a zero for a GPU task it could not see.
++        "gpu_mem": max(devices.values()) if devices else None,
++        "gpu_mem_devices": devices,
++        "nvml": gpu is not None,
++        "samples": gpu.samples if gpu else 0,
++        "exit_code": exit_code,
++        "host": socket.gethostname(),
++    }
++
++
++def write_report(out_dir: str, record: dict) -> None:
++    """Write ``record`` to ``out_dir/<host>.<pid>.json`` atomically; warn instead of failing."""
++    try:
++        os.makedirs(out_dir, exist_ok=True)
++        name = f"{record['host']}.{os.getpid()}.json"
++        tmp = os.path.join(out_dir, f".{name}.tmp")
++        with open(tmp, "w") as f:
++            json.dump(record, f)
++        os.replace(tmp, os.path.join(out_dir, name))
++    except OSError as exc:
++        print(f"rhapsody peak launcher: cannot write peaks to {out_dir}: {exc}", file=sys.stderr)
++
++
++def exit_like(exit_code: int) -> None:
++    """Exit with ``exit_code``; a negative code re-raises that signal on this process."""
++    sys.stdout.flush()
++    sys.stderr.flush()
++    if exit_code >= 0:
++        os._exit(exit_code)
++    sig = -exit_code
++    try:
++        # Do not dump a second core for the launcher when the command dumped one.
++        resource.setrlimit(resource.RLIMIT_CORE, (0, resource.getrlimit(resource.RLIMIT_CORE)[1]))
++    except (ValueError, OSError):
++        pass
++    signal.signal(sig, signal.SIG_DFL)
++    signal.pthread_sigmask(signal.SIG_UNBLOCK, [sig])
++    os.kill(os.getpid(), sig)
++    os._exit(128 + sig)  # the signal does not terminate by default (e.g. SIGCHLD)
++
++
++def run(cmd: list[str], out_dir: str, interval: float = 0.2) -> int:
++    """Run ``cmd``, write its peaks to ``out_dir``, and return its exit code (negative: signal)."""
++    pid = spawn(cmd)
++
++    def forward(sig, _frame):
++        try:
++            os.kill(pid, sig)
++        except ProcessLookupError:
++            pass
++
++    for sig in FORWARDED_SIGNALS:
++        signal.signal(sig, forward)
++
++    nvml = load_nvml()
++    gpu = None
++    if nvml is not None:
++        try:
++            gpu = GpuSampler(nvml, pid, interval)
++            gpu.start()
++        except Exception:
++            gpu = None
++
++    _, status, rusage = os.wait4(pid, 0)  # retried on EINTR (PEP 475)
++    exit_code = os.waitstatus_to_exitcode(status)
++
++    if gpu is not None:
++        gpu.stop()
++    if nvml is not None:
++        try:
++            nvml.nvmlShutdown()
++        except Exception:  # noqa: S110
++            pass
++    write_report(out_dir, report(rusage, gpu, exit_code))
++    return exit_code
++
++
++class MeasuredResult(NamedTuple):
++    """A pooled function's return value with its approximate peak (see :func:`measured_call`)."""
++
++    value: Any
++    observed: Optional[dict]
++
++
++def _status_bytes(field: str) -> Optional[int]:
++    """A ``kB`` field of ``/proc/self/status`` (e.g. ``VmRSS``), in bytes; None off Linux."""
++    try:
++        with open("/proc/self/status") as f:
++            for line in f:
++                if line.startswith(field + ":"):
++                    return int(line.split()[1]) * 1024
++    except (OSError, ValueError, IndexError):
++        pass
++    return None
++
++
++def _reset_peak_rss() -> Optional[int]:
++    """Reset this process's ``VmHWM`` to its current RSS (Linux >= 4.0); return that RSS."""
++    try:
++        with open("/proc/self/clear_refs", "w") as f:
++            f.write("5")
++    except OSError:
++        return None
++    return _status_bytes("VmRSS")
++
++
++def measured_call(fn: Callable, args: tuple, kwargs: dict) -> MeasuredResult:
++    """Call ``fn`` and return its value with the host-memory growth of this process during the call.
++
++    For function tasks, which Dragon's Batch runs one at a time in long-lived pool workers, where the
++    OS keeps no per-call peak. The peak RSS mark is reset before the call and read after it, so
++    ``host_mem`` is the worker's peak during the call minus its RSS before. It is approximate:
++    memory the allocator kept from earlier calls is reused without counting, and other threads of
++    the worker count. ``gpu_mem`` is not measured: CUDA contexts and caching allocators outlive a
++    call. ``observed`` is None off Linux. Exceptions from ``fn`` propagate unchanged, without a
++    measurement.
++    """
++    base = _reset_peak_rss()
++    value = fn(*args, **kwargs)
++    peak = _status_bytes("VmHWM") if base is not None else None
++    if peak is None:
++        return MeasuredResult(value, None)
++    observed = {"host_mem": max(peak - base, 0) / GIB, "gpu_mem": None, "approximate": True}
++    return MeasuredResult(value, observed)
++
++
++def main(argv: Optional[list[str]] = None) -> None:
++    argv = sys.argv[1:] if argv is None else argv
++    parser = argparse.ArgumentParser(
++        prog="python -m rhapsody.backends.execution._peak",
++        description="Run CMD and write its peak host and GPU memory to OUT_DIR.",
++        usage="%(prog)s --out-dir OUT_DIR [--interval S] -- CMD [ARG ...]",
++    )
++    parser.add_argument("--out-dir", required=True)
++    parser.add_argument("--interval", type=float, default=0.2, help="GPU sampling period")
++    if "--" not in argv:
++        parser.error("missing '--' before the command")
++    split = argv.index("--")
++    opts, cmd = parser.parse_args(argv[:split]), argv[split + 1 :]
++    if not cmd:
++        parser.error("no command after '--'")
++    exit_like(run(cmd, opts.out_dir, opts.interval))
++
++
++if __name__ == "__main__":
++    # Run by path, this file's directory leads sys.path: its modules (concurrent.py, dragon.py, ...)
++    # would shadow what is imported lazily here (ctypes, pynvml and their imports).
++    sys.path.pop(0)
++    main()
+diff --git a/src/rhapsody/backends/execution/dragon.py b/src/rhapsody/backends/execution/dragon.py
+index 24285aa..8444234 100644
+--- a/src/rhapsody/backends/execution/dragon.py
++++ b/src/rhapsody/backends/execution/dragon.py
+@@ -1,13 +1,17 @@
+ import asyncio
+ import contextlib
+ import inspect
++import json
+ import logging
+ import os
+ import pickle
+ import shutil
++import subprocess
++import sys
+ import threading
+ import time
+ import traceback
++import uuid
+ from typing import Any
+ from typing import Callable
+ from typing import Optional
+@@ -15,6 +19,11 @@ from typing import Optional
+ from ..base import BaseBackend
+ from ..constants import BackendMainStates
+ from ..constants import StateMapper
++from . import _peak
++
++# Run by path so a launch does not import rhapsody (and Dragon) before the task's command.
++PEAK_LAUNCHER = os.path.abspath(_peak.__file__)
++PEAK_SOURCES = ("auto", "dragon", "launcher")
+ 
+ DRAGON_BATCH_INIT_ERROR = None
+ 
+@@ -23,6 +32,7 @@ try:
+     from dragon.infrastructure.policy import Policy
+     from dragon.native.machine import Node
+     from dragon.native.machine import System
++    from dragon.native.machine import current as current_node
+     from dragon.native.process import ProcessTemplate
+     from dragon.workflows.batch import Batch
+     from dragon.workflows.batch import TaskCancelledError
+@@ -34,6 +44,7 @@ except ImportError as e:  # pragma: no cover - environment without Dragon
+     Policy = None
+     Node = None
+     System = None
++    current_node = None
+     ProcessTemplate = None
+     Batch = None
+     TaskCancelledError = None
+@@ -41,6 +52,18 @@ except ImportError as e:  # pragma: no cover - environment without Dragon
+     DRAGON_BATCH_INIT_ERROR = e
+ 
+ 
++def _batch_reports_rusage() -> bool:
++    """True if this Dragon's Batch tasks carry their processes' resource usage (``Task.rusage``).
++
++    Stock dragonhpc 0.14.1 does not; a Dragon with per-process rusage in Batch results does.
++    """
++    try:
++        from dragon.workflows.batch.batch import Task
++    except ImportError:
++        return False
++    return isinstance(getattr(Task, "rusage", None), property)
++
++
+ def _get_logger() -> logging.Logger:
+     """Get logger for dragon backend module.
+ 
+@@ -136,6 +159,65 @@ def _placement_policy(placement: Optional[dict]):
+     )
+ 
+ 
++# Prints how many CUDA devices a fresh process can use; exits 2 without libcuda, 3 on a CUDA error.
++_CUDA_PROBE = """
++import ctypes, sys
++try:
++    cu = ctypes.CDLL("libcuda.so.1")
++except OSError:
++    sys.exit(2)
++rc = cu.cuInit(0)
++if rc == 100:  # CUDA_ERROR_NO_DEVICE
++    print(0)
++    sys.exit(0)
++if rc != 0:
++    sys.exit(3)
++count = ctypes.c_int()
++if cu.cuDeviceGetCount(ctypes.byref(count)) != 0:
++    sys.exit(3)
++print(count.value)
++"""
++
++
++def _cuda_device_count() -> tuple[Optional[int], bool]:
++    """Count the CUDA devices a process of this Python on this node can use.
++
++    Returns ``(count, loaded)``. ``loaded`` is False when this Python cannot load libcuda, and
++    ``count`` is None whenever the count is unknown. The probe runs in a subprocess, so this
++    process never initialises CUDA: CUDA does not survive a fork, and the caller may fork later.
++    """
++    try:
++        probe = subprocess.run(
++            [sys.executable, "-c", _CUDA_PROBE], capture_output=True, text=True, timeout=60
++        )
++    except (OSError, subprocess.SubprocessError):
++        return None, True
++    if probe.returncode == 2:
++        return None, False
++    try:
++        return (int(probe.stdout.strip()) if probe.returncode == 0 else None), True
++    except ValueError:
++        return None, True
++
++
++def _nvidia_smi_device_count() -> Optional[int]:
++    """Count the GPUs ``nvidia-smi -L`` lists on this node; None without nvidia-smi.
++
++    Only lines starting with ``GPU`` count: in a job without GPUs, nvidia-smi prints "No devices
++    found." (exit 0 on some versions), and Dragon 0.14.1 counts that line as GPU 0.
++    """
++    nvidia_smi = shutil.which("nvidia-smi")
++    if nvidia_smi is None:
++        return None
++    try:
++        out = subprocess.run([nvidia_smi, "-L"], capture_output=True, text=True, timeout=60)
++    except (OSError, subprocess.SubprocessError):
++        return None
++    if out.returncode != 0:
++        return 0 if "No devices" in out.stdout + out.stderr else None
++    return sum(1 for line in out.stdout.splitlines() if line.startswith("GPU "))
++
++
+ def _run_placed_function(result_path: str, target: Callable, args: tuple, kwargs: dict) -> None:
+     """Run a placed function task in its own Dragon process.
+ 
+@@ -271,6 +353,29 @@ class DragonExecutionBackend(BaseBackend):
+         A task description may carry an integer ``priority`` (larger runs sooner). It is
+         passed to ``Batch.options(priority=...)`` when the installed Dragon accepts it, and
+         ignored otherwise.
++        observe_peaks: Report each task's peak memory as ``task["observed"] = {"host_mem": GiB,
++            "gpu_mem": GiB per GPU}`` when it is DONE or FAILED, for AsyncFlow's ``ResourcePolicy``
++            to learn from. Off by default.
++
++            - Executable tasks (process and job), by default: when the Dragon in use reports each
++              process's resource usage with its Batch result (``Task.rusage``), ``host_mem`` is
++              read from there (a job sums its ranks), with no extra process, and ``gpu_mem`` is
++              None. Function tasks with a ``process_template(s)`` then report too.
++            - Otherwise, or with ``peak_source="launcher"``, executable tasks run under a small
++              launcher (:mod:`rhapsody.backends.execution._peak`) that reaps the command with ``wait4``
++              (``ru_maxrss``: the largest single process of its tree) and, if ``pynvml`` is
++              installed, samples its GPU memory every 0.2 s. A job sums its ranks. ``gpu_mem`` is
++              None without NVML or if the task never showed up on a GPU. The launcher writes to
++              ``<work_dir>/rhapsody-peaks.<tag>/<uid>/``, which must be on a file system the
++              nodes share.
++            - Native function tasks share long-lived pool workers, so the OS has no per-task peak:
++              they report the worker's RSS growth during the call, marked ``"approximate": True``,
++              and no ``gpu_mem`` (Linux only).
++            - Function tasks with a ``process_template(s)`` are measured only from Dragon's rusage.
++
++        peak_source: Where ``observe_peaks`` takes executable tasks' peaks from: ``"auto"`` (the
++            default; Dragon's rusage if it reports it, otherwise the launcher), ``"dragon"`` (raise
++            ``ValueError`` if it does not), or ``"launcher"`` (also samples GPU memory).
+ 
+     Note on working directory:
+         DragonExecutionBackend does not support a backend-level working directory.
+@@ -311,13 +416,33 @@ class DragonExecutionBackend(BaseBackend):
+         name: Optional[str] = "dragon",
+         size_pool_to_affinity: bool = True,
+         compile_each_task: bool = False,
++        observe_peaks: bool = False,
++        peak_source: str = "auto",
+     ):
+         if not Batch:
+             raise RuntimeError(DRAGON_BATCH_INIT_ERROR)
++        if peak_source not in PEAK_SOURCES:
++            raise ValueError(f"peak_source must be one of {PEAK_SOURCES}, not {peak_source!r}")
++        dragon_rusage = _batch_reports_rusage()
++        if observe_peaks and peak_source == "dragon" and not dragon_rusage:
++            raise ValueError(
++                "peak_source='dragon' needs a Dragon whose Batch tasks report rusage; "
++                "use 'auto' or 'launcher' with this one"
++            )
+ 
+         super().__init__(name=name)
+ 
+         self.logger = _get_logger()
++        self._observe_peaks = observe_peaks
++        self._peaks_from_dragon = observe_peaks and peak_source != "launcher" and dragon_rusage
++        if observe_peaks:
++            source = "Dragon's Batch rusage" if self._peaks_from_dragon else "the peak launcher"
++            self.logger.info(f"observe_peaks: executable task peaks from {source}")
++        # Launcher output goes to <work_dir>/rhapsody-peaks.<tag>/<uid>/: the tag keeps a reused
++        # work dir's leftovers out of the sums; shutdown removes the roots with what cancelled
++        # tasks left there.
++        self._peak_tag = uuid.uuid4().hex[:8]
++        self._peak_roots: set[str] = set()
+         effective_kwargs = {"task_logs": True, **(batch_kwargs or {})}
+         if not effective_kwargs.get("task_logs", True):
+             self.logger.warning(
+@@ -351,6 +476,8 @@ class DragonExecutionBackend(BaseBackend):
+         self._loop: Optional[asyncio.AbstractEventLoop] = None
+         # Dragon host name -> GPU device ids, looked up on the first placed task.
+         self._node_gpus: Optional[dict[str, set[int]]] = None
++        # Whether the first placed GPU task has had its GPUs probed for reachability.
++        self._gpus_probed = False
+ 
+         self._shutdown_event = threading.Event()
+ 
+@@ -461,6 +588,8 @@ class DragonExecutionBackend(BaseBackend):
+                     is_native_function = (
+                         task_reg.get("is_native_function", False) if task_reg else False
+                     )
++                    if task_reg:
++                        result = self._collect_observed(task_reg, result, raised, batch_task)
+                     if not is_native_function:
+                         # Dragon returns exit codes as int/list[int] for process/job tasks.
+                         # Normalize non-zero to raised=True so Rhapsody delivers FAILED.
+@@ -495,6 +624,27 @@ class DragonExecutionBackend(BaseBackend):
+ 
+         self.logger.debug("Dragon batch monitor loop stopped")
+ 
++    def _collect_observed(self, task_reg: dict, result: Any, raised: bool, batch_task) -> Any:
++        """Store a finished task's peaks as ``task_reg["observed"]``; return its unwrapped result.
++
++        Runs on the monitor thread, so reading the launcher's files stays off the event loop.
++        """
++        peak_dir = task_reg.get("peak_dir")
++        if task_reg.get("dragon_rusage"):
++            try:
++                rusage = batch_task.rusage  # cached by get(); no extra round trip
++            except Exception:
++                rusage = None
++            task_reg["observed"] = _observed_from_rusage(rusage)
++        elif peak_dir is not None:
++            task_reg["observed"] = _read_peaks(peak_dir, task_reg["peak_ranks"])
++            if task_reg["observed"] is None:
++                self.logger.debug(f"No complete peaks for {task_reg['uid']} in {peak_dir}")
++        elif task_reg.get("measured") and not raised and isinstance(result, _peak.MeasuredResult):
++            task_reg["observed"] = result.observed
++            result = result.value
++        return result
++
+     def _deliver_batch(self, completions: list) -> None:
+         """Deliver a batch of completed tasks. Runs on the asyncio event loop (via
+         call_soon_threadsafe).
+@@ -510,6 +660,8 @@ class DragonExecutionBackend(BaseBackend):
+                 self._cancelled_tasks.discard(uid)
+                 continue
+             task_desc = task_info["description"]
++            if task_info.get("observed") is not None:
++                task_desc["observed"] = task_info["observed"]
+             if raised:
+                 task_desc["exception"] = result
+                 task_desc["stderr"] = stderr if stderr else (tb if tb else str(result))
+@@ -590,6 +742,38 @@ class DragonExecutionBackend(BaseBackend):
+                 f"placement GPUs {unknown} are not on Dragon node {policy.host_name!r}; "
+                 f"its GPUs: {sorted(gpus)}"
+             )
++        if policy.gpu_affinity and not self._gpus_probed:
++            self._gpus_probed = True
++            self._warn_unreachable_gpus()
++
++    def _warn_unreachable_gpus(self) -> None:
++        """Warn once when this node reaches fewer GPUs than Dragon lists for it.
++
++        Dragon counts a node's GPUs from ``nvidia-smi -L`` or ``lspci``, not from what the job may
++        use: in a Slurm job without ``--gres`` it still lists GPU 0, and a task pinned there runs
++        without a GPU. The count comes from libcuda, through this Python; when this Python cannot
++        load libcuda, it comes from ``nvidia-smi -L``. Only the node this process runs on is
++        probed, and only NVIDIA GPUs.
++        """
++        host = current_node().hostname
++        listed = sorted(self._node_gpus.get(host, ()))
++        if not listed:
++            return
++        reachable, loaded = _cuda_device_count()
++        source = "CUDA"
++        if not loaded:
++            self.logger.warning(
++                f"Dragon lists GPUs {listed} on {host}, but this Python ({sys.executable}) "
++                "cannot load libcuda.so.1 there: Python function tasks it runs may not reach "
++                "CUDA either."
++            )
++            reachable, source = _nvidia_smi_device_count(), "nvidia-smi"
++        if reachable is not None and reachable < len(listed):
++            self.logger.warning(
++                f"Dragon lists GPUs {listed} on {host}, but {source} reaches {reachable} of them: "
++                "GPU tasks placed there may run without their GPU. "
++                "Does the job request GPUs (e.g. Slurm --gres or --gpus)?"
++            )
+ 
+     async def build_task(self, task: dict):
+         """Translate AsyncFlow task to Dragon Batch task.
+@@ -673,6 +857,23 @@ class DragonExecutionBackend(BaseBackend):
+                 f"Placing task {uid} on {placement_policy.host_name}, "
+                 f"GPUs {placement_policy.gpu_affinity}"
+             )
++        # observe_peaks: an executable runs under the peak launcher, which writes one record per
++        # process (rank) to peak_dir; a native function is wrapped to measure its pool worker.
++        peak_dir = None
++        peak_ranks = 0
++        measured = self._observe_peaks and is_native_function
++        dragon_rusage = self._peaks_from_dragon and not is_native_function
++        if self._observe_peaks and not is_function and not dragon_rusage:
++            peak_root = os.path.join(self._work_dir, f"rhapsody-peaks.{self._peak_tag}")
++            self._peak_roots.add(peak_root)
++            peak_dir = os.path.join(peak_root, uid)
++            peak_ranks = (
++                sum(nranks for nranks, _ in process_templates_config)
++                if process_templates_config is not None
++                else 1
++            )
++            task_args = (PEAK_LAUNCHER, "--out-dir", peak_dir, "--", target, *task_args)
++            target = sys.executable
+ 
+         def _build_process_template_kwargs(template_cfg: dict[str, Any]) -> dict[str, Any]:
+             """Build ProcessTemplate kwargs from user config, adding the placement policy."""
+@@ -727,6 +928,12 @@ class DragonExecutionBackend(BaseBackend):
+                 )
+             )
+ 
++        elif measured:
++            # Priority 3, measured: returns _peak.MeasuredResult, unwrapped by _collect_observed
++            batch_task = task_opts.function(
++                _peak.measured_call, target, tuple(task_args), dict(task_kwargs)
++            )
++
+         elif is_function:
+             # Priority 4: Function native (batch.function — returns Python value, not exit code)
+             batch_task = task_opts.function(target, *task_args, **task_kwargs)
+@@ -744,6 +951,10 @@ class DragonExecutionBackend(BaseBackend):
+             "batch_task": batch_task,
+             "is_native_function": is_native_function,
+             "result_path": result_path,
++            "peak_dir": peak_dir,
++            "peak_ranks": peak_ranks,
++            "measured": measured,
++            "dragon_rusage": dragon_rusage,
+         }
+         self._monitored_batches[batch_task.uid] = (batch_task, uid)
+ 
+@@ -849,6 +1060,9 @@ class DragonExecutionBackend(BaseBackend):
+         if self._saved_client_grouping is not None:
+             _set_client_grouping(self._saved_client_grouping, self.logger)
+             self._saved_client_grouping = None
++        for peak_root in self._peak_roots:
++            shutil.rmtree(peak_root, ignore_errors=True)
++        self._peak_roots.clear()
+ 
+         self._task_registry.clear()
+         self._pending_tuids.clear()
+@@ -879,12 +1093,61 @@ class DragonExecutionBackend(BaseBackend):
+     async def create(
+         cls,
+         batch_kwargs: Optional[dict] = None,
++        observe_peaks: bool = False,
++        peak_source: str = "auto",
+     ):
+         """Create and initialize a DragonExecutionBackend."""
+-        backend = cls(batch_kwargs=batch_kwargs)
++        backend = cls(
++            batch_kwargs=batch_kwargs, observe_peaks=observe_peaks, peak_source=peak_source
++        )
+         return await backend
+ 
+ 
++def _observed_from_rusage(rusage) -> Optional[dict]:
++    """``task["observed"]`` from a Batch task's ``rusage``: a dict, or a job's list of them.
++
++    A job's processes add up (an upper bound: their peaks need not coincide). None unless every
++    process reported. Dragon reports no GPU memory.
++    """
++    entries = rusage if isinstance(rusage, list) else [rusage]
++    if not entries or any(not isinstance(e, dict) or e.get("max_rss") is None for e in entries):
++        return None
++    return {"host_mem": sum(e["max_rss"] for e in entries) / _peak.GIB, "gpu_mem": None}
++
++
++def _read_peaks(peak_dir: str, ranks: int) -> Optional[dict]:
++    """Combine the peak launcher's records in ``peak_dir`` into ``task["observed"]``; remove it.
++
++    A job's ranks add up, on the host (an upper bound: their peaks need not coincide) and on each
++    GPU they share; ``gpu_mem`` is the busiest GPU's. None unless all ``ranks`` reported, since a
++    partial sum would understate the demand.
++    """
++    records = []
++    try:
++        names = os.listdir(peak_dir)
++    except OSError:
++        return None
++    for name in names:
++        if name.startswith(".") or not name.endswith(".json"):
++            continue
++        try:
++            with open(os.path.join(peak_dir, name)) as f:
++                records.append(json.load(f))
++        except (OSError, ValueError):
++            continue
++    shutil.rmtree(peak_dir, ignore_errors=True)
++    if not records or len(records) < ranks:
++        return None
++    gpu: dict[str, float] = {}
++    for rec in records:
++        for device, gib in (rec.get("gpu_mem_devices") or {}).items():
++            gpu[device] = gpu.get(device, 0.0) + gib
++    return {
++        "host_mem": sum(rec["host_mem"] for rec in records),
++        "gpu_mem": max(gpu.values()) if gpu else None,
++    }
++
++
+ def __getattr__(name: str):
+     import warnings
+ 
+diff --git a/tests/unit/test_backend_execution_dragon_peaks.py b/tests/unit/test_backend_execution_dragon_peaks.py
+new file mode 100644
+index 0000000..3f2872a
+--- /dev/null
++++ b/tests/unit/test_backend_execution_dragon_peaks.py
+@@ -0,0 +1,467 @@
++"""DragonExecutionBackend ``observe_peaks``, tested without a Dragon install.
++
++With ``observe_peaks=True``, executable tasks run under the peak launcher, whose per-process records
++the monitor thread combines into ``task["observed"]``, unless the Dragon in use reports each
++process's rusage with its Batch result (``Task.rusage``), which is then read instead. Native function
++tasks are wrapped in ``_peak.measured_call``. These tests swap Batch and ProcessTemplate for fakes.
++One fake Batch runs each process template for real (reaping it with ``wait4`` when it plays a Dragon
++with rusage), so the launcher, the monitor thread and the delivery to the callback are exercised end
++to end.
++"""
++
++import asyncio
++import json
++import os
++import queue
++import subprocess
++import sys
++from unittest.mock import patch
++
++import pytest
++
++from rhapsody.backends.execution import _peak
++from rhapsody.backends.execution import dragon as dragon_module
++from rhapsody.backends.execution.dragon import PEAK_LAUNCHER
++from rhapsody.backends.execution.dragon import DragonExecutionBackend
++from rhapsody.backends.execution.dragon import _observed_from_rusage
++from rhapsody.backends.execution.dragon import _read_peaks
++
++MIB = 1 << 20
++# Linux >= 6.2 keeps RSS in per-CPU counters, so a peak can read a few MiB under the truth.
++SLACK = 16 * MIB
++
++
++class FakeProcessTemplate:
++    """Stands in for dragon.native.process.ProcessTemplate; keeps what it was given."""
++
++    def __init__(self, target, args=None, kwargs=None, **extra):
++        self.target = target
++        self.args = args
++        self.kwargs = kwargs
++        self.extra = extra
++
++
++class FakeBatchTask:
++    def __init__(self, tuid):
++        self.uid = tuid
++        self.result = self.error = None
++        self.traceback = None
++        self.stdout_path = self.stderr_path = None
++        self.rusage = None
++
++    def get(self, block=True):
++        if self.error is not None:
++            raise self.error
++        return self.result
++
++    def get_stdout(self, block=False):
++        return ""
++
++    def get_stderr(self, block=False):
++        return ""
++
++
++class FakeOptionsProxy:
++    def __init__(self, batch):
++        self._batch = batch
++
++    def function(self, target, *args, **kwargs):
++        return self._batch.submit("function", target, args, kwargs)
++
++    def process(self, template):
++        return self._batch.submit("process", template)
++
++    def job(self, templates):
++        return self._batch.submit("job", templates)
++
++
++class FakeBatch:
++    """Records submissions; with ``run=True`` runs them and reports them through poll()."""
++
++    num_workers = 1
++    num_managers = 1
++
++    def __init__(self, run=False, rusage=False):
++        self.run = run
++        self.rusage = rusage
++        self.calls = []
++        self.done = queue.Queue()
++
++    def options(self, **kwargs):
++        return FakeOptionsProxy(self)
++
++    def submit(self, kind, *payload):
++        self.calls.append((kind, payload))
++        task = FakeBatchTask(f"tuid-{len(self.calls)}")
++        if self.run:
++            try:
++                task.result, task.rusage = self._execute(kind, payload, self.rusage)
++            except Exception as exc:
++                task.error = exc
++            self.done.put(task.uid)
++        return task
++
++    @staticmethod
++    def _execute(kind, payload, with_rusage=False):
++        """Run a submission; return (result, rusage) as a Dragon with Task.rusage would."""
++        if kind == "function":
++            target, args, kwargs = payload
++            return target(*args, **kwargs), None
++        templates = [(1, payload[0])] if kind == "process" else payload[0]
++        codes, rusages = [], []
++        for nranks, t in templates:
++            for _ in range(nranks):
++                argv = [str(t.target), *(str(a) for a in t.args)]
++                child = subprocess.Popen(argv)
++                _, status, ru = os.wait4(child.pid, 0)
++                child.returncode = os.waitstatus_to_exitcode(status)
++                codes.append(child.returncode)
++                rusages.append(
++                    {"max_rss": ru.ru_maxrss * _peak.MAXRSS_UNIT, "utime": 0, "stime": 0}
++                )
++        if kind == "process":
++            return codes[0], (rusages[0] if with_rusage else None)
++        return codes, (rusages if with_rusage else None)
++
++    def poll(self, timeout=None):
++        try:
++            return self.done.get(timeout=timeout)
++        except queue.Empty:
++            return None
++
++    def join(self, timeout=None):
++        pass
++
++    def destroy(self, timeout=None):
++        pass
++
++    def log_dir(self):
++        raise RuntimeError("task_logs disabled")
++
++
++class FakeTaskCancelledError(Exception):
++    """Stands in for dragon.workflows.batch.TaskCancelledError."""
++
++
++def _make_backend(batch, tmp_path, observe_peaks=True, dragon_rusage=False, peak_source="auto"):
++    with (
++        patch.object(dragon_module, "Batch", return_value=batch),
++        patch.object(dragon_module, "ProcessTemplate", FakeProcessTemplate),
++        patch.object(dragon_module, "_batch_reports_rusage", return_value=dragon_rusage),
++    ):
++        backend = DragonExecutionBackend(observe_peaks=observe_peaks, peak_source=peak_source)
++    backend._work_dir = str(tmp_path)
++    return backend
++
++
++@pytest.fixture
++def backend(tmp_path):
++    """Backend on a recording FakeBatch, ProcessTemplate faked while the test runs."""
++    batch = FakeBatch()
++    be = _make_backend(batch, tmp_path)
++    with patch.object(dragon_module, "ProcessTemplate", FakeProcessTemplate):
++        yield be
++
++
++def _exe(uid="t1", **extra):
++    return {"uid": uid, "executable": "/bin/echo", "arguments": ["hi", 3], **extra}
++
++
++def _peak_dir(backend, uid):
++    return os.path.join(backend._work_dir, f"rhapsody-peaks.{backend._peak_tag}", uid)
++
++
++def _launcher_args(backend, uid):
++    return (PEAK_LAUNCHER, "--out-dir", _peak_dir(backend, uid), "--")
++
++
++# ============================================================================
++# build_task: what goes to Dragon
++# ============================================================================
++
++
++@pytest.mark.asyncio
++async def test_executable_runs_under_launcher(backend):
++    await backend.build_task(_exe())
++    (kind, (template,)) = backend.batch.calls[0]
++    assert kind == "process"
++    assert template.target == sys.executable
++    assert template.args == (*_launcher_args(backend, "t1"), "/bin/echo", "hi", 3)
++    reg = backend._task_registry["t1"]
++    assert reg["peak_dir"] == _peak_dir(backend, "t1")
++    assert reg["peak_ranks"] == 1
++
++
++@pytest.mark.asyncio
++async def test_executable_with_process_template_keeps_user_settings(backend):
++    task = _exe(task_backend_specific_kwargs={"process_template": {"cwd": "/scratch"}})
++    await backend.build_task(task)
++    (kind, (template,)) = backend.batch.calls[0]
++    assert kind == "process"
++    assert template.target == sys.executable
++    assert template.args[-3:] == ("/bin/echo", "hi", 3)
++    assert template.extra == {"cwd": "/scratch"}
++
++
++@pytest.mark.asyncio
++async def test_job_ranks_all_run_under_launcher(backend):
++    task = _exe(task_backend_specific_kwargs={"process_templates": [(2, {}), (3, {"cwd": "/x"})]})
++    await backend.build_task(task)
++    (kind, (templates,)) = backend.batch.calls[0]
++    assert kind == "job"
++    assert [n for n, _ in templates] == [2, 3]
++    for _, t in templates:
++        assert t.target == sys.executable
++        assert t.args[: len(_launcher_args(backend, "t1"))] == _launcher_args(backend, "t1")
++    assert backend._task_registry["t1"]["peak_ranks"] == 5
++
++
++@pytest.mark.asyncio
++async def test_native_function_is_wrapped_in_measured_call(backend):
++    def f(a, b=0):
++        return a + b
++
++    await backend.build_task({"uid": "f1", "function": f, "args": [1], "kwargs": {"b": 2}})
++    (kind, (target, args, kwargs)) = backend.batch.calls[0]
++    assert kind == "function"
++    assert target is _peak.measured_call
++    assert args == (f, (1,), {"b": 2})
++    assert kwargs == {}
++    assert backend._task_registry["f1"]["measured"] is True
++    assert backend._task_registry["f1"]["peak_dir"] is None
++
++
++@pytest.mark.asyncio
++async def test_function_in_process_template_is_not_measured(backend):
++    def f():
++        return 0
++
++    task = {"uid": "f1", "function": f, "task_backend_specific_kwargs": {"process_template": {}}}
++    await backend.build_task(task)
++    (kind, (template,)) = backend.batch.calls[0]
++    assert template.target is f
++    reg = backend._task_registry["f1"]
++    assert reg["peak_dir"] is None and reg["measured"] is False
++
++
++@pytest.mark.asyncio
++async def test_observe_peaks_off_leaves_tasks_alone(tmp_path):
++    def f():
++        return 0
++
++    be = _make_backend(FakeBatch(), tmp_path, observe_peaks=False)
++    with patch.object(dragon_module, "ProcessTemplate", FakeProcessTemplate):
++        await be.build_task(_exe())
++        await be.build_task({"uid": "f1", "function": f})
++    (_, (template,)), (_, (target, args, _)) = be.batch.calls
++    assert template.target == "/bin/echo" and template.args == ("hi", 3)
++    assert target is f and args == ()
++    assert be._peak_roots == set()
++
++
++# ============================================================================
++# _read_peaks: combining launcher records
++# ============================================================================
++
++
++def _write(peak_dir, name, **rec):
++    os.makedirs(peak_dir, exist_ok=True)
++    with open(os.path.join(peak_dir, name), "w") as f:
++        json.dump(rec, f)
++
++
++def test_read_peaks_single_process(tmp_path):
++    d = str(tmp_path / "t1")
++    _write(d, "h.1.json", host_mem=1.5, gpu_mem=None, gpu_mem_devices={})
++    assert _read_peaks(d, 1) == {"host_mem": 1.5, "gpu_mem": None}
++    assert not os.path.exists(d)
++
++
++def test_read_peaks_job_sums_ranks_and_shared_gpus(tmp_path):
++    d = str(tmp_path / "t1")
++    _write(d, "a.1.json", host_mem=1.0, gpu_mem_devices={"GPU-a": 2.0})
++    _write(d, "a.2.json", host_mem=2.0, gpu_mem_devices={"GPU-a": 3.0, "GPU-b": 1.0})
++    _write(d, "b.1.json", host_mem=0.5, gpu_mem_devices={"GPU-c": 4.0})
++    assert _read_peaks(d, 3) == {"host_mem": 3.5, "gpu_mem": 5.0}
++
++
++def test_read_peaks_incomplete_or_missing_is_none(tmp_path):
++    d = str(tmp_path / "t1")
++    assert _read_peaks(d, 1) is None
++    _write(d, "a.1.json", host_mem=1.0)
++    assert _read_peaks(d, 2) is None
++    assert not os.path.exists(d)
++
++
++def test_read_peaks_skips_temp_and_corrupt_files(tmp_path):
++    d = str(tmp_path / "t1")
++    _write(d, "a.1.json", host_mem=1.0)
++    _write(d, ".a.2.json.tmp", host_mem=9.0)
++    with open(os.path.join(d, "a.3.json"), "w") as f:
++        f.write("{not json")
++    assert _read_peaks(d, 1) == {"host_mem": 1.0, "gpu_mem": None}
++
++
++# ============================================================================
++# Monitor thread to callback, with the real launcher
++# ============================================================================
++
++
++async def _run(backend, tasks, timeout=60.0):
++    """Submit ``tasks``; return {uid: (state, task)} once each reached a final state."""
++    loop = asyncio.get_running_loop()
++    finals = {}
++    all_done = asyncio.Event()
++
++    def callback(task, state):
++        assert loop is asyncio.get_running_loop()
++        if state in ("DONE", "FAILED", "CANCELED"):
++            finals[task["uid"]] = (state, task)
++            if len(finals) == len(tasks):
++                all_done.set()
++
++    backend._callback_func = callback
++    # Looked up by the monitor thread when a task raises, so patched while it runs.
++    with patch.object(dragon_module, "TaskCancelledError", FakeTaskCancelledError):
++        try:
++            await backend.submit_tasks(tasks)
++            await asyncio.wait_for(all_done.wait(), timeout)
++        finally:
++            await backend.shutdown()
++    return finals
++
++
++def _alloc_task(uid, mib, code=0, **extra):
++    script = f"import sys; b = b'x' * ({mib} << 20); sys.exit({code})"
++    return {"uid": uid, "executable": sys.executable, "arguments": ["-c", script], **extra}
++
++
++@pytest.mark.asyncio
++async def test_observed_reaches_callback_for_done_and_failed(tmp_path):
++    be = _make_backend(FakeBatch(run=True), tmp_path)
++    with patch.object(dragon_module, "ProcessTemplate", FakeProcessTemplate):
++        finals = await _run(be, [_alloc_task("ok", 200), _alloc_task("bad", 100, code=4)])
++
++    state, task = finals["ok"]
++    assert state == "DONE" and task["return_value"] == 0
++    assert 200 * MIB - SLACK <= task["observed"]["host_mem"] * (1 << 30) <= 264 * MIB
++    state, task = finals["bad"]
++    assert state == "FAILED" and isinstance(task["exception"], SystemExit)
++    assert 100 * MIB - SLACK <= task["observed"]["host_mem"] * (1 << 30) <= 164 * MIB
++    # Records are read and removed; shutdown removes the root.
++    assert os.listdir(tmp_path) == []
++
++
++@pytest.mark.asyncio
++async def test_job_observed_is_the_sum_of_its_ranks(tmp_path):
++    be = _make_backend(FakeBatch(run=True), tmp_path)
++    job = _alloc_task("job", 100, task_backend_specific_kwargs={"process_templates": [(3, {})]})
++    with patch.object(dragon_module, "ProcessTemplate", FakeProcessTemplate):
++        finals = await _run(be, [job])
++    state, task = finals["job"]
++    assert state == "DONE" and task["return_value"] == [0, 0, 0]
++    assert 300 * MIB - SLACK <= task["observed"]["host_mem"] * (1 << 30) <= 492 * MIB
++
++
++@pytest.mark.asyncio
++async def test_measured_function_value_is_unwrapped(tmp_path):
++    def hold(mib):
++        return len(b"x" * (mib * MIB))
++
++    def boom():
++        raise RuntimeError("boom")
++
++    be = _make_backend(FakeBatch(run=True), tmp_path)
++    tasks = [{"uid": "ok", "function": hold, "args": [256]}, {"uid": "bad", "function": boom}]
++    finals = await _run(be, tasks)
++
++    state, task = finals["ok"]
++    assert state == "DONE" and task["return_value"] == 256 * MIB
++    if sys.platform.startswith("linux"):
++        assert task["observed"]["approximate"] is True
++        assert task["observed"]["host_mem"] * (1 << 30) >= 256 * MIB - SLACK
++    else:
++        assert "observed" not in task
++    state, task = finals["bad"]
++    assert state == "FAILED" and isinstance(task["exception"], RuntimeError)
++    assert "observed" not in task
++
++
++# ============================================================================
++# Peaks from Dragon's Batch rusage (a Dragon with Task.rusage), launcher fallback
++# ============================================================================
++
++
++def test_stock_dragon_has_no_batch_rusage():
++    # Without Dragon (or with stock dragonhpc 0.14.1) the launcher is the source.
++    if dragon_module.dragon is None:
++        assert dragon_module._batch_reports_rusage() is False
++
++
++@pytest.mark.asyncio
++async def test_auto_reads_dragon_rusage_instead_of_launching(tmp_path):
++    def f():
++        return 0
++
++    be = _make_backend(FakeBatch(), tmp_path, dragon_rusage=True)
++    tmpl = {"uid": "f2", "function": f, "task_backend_specific_kwargs": {"process_template": {}}}
++    with patch.object(dragon_module, "ProcessTemplate", FakeProcessTemplate):
++        await be.build_task(_exe())
++        await be.build_task({"uid": "f1", "function": f})
++        await be.build_task(tmpl)
++    (_, (template,)), (_, (target, _, _)), (_, (ftemplate,)) = be.batch.calls
++    assert template.target == "/bin/echo" and template.args == ("hi", 3)
++    assert be._task_registry["t1"]["dragon_rusage"] is True
++    assert be._task_registry["t1"]["peak_dir"] is None
++    # Native functions are still measured in their pool worker.
++    assert target is _peak.measured_call and be._task_registry["f1"]["dragon_rusage"] is False
++    # A function in its own process gets Dragon's rusage too.
++    assert ftemplate.target is f and be._task_registry["f2"]["dragon_rusage"] is True
++    assert be._peak_roots == set()
++
++
++@pytest.mark.asyncio
++async def test_peak_source_launcher_overrides_dragon_rusage(tmp_path):
++    be = _make_backend(FakeBatch(), tmp_path, dragon_rusage=True, peak_source="launcher")
++    with patch.object(dragon_module, "ProcessTemplate", FakeProcessTemplate):
++        await be.build_task(_exe())
++    (_, (template,)) = be.batch.calls[0]
++    assert template.target == sys.executable
++    assert be._task_registry["t1"]["dragon_rusage"] is False
++
++
++def test_peak_source_is_checked(tmp_path):
++    with pytest.raises(ValueError, match="needs a Dragon"):
++        _make_backend(FakeBatch(), tmp_path, dragon_rusage=False, peak_source="dragon")
++    with pytest.raises(ValueError, match="peak_source must be one of"):
++        _make_backend(FakeBatch(), tmp_path, peak_source="nvml")
++    # Without observe_peaks the source does not matter.
++    _make_backend(FakeBatch(), tmp_path, observe_peaks=False, peak_source="dragon")
++
++
++def test_observed_from_rusage():
++    one = {"max_rss": 1 << 30, "utime": 0.1, "stime": 0.0}
++    assert _observed_from_rusage(one) == {"host_mem": 1.0, "gpu_mem": None}
++    assert _observed_from_rusage([one, one, one]) == {"host_mem": 3.0, "gpu_mem": None}
++    assert _observed_from_rusage(None) is None
++    assert _observed_from_rusage([]) is None
++    assert _observed_from_rusage([one, None]) is None
++    assert _observed_from_rusage({"max_rss": None}) is None
++
++
++@pytest.mark.asyncio
++async def test_dragon_rusage_reaches_callback(tmp_path):
++    be = _make_backend(FakeBatch(run=True, rusage=True), tmp_path, dragon_rusage=True)
++    job = _alloc_task("job", 200, task_backend_specific_kwargs={"process_templates": [(2, {})]})
++    with patch.object(dragon_module, "ProcessTemplate", FakeProcessTemplate):
++        finals = await _run(be, [_alloc_task("ok", 400), _alloc_task("bad", 300, code=5), job])
++
++    # wait4 here, as in Dragon: a peak includes what the child inherited from its parent at fork.
++    state, task = finals["ok"]
++    assert state == "DONE" and task["observed"]["gpu_mem"] is None
++    assert task["observed"]["host_mem"] * (1 << 30) >= 400 * MIB - SLACK
++    state, task = finals["bad"]
++    assert state == "FAILED" and task["observed"]["host_mem"] * (1 << 30) >= 300 * MIB - SLACK
++    state, task = finals["job"]
++    assert state == "DONE" and task["observed"]["host_mem"] * (1 << 30) >= 400 * MIB - SLACK
++    assert os.listdir(tmp_path) == []
+diff --git a/tests/unit/test_backend_execution_dragon_placement.py b/tests/unit/test_backend_execution_dragon_placement.py
+index 8f0b025..a5eca16 100644
+--- a/tests/unit/test_backend_execution_dragon_placement.py
++++ b/tests/unit/test_backend_execution_dragon_placement.py
+@@ -93,6 +93,8 @@ def backend(tmp_path):
+         backend._work_dir = str(tmp_path)
+         # Dragon's node list, which build_task checks placements against.
+         backend._node_gpus = {"gpua042": {0, 1, 2, 3}, "cn001": set()}
++        # The GPU reachability probe has its own tests below.
++        backend._gpus_probed = True
+         yield backend
+ 
+ 
+@@ -306,6 +308,179 @@ async def test_dragon_nodes_are_looked_up_once(backend):
+     assert [kind for kind, _ in backend.batch.calls] == ["process", "process"]
+ 
+ 
++# ============================================================================
++# GPU reachability: Dragon lists GPUs a Slurm job without --gres cannot use
++# ============================================================================
++
++
++class FakeCurrentNode:
++    hostname = "gpua042"
++
++
++@pytest.fixture
++def probe(backend):
++    """Arm the one-time GPU probe.
++
++    Set ``probe.reachable`` to what CUDA reports, ``probe.loaded`` to whether this Python can load
++    libcuda, and ``probe.smi`` to what ``nvidia-smi -L`` counts.
++    """
++
++    class Probe:
++        reachable = None
++        loaded = True
++        smi = None
++        calls = 0
++        smi_calls = 0
++
++        @classmethod
++        def count(cls):
++            cls.calls += 1
++            return cls.reachable, cls.loaded
++
++        @classmethod
++        def smi_count(cls):
++            cls.smi_calls += 1
++            return cls.smi
++
++    backend._gpus_probed = False
++    with (
++        patch.object(dragon_module, "current_node", FakeCurrentNode),
++        patch.object(dragon_module, "_cuda_device_count", Probe.count),
++        patch.object(dragon_module, "_nvidia_smi_device_count", Probe.smi_count),
++    ):
++        yield Probe
++
++
++async def test_unreachable_gpus_warn_once(backend, probe, caplog):
++    probe.reachable = 0
++    with caplog.at_level(logging.WARNING, logger=dragon_module.__name__):
++        await backend.build_task(_task(uid="t.1", placement=PLACEMENT))
++        await backend.build_task(_task(uid="t.2", placement=PLACEMENT))
++
++    assert probe.calls == 1
++    assert probe.smi_calls == 0
++    assert caplog.text.count("CUDA reaches 0 of them") == 1
++    # A warning, not an error: both tasks are still submitted with their placement.
++    assert [kind for kind, _ in backend.batch.calls] == ["process", "process"]
++
++
++async def test_reachable_gpus_do_not_warn(backend, probe, caplog):
++    probe.reachable = 4
++    with caplog.at_level(logging.WARNING, logger=dragon_module.__name__):
++        await backend.build_task(_task(placement=PLACEMENT))
++
++    assert probe.calls == 1
++    assert "reaches" not in caplog.text
++
++
++async def test_unknown_reachability_does_not_warn(backend, probe, caplog):
++    probe.reachable = None  # a CUDA error other than "no device"
++    with caplog.at_level(logging.WARNING, logger=dragon_module.__name__):
++        await backend.build_task(_task(placement=PLACEMENT))
++
++    assert probe.smi_calls == 0
++    assert caplog.text == ""
++
++
++async def test_without_libcuda_nvidia_smi_counts(backend, probe, caplog):
++    # rust job 24840: EESSI's Python cannot load libcuda on julia, and the job has no --gres.
++    probe.loaded = False
++    probe.smi = 0
++    with caplog.at_level(logging.WARNING, logger=dragon_module.__name__):
++        await backend.build_task(_task(placement=PLACEMENT))
++
++    assert probe.smi_calls == 1
++    assert "cannot load libcuda.so.1" in caplog.text
++    assert "nvidia-smi reaches 0 of them" in caplog.text
++
++
++async def test_without_libcuda_or_nvidia_smi_only_names_libcuda(backend, probe, caplog):
++    probe.loaded = False
++    probe.smi = None
++    with caplog.at_level(logging.WARNING, logger=dragon_module.__name__):
++        await backend.build_task(_task(placement=PLACEMENT))
++
++    assert "cannot load libcuda.so.1" in caplog.text
++    assert "reaches" not in caplog.text
++
++
++async def test_no_probe_without_gpus_in_the_placement(backend, probe):
++    await backend.build_task(_task(placement={"node": 0, "host": "cn001", "gpus": []}))
++
++    assert probe.calls == 0
++    assert backend._gpus_probed is False
++
++
++async def test_no_probe_when_this_node_has_no_listed_gpus(backend, probe):
++    # This process runs on cn001, which has no GPUs to compare against.
++    with patch.object(FakeCurrentNode, "hostname", "cn001"):
++        await backend.build_task(_task(placement=PLACEMENT))
++
++    assert probe.calls == 0
++
++
++class FakeCompleted:
++    def __init__(self, returncode, stdout="", stderr=""):
++        self.returncode = returncode
++        self.stdout = stdout
++        self.stderr = stderr
++
++
++@pytest.mark.parametrize(
++    ("outcome", "expected"),
++    [
++        (FakeCompleted(0, "2\n"), (2, True)),
++        (FakeCompleted(0, "0\n"), (0, True)),
++        (FakeCompleted(2), (None, False)),  # no libcuda
++        (FakeCompleted(3), (None, True)),  # CUDA error other than "no device"
++        (FakeCompleted(0, "garbage"), (None, True)),
++    ],
++)
++def test_cuda_device_count_parses_the_probe(outcome, expected):
++    with patch.object(dragon_module.subprocess, "run", return_value=outcome):
++        assert dragon_module._cuda_device_count() == expected
++
++
++def test_cuda_device_count_survives_a_hung_probe():
++    hung = dragon_module.subprocess.TimeoutExpired(cmd="probe", timeout=60)
++    with patch.object(dragon_module.subprocess, "run", side_effect=hung):
++        assert dragon_module._cuda_device_count() == (None, True)
++
++
++def test_cuda_device_count_runs_for_real():
++    count, loaded = dragon_module._cuda_device_count()
++    assert count is None or count >= 0
++    assert loaded or count is None
++
++
++SMI_TWO_GPUS = (
++    "GPU 0: NVIDIA A100-SXM4-40GB (UUID: GPU-ccdb6af5-102b-3fb4-4e06-8b7aaeba0578)\n"
++    "GPU 1: NVIDIA A100-SXM4-40GB (UUID: GPU-43539da6-e86a-d93e-8db2-f8814ef47c41)\n"
++)
++
++
++@pytest.mark.parametrize(
++    ("outcome", "expected"),
++    [
++        (FakeCompleted(0, SMI_TWO_GPUS), 2),
++        (FakeCompleted(0, "No devices found.\n"), 0),  # rust, job without --gres
++        (FakeCompleted(6, "No devices were found\n"), 0),  # versions that exit non-zero
++        (FakeCompleted(9, stderr="NVIDIA-SMI has failed\n"), None),
++    ],
++)
++def test_nvidia_smi_device_count_counts_gpu_lines(outcome, expected):
++    with (
++        patch.object(dragon_module.shutil, "which", return_value="/usr/bin/nvidia-smi"),
++        patch.object(dragon_module.subprocess, "run", return_value=outcome),
++    ):
++        assert dragon_module._nvidia_smi_device_count() == expected
++
++
++def test_nvidia_smi_device_count_without_nvidia_smi():
++    with patch.object(dragon_module.shutil, "which", return_value=None):
++        assert dragon_module._nvidia_smi_device_count() is None
++
++
+ # ============================================================================
+ # Placed function outcome: written by the process, read by the monitor
+ # ============================================================================
+diff --git a/tests/unit/test_backend_execution_peak.py b/tests/unit/test_backend_execution_peak.py
+new file mode 100644
+index 0000000..d6f7594
+--- /dev/null
++++ b/tests/unit/test_backend_execution_peak.py
+@@ -0,0 +1,324 @@
++"""The peak launcher (``rhapsody.backends.execution._peak``), tested without Dragon or a GPU.
++
++The launcher runs a command as its child, reaps it with ``wait4`` for its peak RSS, samples its
++GPU memory through NVML when ``pynvml`` is present, and exits as the command did. These tests run
++it as the backend does (``python <path to _peak.py> --out-dir DIR -- CMD ...``) and use a fake
++NVML for the GPU sampler.
++"""
++
++# FakeNvml mirrors pynvml's camelCase function names.
++# ruff: noqa: N802
++
++import json
++import os
++import signal
++import subprocess
++import sys
++import time
++from collections import namedtuple
++from types import SimpleNamespace
++
++import pytest
++
++from rhapsody.backends.execution import _peak
++
++LAUNCHER = os.path.abspath(_peak.__file__)
++MIB = 1 << 20
++# Linux >= 6.2 keeps RSS in per-CPU counters, so a peak can read a few MiB under the truth.
++SLACK = 16 * MIB
++LINUX = sys.platform.startswith("linux")
++
++
++def _launch(out_dir, *cmd, **kwargs):
++    return subprocess.run(
++        [sys.executable, LAUNCHER, "--out-dir", str(out_dir), "--", *cmd],
++        capture_output=True,
++        text=True,
++        timeout=60,
++        **kwargs,
++    )
++
++
++def _record(out_dir):
++    names = [n for n in os.listdir(out_dir) if n.endswith(".json")]
++    assert len(names) == 1, names
++    with open(os.path.join(out_dir, names[0])) as f:
++        return json.load(f)
++
++
++def _alloc(mib, code=0):
++    """A Python child that touches ``mib`` MiB, then exits with ``code``."""
++    return (sys.executable, "-c", f"import sys; b = b'x' * ({mib} << 20); sys.exit({code})")
++
++
++# ============================================================================
++# Host memory and exit status, through the real launcher
++# ============================================================================
++
++
++@pytest.mark.parametrize("mib", [64, 512])
++def test_peak_rss_of_child_that_allocates(tmp_path, mib):
++    proc = _launch(tmp_path, *_alloc(mib))
++    assert proc.returncode == 0, proc.stderr
++    rec = _record(tmp_path)
++    # The child's peak is the buffer plus a Python interpreter (well under 64 MiB).
++    assert mib * MIB - SLACK <= rec["host_mem"] * (1 << 30) <= (mib + 64) * MIB
++    assert rec["exit_code"] == 0
++    assert rec["gpu_mem"] is None or rec["nvml"]
++
++
++def test_peak_rss_tracks_allocation_size(tmp_path):
++    small, large = tmp_path / "small", tmp_path / "large"
++    _launch(small, *_alloc(100))
++    _launch(large, *_alloc(400))
++    grown = (_record(large)["host_mem"] - _record(small)["host_mem"]) * (1 << 30)
++    assert abs(grown - 300 * MIB) < 20 * MIB
++
++
++def test_exit_code_and_stdio_pass_through(tmp_path):
++    cmd = "import sys; print('to stdout'); print('to stderr', file=sys.stderr); sys.exit(7)"
++    proc = _launch(tmp_path, sys.executable, "-c", cmd)
++    assert proc.returncode == 7
++    assert proc.stdout == "to stdout\n"
++    assert proc.stderr == "to stderr\n"
++    assert _record(tmp_path)["exit_code"] == 7
++
++
++def test_death_by_signal_is_reraised(tmp_path):
++    cmd = "import os, signal; os.kill(os.getpid(), signal.SIGTERM)"
++    proc = _launch(tmp_path, sys.executable, "-c", cmd)
++    assert proc.returncode == -signal.SIGTERM
++    assert _record(tmp_path)["exit_code"] == -signal.SIGTERM
++
++
++def test_missing_command_exits_127(tmp_path):
++    proc = _launch(tmp_path, "rhapsody-no-such-command")
++    assert proc.returncode == 127
++    assert "rhapsody-no-such-command" in proc.stderr
++    assert _record(tmp_path)["exit_code"] == 127
++
++
++def test_command_arguments_and_path_lookup(tmp_path):
++    proc = _launch(tmp_path, "sh", "-c", 'echo "$0 $1"', "a b", "c")
++    assert proc.returncode == 0
++    assert proc.stdout == "a b c\n"
++
++
++def _start_sleeper(out_dir):
++    """Launch a child that prints its pid, then sleeps; return (launcher, child pid)."""
++    cmd = "import os, time; print(os.getpid(), flush=True); time.sleep(60)"
++    launcher = subprocess.Popen(
++        [sys.executable, LAUNCHER, "--out-dir", str(out_dir), "--", sys.executable, "-c", cmd],
++        stdout=subprocess.PIPE,
++        text=True,
++    )
++    return launcher, int(launcher.stdout.readline())
++
++
++def _gone(pid, timeout=10.0):
++    deadline = time.monotonic() + timeout
++    while time.monotonic() < deadline:
++        try:
++            os.kill(pid, 0)
++        except ProcessLookupError:
++            return True
++        time.sleep(0.05)
++    return False
++
++
++def test_sigterm_is_forwarded_to_the_command(tmp_path):
++    launcher, child = _start_sleeper(tmp_path)
++    launcher.send_signal(signal.SIGTERM)
++    assert launcher.wait(timeout=10) == -signal.SIGTERM
++    assert _gone(child)
++    assert _record(tmp_path)["exit_code"] == -signal.SIGTERM
++
++
++@pytest.mark.skipif(not LINUX, reason="PR_SET_PDEATHSIG is Linux only")
++def test_command_dies_with_a_killed_launcher(tmp_path):
++    launcher, child = _start_sleeper(tmp_path)
++    launcher.kill()
++    assert launcher.wait(timeout=10) == -signal.SIGKILL
++    assert _gone(child)
++    assert not os.path.exists(tmp_path) or not os.listdir(tmp_path)
++
++
++def test_usage_errors_exit_2(tmp_path):
++    no_dash = subprocess.run(
++        [sys.executable, LAUNCHER, "--out-dir", str(tmp_path), "true"], capture_output=True
++    )
++    no_cmd = subprocess.run(
++        [sys.executable, LAUNCHER, "--out-dir", str(tmp_path), "--"], capture_output=True
++    )
++    assert no_dash.returncode == no_cmd.returncode == 2
++
++
++def test_unwritable_out_dir_keeps_exit_code(tmp_path):
++    blocker = tmp_path / "file"
++    blocker.write_text("")
++    proc = _launch(blocker / "sub", *_alloc(1, code=3))
++    assert proc.returncode == 3
++    assert "cannot write peaks" in proc.stderr
++
++
++# ============================================================================
++# GPU sampling, against a fake NVML
++# ============================================================================
++
++
++Proc = namedtuple("Proc", ["pid", "usedGpuMemory"])
++
++
++class FakeNvml:
++    """Two GPUs; ``procs[i]`` is what device i reports for the next sample."""
++
++    class NVMLError(Exception):
++        pass
++
++    def __init__(self, ndev=2):
++        self.procs = [[] for _ in range(ndev)]
++        self.inits = self.shutdowns = 0
++
++    def nvmlInit(self):
++        self.inits += 1
++
++    def nvmlShutdown(self):
++        self.shutdowns += 1
++
++    def nvmlDeviceGetCount(self):
++        return len(self.procs)
++
++    def nvmlDeviceGetHandleByIndex(self, i):
++        return i
++
++    def nvmlDeviceGetUUID(self, handle):
++        return f"GPU-{handle}".encode()  # older pynvml returns bytes
++
++    def nvmlDeviceGetComputeRunningProcesses(self, handle):
++        if self.procs[handle] is None:
++            raise self.NVMLError("not supported")
++        return self.procs[handle]
++
++
++def _sampler(nvml, tree=frozenset({10, 11})):
++    return _peak.GpuSampler(nvml, 10, 0.01, tree=lambda pid: set(tree))
++
++
++def test_gpu_peak_is_per_device_max_over_samples_of_the_tree_sum():
++    nvml = FakeNvml()
++    gpu = _sampler(nvml)
++    nvml.procs = [[Proc(10, 3 * MIB), Proc(11, 2 * MIB), Proc(99, 50 * MIB)], []]
++    gpu.sample()
++    nvml.procs = [[Proc(10, 1 * MIB)], [Proc(11, 4 * MIB)]]
++    gpu.sample()
++    assert gpu.peak == {"GPU-0": 5 * MIB, "GPU-1": 4 * MIB}
++    assert gpu.samples == 2
++
++
++def test_gpu_unknown_usage_and_device_errors_are_tolerated():
++    nvml = FakeNvml()
++    gpu = _sampler(nvml)
++    nvml.procs = [[Proc(10, None)], None]
++    gpu.sample()
++    assert gpu.peak == {"GPU-0": 0}
++
++
++def test_report_gpu_mem_is_none_unless_the_tree_was_seen_on_a_gpu():
++    rusage = SimpleNamespace(ru_maxrss=(1 << 30) // _peak.MAXRSS_UNIT)  # 1 GiB
++    nvml = FakeNvml()
++    unseen = _sampler(nvml)
++    nvml.procs = [[Proc(99, 8 * MIB)], []]
++    unseen.sample()
++    rec = _peak.report(rusage, unseen, 0)
++    assert rec["host_mem"] == pytest.approx(1.0)
++    assert rec["gpu_mem"] is None and rec["nvml"] is True
++
++    seen = _sampler(nvml)
++    nvml.procs = [[Proc(10, 512 * MIB)], [Proc(11, 1024 * MIB)]]
++    seen.sample()
++    rec = _peak.report(rusage, seen, 0)
++    assert rec["gpu_mem"] == pytest.approx(1.0)
++    assert rec["gpu_mem_devices"] == {"GPU-0": 0.5, "GPU-1": 1.0}
++
++    rec = _peak.report(rusage, None, 0)
++    assert rec["gpu_mem"] is None and rec["nvml"] is False
++
++
++def test_sampler_thread_samples_until_stopped():
++    nvml = FakeNvml()
++    nvml.procs = [[Proc(10, MIB)], []]
++    gpu = _sampler(nvml)
++    gpu.start()
++    time.sleep(0.1)
++    gpu.stop()
++    assert not gpu.is_alive()
++    assert gpu.samples >= 2
++    assert gpu.peak == {"GPU-0": MIB}
++
++
++def test_load_nvml_without_pynvml(monkeypatch):
++    monkeypatch.setitem(sys.modules, "pynvml", None)  # import pynvml raises ImportError
++    assert _peak.load_nvml() is None
++
++
++def test_load_nvml_without_gpus_or_driver(monkeypatch):
++    nvml = FakeNvml(ndev=0)
++    monkeypatch.setitem(sys.modules, "pynvml", nvml)
++    assert _peak.load_nvml() is None
++    assert nvml.shutdowns == 1
++
++    def no_driver():
++        raise FakeNvml.NVMLError("driver not loaded")
++
++    broken = FakeNvml()
++    broken.nvmlInit = no_driver
++    monkeypatch.setitem(sys.modules, "pynvml", broken)
++    assert _peak.load_nvml() is None
++
++
++def test_descendants_finds_grandchildren():
++    if not os.path.exists(f"/proc/{os.getpid()}/task/{os.getpid()}/children"):
++        assert _peak.descendants(os.getpid()) == {os.getpid()}
++        return
++    cmd = "import subprocess, sys, time; subprocess.Popen(['sleep', '30']); time.sleep(30)"
++    child = subprocess.Popen([sys.executable, "-c", cmd])
++    try:
++        deadline = time.monotonic() + 10
++        while len(_peak.descendants(child.pid)) < 2 and time.monotonic() < deadline:
++            time.sleep(0.05)
++        tree = _peak.descendants(os.getpid())
++        assert child.pid in tree and len(tree) >= 3
++    finally:
++        for pid in _peak.descendants(child.pid):
++            os.kill(pid, signal.SIGKILL)
++        child.wait()
++
++
++# ============================================================================
++# measured_call: function tasks in pooled workers
++# ============================================================================
++
++
++def _hold(mib):
++    buf = b"x" * (mib * MIB)
++    return len(buf)
++
++
++def test_measured_call_returns_value_and_growth():
++    result = _peak.measured_call(_hold, (256,), {})
++    assert isinstance(result, _peak.MeasuredResult)
++    assert result.value == 256 * MIB
++    if not LINUX:
++        assert result.observed is None
++        return
++    assert result.observed["approximate"] is True
++    assert result.observed["gpu_mem"] is None
++    assert 256 * MIB - SLACK <= result.observed["host_mem"] * (1 << 30) <= 300 * MIB
++
++
++def test_measured_call_propagates_exceptions():
++    def boom(x, y=0):
++        raise ValueError(x + y)
++
++    with pytest.raises(ValueError, match="3"):
++        _peak.measured_call(boom, (1,), {"y": 2})

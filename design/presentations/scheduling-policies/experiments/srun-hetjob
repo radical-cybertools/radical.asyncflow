@@ -1,0 +1,38 @@
+#!/bin/bash
+# srun for Dragon's Slurm launcher inside a heterogeneous job (third campaign).
+# Dragon starts its network-config helper and its backends with one srun step of
+# "--nodes=N --ntasks=N [--nodelist=...]". In a heterogeneous job a step without --het-group
+# runs in component 0 only, so that srun fails or sees one node. This wrapper drops those
+# three options and runs the step over every component with one task per node
+# (--het-group=0-<last> --nodes=1 --ntasks=1), which covers the same nodes when each
+# component is one node. It adds --overlap: in a heterogeneous job on rust a step without it
+# starts but never runs its task (job 24780). In a plain job it only adds --overlap, so that
+# Dragon's step shares the CPUs with run2n.sbatch's samplers. Any other srun call (one without
+# --nodes=) passes through unchanged.
+# SRUN_HETJOB_LOG (Bridges-2): write the note on each rewritten launch there, not to stderr. Dragon
+# prints every stderr line of its network-config helper as "Network Config Error Detected".
+note() { if [ -n "$SRUN_HETJOB_LOG" ]; then echo "$*" >> "$SRUN_HETJOB_LOG"; else echo "$*" >&2; fi; }
+REAL=$(PATH=$(echo "$PATH" | tr : '\n' | grep -vx "$(dirname "$0")" | paste -sd:) command -v srun)
+if ! printf '%s\n' "$@" | grep -q '^--nodes='; then  # not one of Dragon's launches
+  exec "$REAL" "$@"
+fi
+if [ -z "$SLURM_HET_SIZE" ] || [ "$SRUN_HETJOB_MODE" = overlap-only ]; then
+  # A plain job (or the smoke test's check of Dragon's own srun): only --overlap, and node names
+  # without their domain. Dragon passes the hosts' own names (on Bridges-2 r412.ib.bridges2.psc.edu),
+  # which Slurm rejects as a node list (job 49819809); rust's names have no domain.
+  args=()
+  for a in "$@"; do
+    case $a in
+      --nodelist=*) l=${a#--nodelist=}; args+=("--nodelist=$(echo "$l" | tr , '\n' | sed 's/\..*//' | paste -sd, -)") ;;
+      *) args+=("$a") ;;
+    esac
+  done
+  note "srun-hetjob: $REAL --overlap ${args[*]}"
+  exec "$REAL" --overlap "${args[@]}"
+fi
+args=()
+for a in "$@"; do
+  case $a in --nodes=*|--ntasks=*|--nodelist=*) ;; *) args+=("$a") ;; esac
+done
+note "srun-hetjob: $REAL --overlap --het-group=0-$((SLURM_HET_SIZE - 1)) --nodes=1 --ntasks=1 ${args[*]}"
+exec "$REAL" --overlap --het-group=0-$((SLURM_HET_SIZE - 1)) --nodes=1 --ntasks=1 "${args[@]}"

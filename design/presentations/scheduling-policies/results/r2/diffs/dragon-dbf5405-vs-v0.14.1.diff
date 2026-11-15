@@ -1,0 +1,301 @@
+diff --git a/src/dragon/workflows/batch/batch.py b/src/dragon/workflows/batch/batch.py
+index 6fe416a..95a60ca 100644
+--- a/src/dragon/workflows/batch/batch.py
++++ b/src/dragon/workflows/batch/batch.py
+@@ -702,6 +702,9 @@ class TaskCore:
+         # partitioning and for ready-task launch order on subnode managers.
+         self.weight = 0
+         self.heft_topo_order: int | float = math.inf
++        # Client-set launch priority: among ready tasks on a subnode manager, a larger
++        # priority launches sooner. Set at submission (Batch.options(priority=...)).
++        self.priority = 0
+         self.is_cancelled = TaskCancellationReason.NONE
+         self.cancel_source_tuid: Optional[str] = None
+         self.cancel_source_manager_idx: Optional[int] = None
+@@ -1150,6 +1153,19 @@ class Task:
+     def weight(self, value) -> None:
+         self.core.weight = value
+ 
++    @property
++    def priority(self) -> int:
++        """
++        Provides the client-set launch priority for this task (larger runs sooner).
++        """
++        return self.core.priority
++
++    @priority.setter
++    def priority(self, value: int) -> None:
++        # Only effective before the task is compiled; use Batch.options(priority=...)
++        # to set it at submission.
++        self.core.priority = int(value)
++
+ 
+ class FunctionCore(TaskCore):
+     def __init__(
+@@ -1730,10 +1746,12 @@ def _is_multi_node_job(task_core: TaskCore, physical_cores_per_node: int) -> boo
+     return isinstance(task_core, JobCore) and num_procs > physical_cores_per_node
+ 
+ 
+-def _task_heft_priority_key(task_core: TaskCore) -> tuple[int, int | float, str]:
++def _task_heft_priority_key(task_core: TaskCore) -> tuple[int, int, int | float, str]:
+     """Return the deterministic HEFTY priority key shared by placement and launch ordering."""
+     task_tuid = task_core.tuid if task_core.tuid is not None else ""
+-    return (-task_core.weight, task_core.heft_topo_order, task_tuid)
++    # A client-set priority (larger runs sooner) comes before the HEFT weight; it is 0
++    # unless the client sets one, which leaves the HEFT order unchanged.
++    return (-getattr(task_core, "priority", 0), -task_core.weight, task_core.heft_topo_order, task_tuid)
+ 
+ 
+ def _bootstrap_manager(work_q: Queue) -> None:
+@@ -1848,6 +1866,8 @@ class Manager:
+         all_node_hostnames: Optional[list[str]] = None,
+         subnode_manager_qs: Optional[list] = None,
+         managed_lifecycle: bool = False,
++        report_each_task: bool = False,
++        cap_launch_budget: bool = False,
+     ) -> None:
+         """
+         Initialize a manager.
+@@ -1998,13 +2018,19 @@ class Manager:
+         # Task tuids that were accepted for execution during the current allocation phase.
+         self._alloc_phase_tuids: set[str] = set()
+         # Ready subnode tasks for the current allocation phase, ordered by HEFT priority.
+-        self._subnode_ready_heap: list[tuple[int, int | float, str, TaskCore]] = []
++        self._subnode_ready_heap: list[tuple[int, int, int | float, str, TaskCore]] = []
+         # Number of node-local physical cores still available for active
+         # subnode work on this manager. This is the shared capacity limiter
+         # for both pool-launched tasks and manager-owned direct function
+         # threads, so the total active work on the node never exceeds the
+         # physical core budget.
+         self._subnode_available_cores: int = physical_cores_per_node
++        # Experimental switches (see Batch): report each task's completion on its own
++        # instead of once per map_async call, and cap the launch budget at the pool size.
++        self.report_each_task = report_each_task
++        self.cap_launch_budget = cap_launch_budget
++        if cap_launch_budget:
++            self._subnode_available_cores = min(physical_cores_per_node, num_workers)
+ 
+     def _request_runtime_shutdown(self, force_timeout: Optional[float] = None) -> None:
+         if not self.destroy_called:
+@@ -2693,7 +2719,7 @@ class Manager:
+         return False
+ 
+     def _task_is_queued_in_ready_heap(self, tuid: str) -> bool:
+-        return any(task_core.tuid == tuid for _, _, _, task_core in self._subnode_ready_heap)
++        return any(item[-1].tuid == tuid for item in self._subnode_ready_heap)
+ 
+     def _handle_cancel_request(self, req: CancelRequest) -> None:
+         tuid = req.tuid
+@@ -3473,6 +3499,10 @@ class Manager:
+         """Add a completion batch to the async queue."""
+         self._async_queue.put(completion_batch)
+ 
++    def _add_one_to_async_queue(self, completion: CompletionNotification) -> None:
++        """Add one task's completion to the async queue (apply_async callback)."""
++        self._async_queue.put([completion])
++
+     def _launch_tasks(self) -> None:
+         """
+         Launch all queued tasks using map_async.
+@@ -3499,12 +3529,18 @@ class Manager:
+         chunk_size = 1
+ 
+         self.log.debug(f"starting {num_tasks} tasks")
+-        self.pool.map_async(
+-            _do_task,
+-            self._pool_launch_args_list,
+-            chunk_size,
+-            self._add_to_async_queue,
+-        )
++        if getattr(self, "report_each_task", False):
++            # One apply_async per task, so each task is reported when it finishes. A
++            # MapResult calls its callback only once every task of the map is done.
++            for task_and_args in self._pool_launch_args_list:
++                self.pool.apply_async(_do_task, (task_and_args,), callback=self._add_one_to_async_queue)
++        else:
++            self.pool.map_async(
++                _do_task,
++                self._pool_launch_args_list,
++                chunk_size,
++                self._add_to_async_queue,
++            )
+ 
+         if not self.disable_telem:
+             self.num_running_tasks += self._queued_task_count
+@@ -5002,6 +5038,7 @@ class BatchTaskOptions:
+     stdout: Optional[str | Path] = None
+     stderr: Optional[str | Path] = None
+     pmi: PMIBackend = PMIBackend.CRAY
++    priority: int = 0
+ 
+ 
+ class BatchOptionsProxy:
+@@ -5041,6 +5078,10 @@ class Batch:
+         stdout: Optional[str | Path] = None,
+         stderr: Optional[str | Path] = None,
+         task_logs: bool = False,
++        client_linger_sec: Optional[float] = None,
++        client_max_batch_size: Optional[int] = None,
++        report_each_task: Optional[bool] = None,
++        cap_launch_budget: Optional[bool] = None,
+     ) -> None:
+         """
+         Create a Batch instance for orchestrating functions, executables, and parallel applications
+@@ -5098,6 +5139,22 @@ class Batch:
+             interface matures. The log-discovery helpers raise ``RuntimeError`` while task
+             logging is disabled.
+         :type task_logs: bool
++        :param client_linger_sec: Experimental. How long the client waits for further
++            submissions to compile with the first one. Defaults to
++            ``client_task_batch_linger_sec``.
++        :type client_linger_sec: Optional[float]
++        :param client_max_batch_size: Experimental. The most submissions compiled together.
++            Defaults to ``client_task_batch_maxsize``; 1 compiles every task on its own.
++        :type client_max_batch_size: Optional[int]
++        :param report_each_task: Experimental. When ``True``, managers report each task's
++            completion as soon as it finishes, instead of once every task launched with it
++            has finished. Defaults to the environment variable
++            ``DRAGON_BATCH_REPORT_EACH_TASK=1``, else ``False``.
++        :type report_each_task: Optional[bool]
++        :param cap_launch_budget: Experimental. When ``True``, a subnode manager launches
++            at most as many tasks at once as its pool has workers. Defaults to
++            ``DRAGON_BATCH_CAP_LAUNCH_BUDGET=1``, else ``False``.
++        :type cap_launch_budget: Optional[bool]
+ 
+         .. highlight:: python
+         .. code-block:: python
+@@ -5213,6 +5270,16 @@ class Batch:
+         self._deserialized_handle = False
+         self._run_id = str(uuid1())
+         self._task_logs_enabled = task_logs
++        self._client_linger_sec = client_task_batch_linger_sec if client_linger_sec is None else client_linger_sec
++        self._client_max_batch_size = (
++            client_task_batch_maxsize if client_max_batch_size is None else client_max_batch_size
++        )
++        if report_each_task is None:
++            report_each_task = os.environ.get("DRAGON_BATCH_REPORT_EACH_TASK") == "1"
++        if cap_launch_budget is None:
++            cap_launch_budget = os.environ.get("DRAGON_BATCH_CAP_LAUNCH_BUDGET") == "1"
++        self._report_each_task = bool(report_each_task)
++        self._cap_launch_budget = bool(cap_launch_budget)
+         self._default_stdout = _normalize_output_path(stdout)
+         self._default_stderr = _normalize_output_path(stderr)
+         self._client_run_dir: Optional[Path] = None
+@@ -5494,6 +5561,8 @@ class Batch:
+                 disable_telem=self.disable_telem,
+                 is_scheduler=False,
+                 managed_lifecycle=self.managed_lifecycle,
++                report_each_task=self._report_each_task,
++                cap_launch_budget=self._cap_launch_budget,
+                 # Pass the scheduler queue so the subnode manager can send
+                 # SubnodeAllocRequest / SubnodeFreeRequest messages.
+                 subnode_manager_qs=[scheduler_q],
+@@ -5526,6 +5595,8 @@ class Batch:
+             disable_telem=self.disable_telem,
+             is_scheduler=True,
+             managed_lifecycle=self.managed_lifecycle,
++            report_each_task=self._report_each_task,
++            cap_launch_budget=self._cap_launch_budget,
+             all_node_hostnames=self._all_node_hostnames,
+             subnode_manager_qs=subnode_manager_qs,
+         )
+@@ -6269,6 +6340,8 @@ class Batch:
+                         item,
+                         self._client_request_q,
+                         Task,
++                        linger_sec=getattr(self, "_client_linger_sec", client_task_batch_linger_sec),
++                        max_batch_size=getattr(self, "_client_max_batch_size", client_task_batch_maxsize),
+                     )
+ 
+                     self._compile_and_dispatch_client_tasks(task_batch)
+@@ -6792,6 +6865,7 @@ class Batch:
+         stdout: Optional[str | Path] = None,
+         stderr: Optional[str | Path] = None,
+         pmi: PMIBackend = PMIBackend.CRAY,
++        priority: int = 0,
+     ) -> BatchOptionsProxy:
+         """Return a submission proxy with Batch metadata bound ahead of time.
+ 
+@@ -6803,6 +6877,10 @@ class Batch:
+         :py:meth:`Batch.options` act as task-level defaults. If an individual
+         :py:class:`ProcessTemplate` already specifies ``stdout`` or ``stderr``,
+         the template setting takes precedence.
++
++        ``priority`` orders ready tasks on a subnode manager: a larger priority
++        launches sooner, before the HEFT weight is considered. The default, 0,
++        keeps Batch's order.
+         """
+         return BatchOptionsProxy(
+             self,
+@@ -6814,6 +6892,7 @@ class Batch:
+                 stdout=stdout,
+                 stderr=stderr,
+                 pmi=pmi,
++                priority=priority,
+             ),
+         )
+ 
+@@ -6884,6 +6963,7 @@ class Batch:
+             stdout=task_options.stdout,
+             stderr=task_options.stderr,
+         )
++        task.core.priority = int(task_options.priority)
+         self._enqueue_client_request(task)
+         return task
+ 
+@@ -6910,6 +6990,7 @@ class Batch:
+             stdout=task_options.stdout,
+             stderr=task_options.stderr,
+         )
++        task.core.priority = int(task_options.priority)
+         self._enqueue_client_request(task)
+         return task
+ 
+diff --git a/test/multi-node/test_batch.py b/test/multi-node/test_batch.py
+index 294d10e..9a2d315 100644
+--- a/test/multi-node/test_batch.py
++++ b/test/multi-node/test_batch.py
+@@ -31,6 +31,8 @@ from dragon.workflows.batch.batch import (
+     default_results_ddict_managers_per_pool,
+     _drain_client_task_batch,
+     _resolve_results_ddict_managers_per_pool,
++    _task_heft_priority_key,
++    BatchTaskOptions,
+ )
+ from dragon.native.machine import System, Node, current
+ from user_functions import (
+@@ -2289,5 +2291,34 @@ class TestClientTaskBatchingLogic(unittest.TestCase):
+         self.assertIsNone(deferred_item)
+ 
+ 
++class TestClientPriorityLogic(unittest.TestCase):
++    """Experimental client priority: it orders ready tasks before the HEFT weight."""
++
++    class _FakeCore:
++        def __init__(self, tuid, weight=1, topo=0, priority=None):
++            self.tuid = tuid
++            self.weight = weight
++            self.heft_topo_order = topo
++            if priority is not None:
++                self.priority = priority
++
++    def test_default_priority_keeps_heft_order(self):
++        cores = [self._FakeCore("1-2", weight=1, topo=1), self._FakeCore("1-1", weight=3, topo=0)]
++        self.assertEqual([c.tuid for c in sorted(cores, key=_task_heft_priority_key)], ["1-1", "1-2"])
++
++    def test_priority_comes_before_weight_and_order(self):
++        low = self._FakeCore("1-1", weight=5, topo=0, priority=0)
++        high = self._FakeCore("1-2", weight=1, topo=7, priority=3)
++        self.assertEqual(sorted([low, high], key=_task_heft_priority_key)[0], high)
++
++    def test_core_without_priority_attribute_counts_as_zero(self):
++        old = self._FakeCore("1-1")
++        new = self._FakeCore("1-2", priority=0)
++        self.assertEqual(_task_heft_priority_key(old)[0], _task_heft_priority_key(new)[0])
++
++    def test_task_options_priority_defaults_to_zero(self):
++        self.assertEqual(BatchTaskOptions().priority, 0)
++
++
+ if __name__ == "__main__":
+     unittest.main(verbosity=2)

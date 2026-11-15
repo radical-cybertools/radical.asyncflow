@@ -1,0 +1,139 @@
+diff --git a/src/dragon/workflows/batch/batch.py b/src/dragon/workflows/batch/batch.py
+index 95a60ca..03a70b7 100644
+--- a/src/dragon/workflows/batch/batch.py
++++ b/src/dragon/workflows/batch/batch.py
+@@ -5082,6 +5082,7 @@ class Batch:
+         client_max_batch_size: Optional[int] = None,
+         report_each_task: Optional[bool] = None,
+         cap_launch_budget: Optional[bool] = None,
++        client_wake_on_completion: Optional[bool] = None,
+     ) -> None:
+         """
+         Create a Batch instance for orchestrating functions, executables, and parallel applications
+@@ -5155,6 +5156,13 @@ class Batch:
+             at most as many tasks at once as its pool has workers. Defaults to
+             ``DRAGON_BATCH_CAP_LAUNCH_BUDGET=1``, else ``False``.
+         :type cap_launch_budget: Optional[bool]
++        :param client_wake_on_completion: Experimental. When ``True``, a dedicated client
++            thread blocks on the return queue and publishes each completion to
++            :py:meth:`poll` as it arrives. Otherwise the client request worker drains the
++            return queue only between submissions, after waiting up to 50 ms for one, so
++            ``poll()`` can see a completion up to 50 ms late. Defaults to
++            ``DRAGON_BATCH_CLIENT_WAKE=1``, else ``False``.
++        :type client_wake_on_completion: Optional[bool]
+ 
+         .. highlight:: python
+         .. code-block:: python
+@@ -5278,8 +5286,11 @@ class Batch:
+             report_each_task = os.environ.get("DRAGON_BATCH_REPORT_EACH_TASK") == "1"
+         if cap_launch_budget is None:
+             cap_launch_budget = os.environ.get("DRAGON_BATCH_CAP_LAUNCH_BUDGET") == "1"
++        if client_wake_on_completion is None:
++            client_wake_on_completion = os.environ.get("DRAGON_BATCH_CLIENT_WAKE") == "1"
+         self._report_each_task = bool(report_each_task)
+         self._cap_launch_budget = bool(cap_launch_budget)
++        self._client_wake = bool(client_wake_on_completion)
+         self._default_stdout = _normalize_output_path(stdout)
+         self._default_stderr = _normalize_output_path(stderr)
+         self._client_run_dir: Optional[Path] = None
+@@ -5458,6 +5469,8 @@ class Batch:
+             "_completion_overflow",
+             "_client_request_q",
+             "_client_request_thread",
++            "_client_completion_thread",
++            "_client_completion_stop",
+             "_client_request_worker_exc",
+             "client_compiler",
+             "log",
+@@ -5659,10 +5672,13 @@ class Batch:
+         self.cq = LocalQueue(maxsize=client_completion_queue_maxsize)
+         # Completions that arrive while ``cq`` is full (e.g. a client that never
+         # calls poll()). Buffered here so the Dragon return queue keeps draining;
+-        # only the client request worker thread touches this buffer.
++        # only the thread that drains the return queue touches this buffer: the
++        # client request worker, or the completion worker with client_wake_on_completion.
+         self._completion_overflow = deque()
+         self._client_request_q = LocalQueue()
+         self._client_request_thread = None
++        self._client_completion_thread = None
++        self._client_completion_stop = threading.Event()
+         self._client_request_worker_exc = None
+         self.client_compiler = None
+         self.log = _setup_logging("client")
+@@ -6249,6 +6265,53 @@ class Batch:
+         )
+         self._client_request_thread.start()
+ 
++        if getattr(self, "_client_wake", False):
++            if getattr(self, "_client_completion_stop", None) is None:
++                self._client_completion_stop = threading.Event()
++            self._client_completion_stop.clear()
++            self._client_completion_thread = threading.Thread(
++                target=self._run_client_completion_worker,
++                name=f"batch-client-{self.client_id}-completions",
++                daemon=True,
++            )
++            self._client_completion_thread.start()
++
++    def _run_client_completion_worker(self) -> None:
++        """Publish completions as they arrive (``client_wake_on_completion``).
++
++        Owns the return queue after registration: blocks on it, and moves each
++        completed tuid to ``cq`` (or the overflow buffer) at once. The request
++        worker then handles only submissions. The 50 ms timeout only bounds how
++        long a stop or shutdown takes to be noticed.
++        """
++        while not self._client_completion_stop.is_set():
++            try:
++                if self.closed or self.destroyed or self.ret_q is None:
++                    return
++                ret_q = self.ret_q
++                self._flush_completion_overflow()
++                try:
++                    item = ret_q.get(timeout=0.05)
++                except (queue.Empty, TimeoutError):
++                    continue
++
++                if isinstance(item, CompletedTuids):
++                    completed_at_ns = time.time_ns()
++                    for tuid in item.tuids:
++                        self._mark_task_log_complete(tuid, completed_at_ns=completed_at_ns)
++                        self._enqueue_completion(tuid)
++                    continue
++
++                if isinstance(item, ManagerException):
++                    raise RuntimeError(item.err_message) from item.exception
++
++                raise RuntimeError(f"unexpected item received on client return queue: {item!r}")
++            except Exception as e:
++                if self._client_completion_stop.is_set() or self.closed or self.destroyed or self.ret_q is None:
++                    return
++                self._client_request_worker_exc = e
++                return
++
+     def _raise_client_request_worker_error(self) -> None:
+         if self._client_request_worker_exc is not None:
+             raise RuntimeError("client request worker failed") from self._client_request_worker_exc
+@@ -6324,7 +6387,8 @@ class Batch:
+                 if self.closed or self.destroyed or self.ret_q is None:
+                     return
+ 
+-                self._drain_client_return_queue()
++                if not getattr(self, "_client_wake", False):
++                    self._drain_client_return_queue()
+ 
+                 if deferred_item is not None:
+                     item = deferred_item
+@@ -6416,6 +6480,12 @@ class Batch:
+         thread.join(timeout=timeout)
+         self._client_request_thread = None
+ 
++        completion_thread = getattr(self, "_client_completion_thread", None)
++        if completion_thread is not None:
++            self._client_completion_stop.set()
++            completion_thread.join(timeout=timeout)
++            self._client_completion_thread = None
++
+     def _enqueue_client_request(self, item) -> None:
+         self._raise_client_request_worker_error()
+         self._client_request_q.put(item)

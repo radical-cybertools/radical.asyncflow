@@ -1,0 +1,1456 @@
+{
+ "raw_batch": [
+  {
+   "env": "stock",
+   "runtime": 1,
+   "used": 1,
+   "reps": 3,
+   "tasks_per_s": {
+    "median": 668.0325869405592,
+    "min": 635.0846738996165,
+    "max": 668.1126977632766,
+    "n": 3
+   },
+   "step_p50_ms": {
+    "median": 10.231838561594486,
+    "min": 10.190711822360754,
+    "max": 10.294957552105188,
+    "n": 3
+   },
+   "job": "50006591"
+  },
+  {
+   "env": "branch",
+   "runtime": 1,
+   "used": 1,
+   "reps": 3,
+   "tasks_per_s": {
+    "median": 663.7913879430997,
+    "min": 640.0777258843283,
+    "max": 664.4856935271557,
+    "n": 3
+   },
+   "step_p50_ms": {
+    "median": 5.536196753382683,
+    "min": 5.153779871761799,
+    "max": 5.550634115934372,
+    "n": 3
+   },
+   "job": "50006591"
+  },
+  {
+   "env": "stock",
+   "runtime": 2,
+   "used": 1,
+   "reps": 3,
+   "tasks_per_s": {
+    "median": 294.5505274699894,
+    "min": 282.92707654292957,
+    "max": 294.7688424414594,
+    "n": 3
+   },
+   "step_p50_ms": {
+    "median": 13.213912025094032,
+    "min": 12.142885010689497,
+    "max": 13.24699679389596,
+    "n": 3
+   },
+   "job": "50006591"
+  },
+  {
+   "env": "branch",
+   "runtime": 2,
+   "used": 1,
+   "reps": 3,
+   "tasks_per_s": {
+    "median": 287.6301403294801,
+    "min": 272.47391130219023,
+    "max": 290.9671726583613,
+    "n": 3
+   },
+   "step_p50_ms": {
+    "median": 10.807821992784739,
+    "min": 10.30199695378542,
+    "max": 11.084714904427528,
+    "n": 3
+   },
+   "job": "50006591"
+  },
+  {
+   "env": "stock",
+   "runtime": 2,
+   "used": 2,
+   "reps": 3,
+   "tasks_per_s": {
+    "median": 255.98230938907946,
+    "min": 244.95091541537752,
+    "max": 264.5669811155193,
+    "n": 3
+   },
+   "step_p50_ms": {
+    "median": 15.706702135503292,
+    "min": 14.638336841017008,
+    "max": 17.056342214345932,
+    "n": 3
+   },
+   "job": "50006591"
+  },
+  {
+   "env": "branch",
+   "runtime": 2,
+   "used": 2,
+   "reps": 3,
+   "tasks_per_s": {
+    "median": 194.27498453845448,
+    "min": 185.78699946578215,
+    "max": 213.96128281326907,
+    "n": 3
+   },
+   "step_p50_ms": {
+    "median": 13.036424294114113,
+    "min": 13.034182135015726,
+    "max": 14.07452393323183,
+    "n": 3
+   },
+   "job": "50006591"
+  },
+  {
+   "env": "stock",
+   "runtime": 4,
+   "used": 1,
+   "reps": 3,
+   "tasks_per_s": {
+    "median": 237.20216801478819,
+    "min": 236.56291127918175,
+    "max": 238.65895819678715,
+    "n": 3
+   },
+   "step_p50_ms": {
+    "median": 13.339053839445114,
+    "min": 12.956704013049603,
+    "max": 13.487676158547401,
+    "n": 3
+   },
+   "job": "50006591"
+  },
+  {
+   "env": "stock",
+   "runtime": 4,
+   "used": 2,
+   "reps": 3,
+   "tasks_per_s": {
+    "median": 240.18032521809937,
+    "min": 211.20074249348363,
+    "max": 246.0386703533575,
+    "n": 3
+   },
+   "step_p50_ms": {
+    "median": 17.33504282310605,
+    "min": 17.332166898995638,
+    "max": 17.50974729657173,
+    "n": 3
+   },
+   "job": "50006591"
+  },
+  {
+   "env": "stock",
+   "runtime": 4,
+   "used": 4,
+   "reps": 3,
+   "tasks_per_s": {
+    "median": 252.8519662120949,
+    "min": 250.70037159508206,
+    "max": 266.00159083701175,
+    "n": 3
+   },
+   "step_p50_ms": {
+    "median": 18.27884092926979,
+    "min": 18.01098231226206,
+    "max": 18.415631260722876,
+    "n": 3
+   },
+   "job": "50006591"
+  }
+ ],
+ "raw_debug": [
+  {
+   "tag": "stock-n1-debug",
+   "runtime": 1,
+   "tasks_per_s": 108.18729670091936,
+   "step_p50_ms": 10.710311122238636
+  },
+  {
+   "tag": "stock-n2-debug",
+   "runtime": 2,
+   "tasks_per_s": 139.45189981471796,
+   "step_p50_ms": 24.282671976834536
+  }
+ ],
+ "raw_hung": [
+  {
+   "tag": "branch-n4",
+   "rc": 124,
+   "wall_s": 611,
+   "done": [
+    [
+     1,
+     223.0,
+     12.4
+    ],
+    [
+     2,
+     161.0,
+     16.9
+    ]
+   ],
+   "hung_in": 4
+  }
+ ],
+ "af": [
+  {
+   "exp": "e1-diamonds",
+   "nodes": 2,
+   "policy": "none",
+   "reps": 3,
+   "workers": 128,
+   "jobs": [
+    "50006592",
+    "50006593",
+    "50006594"
+   ],
+   "diamonds": 1024,
+   "first_s": {
+    "median": 7.282451800070703,
+    "min": 7.259229054674506,
+    "max": 7.304061915259808,
+    "n": 3
+   },
+   "mean_wct_s": {
+    "median": 19.310750785867185,
+    "min": 19.27432556788972,
+    "max": 19.332888945556533,
+    "n": 3
+   },
+   "makespan_s": {
+    "median": 35.321832401212305,
+    "min": 35.1030963412486,
+    "max": 35.828680868726224,
+    "n": 3
+   },
+   "peak_live_wf": {
+    "median": 280,
+    "min": 280,
+    "max": 280,
+    "n": 3
+   }
+  },
+  {
+   "exp": "e1-diamonds",
+   "nodes": 2,
+   "policy": "lineage",
+   "reps": 3,
+   "workers": 128,
+   "jobs": [
+    "50006592",
+    "50006593",
+    "50006594"
+   ],
+   "diamonds": 1024,
+   "first_s": {
+    "median": 3.2149811210110784,
+    "min": 3.184037657920271,
+    "max": 3.2236842745915055,
+    "n": 3
+   },
+   "mean_wct_s": {
+    "median": 19.287599771418172,
+    "min": 19.250277433822248,
+    "max": 19.503481540396024,
+    "n": 3
+   },
+   "makespan_s": {
+    "median": 36.60640661558136,
+    "min": 35.9976404029876,
+    "max": 36.664988103788346,
+    "n": 3
+   },
+   "peak_live_wf": {
+    "median": 128,
+    "min": 128,
+    "max": 128,
+    "n": 3
+   }
+  },
+  {
+   "exp": "e1-diamonds",
+   "nodes": 4,
+   "policy": "none",
+   "reps": 3,
+   "workers": 256,
+   "jobs": [
+    "50006595",
+    "50006596",
+    "50006597"
+   ],
+   "diamonds": 2048,
+   "first_s": {
+    "median": 25.198834791313857,
+    "min": 24.584289179183543,
+    "max": 26.12588285608217,
+    "n": 3
+   },
+   "mean_wct_s": {
+    "median": 35.77272976847985,
+    "min": 35.378673777323456,
+    "max": 37.89790987187689,
+    "n": 3
+   },
+   "makespan_s": {
+    "median": 43.767325778957456,
+    "min": 43.72613395517692,
+    "max": 46.04701665509492,
+    "n": 3
+   },
+   "peak_live_wf": {
+    "median": 1592,
+    "min": 1576,
+    "max": 1600,
+    "n": 3
+   }
+  },
+  {
+   "exp": "e1-diamonds",
+   "nodes": 4,
+   "policy": "lineage",
+   "reps": 3,
+   "workers": 256,
+   "jobs": [
+    "50006595",
+    "50006596",
+    "50006597"
+   ],
+   "diamonds": 2048,
+   "first_s": {
+    "median": 4.852869418915361,
+    "min": 4.808091904968023,
+    "max": 4.910823636222631,
+    "n": 3
+   },
+   "mean_wct_s": {
+    "median": 26.803778747067554,
+    "min": 26.773003197187336,
+    "max": 27.092948814846068,
+    "n": 3
+   },
+   "makespan_s": {
+    "median": 50.16424522828311,
+    "min": 49.90524892602116,
+    "max": 50.771150273736566,
+    "n": 3
+   },
+   "peak_live_wf": {
+    "median": 256,
+    "min": 256,
+    "max": 256,
+    "n": 3
+   }
+  },
+  {
+   "exp": "e1-mixed",
+   "nodes": 1,
+   "policy": "none",
+   "reps": 3,
+   "workers": 32,
+   "jobs": [
+    "50008020"
+   ],
+   "bulk": 1000,
+   "chain_p50_s": {
+    "median": 1.8019376061856747,
+    "min": 1.7249862723983824,
+    "max": 1.8347780969925225,
+    "n": 3
+   },
+   "chain_p95_s": {
+    "median": 2.0713797179050744,
+    "min": 1.9433422610163689,
+    "max": 2.130612294189632,
+    "n": 3
+   },
+   "bulk_makespan_s": {
+    "median": 98.56494963588193,
+    "min": 96.513943947386,
+    "max": 98.57216619793326,
+    "n": 3
+   }
+  },
+  {
+   "exp": "e1-mixed",
+   "nodes": 1,
+   "policy": "fair",
+   "reps": 3,
+   "workers": 32,
+   "jobs": [
+    "50008020"
+   ],
+   "bulk": 1000,
+   "chain_p50_s": {
+    "median": 1.617216542828828,
+    "min": 1.5814549033530056,
+    "max": 1.649904126767069,
+    "n": 3
+   },
+   "chain_p95_s": {
+    "median": 1.812348558101803,
+    "min": 1.6926650563254952,
+    "max": 1.9453157102689147,
+    "n": 3
+   },
+   "bulk_makespan_s": {
+    "median": 98.5424140249379,
+    "min": 97.47577370936051,
+    "max": 98.75443069403991,
+    "n": 3
+   }
+  },
+  {
+   "exp": "e1-mixed",
+   "nodes": 1,
+   "policy": "none",
+   "reps": 3,
+   "workers": 64,
+   "jobs": [
+    "50018097"
+   ],
+   "bulk": 2000,
+   "chain_p50_s": {
+    "median": 20.556950429920107,
+    "min": 19.796281314920634,
+    "max": 21.813636299222708,
+    "n": 3
+   },
+   "chain_p95_s": {
+    "median": 50.45234405482188,
+    "min": 49.53441549837589,
+    "max": 51.58616110496223,
+    "n": 3
+   },
+   "bulk_makespan_s": {
+    "median": 97.8035638909787,
+    "min": 96.61200563563034,
+    "max": 98.42034383723512,
+    "n": 3
+   }
+  },
+  {
+   "exp": "e1-mixed",
+   "nodes": 1,
+   "policy": "fair",
+   "reps": 3,
+   "workers": 64,
+   "jobs": [
+    "50018097"
+   ],
+   "bulk": 2000,
+   "chain_p50_s": {
+    "median": 1.5733821270987391,
+    "min": 1.5725310039706528,
+    "max": 1.6009807172231376,
+    "n": 3
+   },
+   "chain_p95_s": {
+    "median": 1.7045644167810678,
+    "min": 1.6419242657721043,
+    "max": 1.7118909587152302,
+    "n": 3
+   },
+   "bulk_makespan_s": {
+    "median": 97.37456755898893,
+    "min": 96.77055212296546,
+    "max": 98.60536015080288,
+    "n": 3
+   }
+  },
+  {
+   "exp": "e1-mixed",
+   "nodes": 1,
+   "policy": "none",
+   "reps": 3,
+   "workers": 128,
+   "jobs": [
+    "50076655"
+   ],
+   "bulk": 4000,
+   "chain_p50_s": {
+    "median": 44.11375929880887,
+    "min": 43.61270287446678,
+    "max": 45.33070280589163,
+    "n": 3
+   },
+   "chain_p95_s": {
+    "median": 74.03928090631962,
+    "min": 73.54312210716307,
+    "max": 75.23346283566207,
+    "n": 3
+   },
+   "bulk_makespan_s": {
+    "median": 97.52952031418681,
+    "min": 96.91347888670862,
+    "max": 98.29087325651199,
+    "n": 3
+   }
+  },
+  {
+   "exp": "e1-mixed",
+   "nodes": 1,
+   "policy": "fair",
+   "reps": 3,
+   "workers": 128,
+   "jobs": [
+    "50076655"
+   ],
+   "bulk": 4000,
+   "chain_p50_s": {
+    "median": 1.5518008805811405,
+    "min": 1.5502853626385331,
+    "max": 1.5664265863597393,
+    "n": 3
+   },
+   "chain_p95_s": {
+    "median": 1.6107910964637995,
+    "min": 1.5660498589277267,
+    "max": 1.6158364517614245,
+    "n": 3
+   },
+   "bulk_makespan_s": {
+    "median": 97.35009344667196,
+    "min": 96.95747475791723,
+    "max": 97.71232932806015,
+    "n": 3
+   }
+  },
+  {
+   "exp": "e1-mixed",
+   "nodes": 2,
+   "policy": "none",
+   "reps": 3,
+   "workers": 128,
+   "jobs": [
+    "50006592",
+    "50006593",
+    "50006594"
+   ],
+   "bulk": 4000,
+   "chain_p50_s": {
+    "median": 45.54785291897133,
+    "min": 44.12434044480324,
+    "max": 45.69293814711273,
+    "n": 3
+   },
+   "chain_p95_s": {
+    "median": 75.4498437247239,
+    "min": 73.61972786486149,
+    "max": 76.35845859488472,
+    "n": 3
+   },
+   "bulk_makespan_s": {
+    "median": 98.49085162300617,
+    "min": 98.34632225707173,
+    "max": 98.64361022086814,
+    "n": 3
+   }
+  },
+  {
+   "exp": "e1-mixed",
+   "nodes": 2,
+   "policy": "fair",
+   "reps": 3,
+   "workers": 128,
+   "jobs": [
+    "50006592",
+    "50006593",
+    "50006594"
+   ],
+   "bulk": 4000,
+   "chain_p50_s": {
+    "median": 1.9379868367686868,
+    "min": 1.7964884988032281,
+    "max": 2.061512405052781,
+    "n": 3
+   },
+   "chain_p95_s": {
+    "median": 2.7644921909086406,
+    "min": 2.492865074891597,
+    "max": 2.765248302835971,
+    "n": 3
+   },
+   "bulk_makespan_s": {
+    "median": 102.21760017797351,
+    "min": 101.92560464702547,
+    "max": 102.40211607795209,
+    "n": 3
+   }
+  },
+  {
+   "exp": "e1-mixed",
+   "nodes": 4,
+   "policy": "none",
+   "reps": 3,
+   "workers": 256,
+   "jobs": [
+    "50006595",
+    "50006596",
+    "50006597"
+   ],
+   "bulk": 8000,
+   "chain_p50_s": {
+    "median": 56.36082405503839,
+    "min": 54.82636184012517,
+    "max": 57.4598586387001,
+    "n": 3
+   },
+   "chain_p95_s": {
+    "median": 87.17116576293483,
+    "min": 85.96949187805876,
+    "max": 87.17988270381466,
+    "n": 3
+   },
+   "bulk_makespan_s": {
+    "median": 99.9555534971878,
+    "min": 99.22881589597091,
+    "max": 100.6970758647658,
+    "n": 3
+   }
+  },
+  {
+   "exp": "e1-mixed",
+   "nodes": 4,
+   "policy": "fair",
+   "reps": 3,
+   "workers": 256,
+   "jobs": [
+    "50006595",
+    "50006596",
+    "50006597"
+   ],
+   "bulk": 8000,
+   "chain_p50_s": {
+    "median": 2.0885157040320337,
+    "min": 1.8703652587719262,
+    "max": 2.154342324938625,
+    "n": 3
+   },
+   "chain_p95_s": {
+    "median": 3.162900639232248,
+    "min": 2.9926343951374292,
+    "max": 3.71592025924474,
+    "n": 3
+   },
+   "bulk_makespan_s": {
+    "median": 103.39648542087525,
+    "min": 102.89129418320954,
+    "max": 104.06859941082075,
+    "n": 3
+   }
+  },
+  {
+   "exp": "e3",
+   "nodes": 2,
+   "policy": "none",
+   "reps": 3,
+   "workers": 128,
+   "jobs": [
+    "50006592",
+    "50006593",
+    "50006594"
+   ],
+   "step_p50_ms": {
+    "median": 20.644032396376133,
+    "min": 20.443663001060486,
+    "max": 21.281810011714697,
+    "n": 3
+   },
+   "step_p95_ms": {
+    "median": 59.07907569780946,
+    "min": 54.74389297887683,
+    "max": 174.4183748960495,
+    "n": 3
+   },
+   "per_task_ms": {
+    "median": 26.780799571424723,
+    "min": 26.242916639894247,
+    "max": 35.235759979113936,
+    "n": 3
+   },
+   "tasks_per_s": {
+    "median": 163.47231003884775,
+    "min": 156.05984967084666,
+    "max": 181.0594469362443,
+    "n": 3
+   }
+  },
+  {
+   "exp": "e3",
+   "nodes": 2,
+   "policy": "fair",
+   "reps": 3,
+   "workers": 128,
+   "jobs": [
+    "50006592",
+    "50006593",
+    "50006594"
+   ],
+   "step_p50_ms": {
+    "median": 21.331271156668663,
+    "min": 20.366573240607977,
+    "max": 22.328018210828304,
+    "n": 3
+   },
+   "step_p95_ms": {
+    "median": 48.22030616924167,
+    "min": 42.869812808930874,
+    "max": 160.88217915967107,
+    "n": 3
+   },
+   "per_task_ms": {
+    "median": 27.70396494306624,
+    "min": 22.565053631551564,
+    "max": 31.240188302472234,
+    "n": 3
+   },
+   "tasks_per_s": {
+    "median": 185.1928049805257,
+    "min": 182.1853867518748,
+    "max": 188.1338546092189,
+    "n": 3
+   }
+  },
+  {
+   "exp": "e3",
+   "nodes": 2,
+   "policy": "lineage",
+   "reps": 3,
+   "workers": 128,
+   "jobs": [
+    "50006592",
+    "50006593",
+    "50006594"
+   ],
+   "step_p50_ms": {
+    "median": 20.15123888850212,
+    "min": 20.13994613662362,
+    "max": 20.717536099255085,
+    "n": 3
+   },
+   "step_p95_ms": {
+    "median": 47.63001203536987,
+    "min": 44.79481605812907,
+    "max": 47.878805082291365,
+    "n": 3
+   },
+   "per_task_ms": {
+    "median": 24.66339920181781,
+    "min": 24.136405531316996,
+    "max": 24.85038904938847,
+    "n": 3
+   },
+   "tasks_per_s": {
+    "median": 186.37561408910878,
+    "min": 180.568507276619,
+    "max": 192.44011608862087,
+    "n": 3
+   }
+  },
+  {
+   "exp": "e3",
+   "nodes": 4,
+   "policy": "none",
+   "reps": 2,
+   "workers": 256,
+   "jobs": [
+    "50006596",
+    "50006597"
+   ],
+   "step_p50_ms": {
+    "median": 25.480693439021707,
+    "min": 24.89083679392934,
+    "max": 26.070550084114075,
+    "n": 2
+   },
+   "step_p95_ms": {
+    "median": 176.92600702866912,
+    "min": 176.67275527492166,
+    "max": 177.17925878241658,
+    "n": 2
+   },
+   "per_task_ms": {
+    "median": 41.228616875596344,
+    "min": 37.22954776138067,
+    "max": 45.22768598981202,
+    "n": 2
+   },
+   "tasks_per_s": {
+    "median": 162.03043306787117,
+    "min": 150.9090122973063,
+    "max": 173.15185383843604,
+    "n": 2
+   }
+  },
+  {
+   "exp": "e3",
+   "nodes": 4,
+   "policy": "fair",
+   "reps": 2,
+   "workers": 256,
+   "jobs": [
+    "50006596",
+    "50006597"
+   ],
+   "step_p50_ms": {
+    "median": 26.537786470726132,
+    "min": 26.24733094125986,
+    "max": 26.828242000192404,
+    "n": 2
+   },
+   "step_p95_ms": {
+    "median": 41.532764211297035,
+    "min": 36.84340510517359,
+    "max": 46.22212331742048,
+    "n": 2
+   },
+   "per_task_ms": {
+    "median": 29.87485523102805,
+    "min": 27.354822102934122,
+    "max": 32.39488835912198,
+    "n": 2
+   },
+   "tasks_per_s": {
+    "median": 160.4654491899857,
+    "min": 157.859657232355,
+    "max": 163.07124114761635,
+    "n": 2
+   }
+  },
+  {
+   "exp": "e3",
+   "nodes": 4,
+   "policy": "lineage",
+   "reps": 2,
+   "workers": 256,
+   "jobs": [
+    "50006596",
+    "50006597"
+   ],
+   "step_p50_ms": {
+    "median": 26.128192665055394,
+    "min": 25.893036276102066,
+    "max": 26.363349054008722,
+    "n": 2
+   },
+   "step_p95_ms": {
+    "median": 47.76563658379018,
+    "min": 46.15362919867039,
+    "max": 49.37764396890998,
+    "n": 2
+   },
+   "per_task_ms": {
+    "median": 32.012261995114386,
+    "min": 30.173791931010783,
+    "max": 33.85073205921799,
+    "n": 2
+   },
+   "tasks_per_s": {
+    "median": 156.35669891022084,
+    "min": 155.2881621337182,
+    "max": 157.42523568672348,
+    "n": 2
+   }
+  }
+ ],
+ "i95": [
+  {
+   "cores": 4,
+   "config": "rh-0.6.0",
+   "reps": 2,
+   "workers": 64,
+   "ok": 2,
+   "jobs": [
+    "50006599",
+    "50006601"
+   ],
+   "backend_s": {
+    "median": 2.539453625679016,
+    "min": 2.3314990997314453,
+    "max": 2.747408151626587,
+    "n": 2
+   },
+   "trivial_s": {
+    "median": 15.170311331748962,
+    "min": 12.7471444606781,
+    "max": 17.593478202819824,
+    "n": 2
+   },
+   "workflow_s": {
+    "median": 21.018818974494934,
+    "min": 16.961632251739502,
+    "max": 25.076005697250366,
+    "n": 2
+   },
+   "shutdown_s": {
+    "median": 31.81696343421936,
+    "min": 12.76092004776001,
+    "max": 50.87300682067871,
+    "n": 2
+   }
+  },
+  {
+   "cores": 4,
+   "config": "rh-fix",
+   "reps": 2,
+   "workers": 2,
+   "ok": 2,
+   "jobs": [
+    "50006598",
+    "50006600"
+   ],
+   "backend_s": {
+    "median": 2.2511707544326782,
+    "min": 1.9310245513916016,
+    "max": 2.571316957473755,
+    "n": 2
+   },
+   "trivial_s": {
+    "median": 0.7835091352462769,
+    "min": 0.6228418350219727,
+    "max": 0.944176435470581,
+    "n": 2
+   },
+   "workflow_s": {
+    "median": 0.5580786466598511,
+    "min": 0.38723015785217285,
+    "max": 0.7289271354675293,
+    "n": 2
+   },
+   "shutdown_s": {
+    "median": 1.6265567541122437,
+    "min": 1.551274061203003,
+    "max": 1.7018394470214844,
+    "n": 2
+   }
+  },
+  {
+   "cores": 16,
+   "config": "rh-0.6.0",
+   "reps": 2,
+   "workers": 64,
+   "ok": 2,
+   "jobs": [
+    "50006603",
+    "50006605"
+   ],
+   "backend_s": {
+    "median": 2.6103017330169678,
+    "min": 1.9558014869689941,
+    "max": 3.2648019790649414,
+    "n": 2
+   },
+   "trivial_s": {
+    "median": 2.644545555114746,
+    "min": 1.9704461097717285,
+    "max": 3.3186450004577637,
+    "n": 2
+   },
+   "workflow_s": {
+    "median": 7.951264023780823,
+    "min": 7.390161037445068,
+    "max": 8.512367010116577,
+    "n": 2
+   },
+   "shutdown_s": {
+    "median": 2.8444753885269165,
+    "min": 2.163236379623413,
+    "max": 3.52571439743042,
+    "n": 2
+   }
+  },
+  {
+   "cores": 16,
+   "config": "rh-fix",
+   "reps": 2,
+   "workers": 8,
+   "ok": 2,
+   "jobs": [
+    "50006602",
+    "50006604"
+   ],
+   "backend_s": {
+    "median": 1.8828215599060059,
+    "min": 1.7277767658233643,
+    "max": 2.0378663539886475,
+    "n": 2
+   },
+   "trivial_s": {
+    "median": 0.3678635358810425,
+    "min": 0.20976614952087402,
+    "max": 0.5259609222412109,
+    "n": 2
+   },
+   "workflow_s": {
+    "median": 0.5048710107803345,
+    "min": 0.480802059173584,
+    "max": 0.528939962387085,
+    "n": 2
+   },
+   "shutdown_s": {
+    "median": 1.3484071493148804,
+    "min": 1.2092230319976807,
+    "max": 1.48759126663208,
+    "n": 2
+   }
+  }
+ ],
+ "gpu": [
+  {
+   "job": "49821147",
+   "run": 1,
+   "mode": "res-node",
+   "gpus": 1,
+   "pipelines": 4,
+   "workers": 8,
+   "rc": 0,
+   "wall_s": 144,
+   "tasks_started": 4,
+   "tasks_done": 4,
+   "peak_concurrent": 4,
+   "peak_per_gpu": 4,
+   "pipelines_lost": 0,
+   "ooms": 0,
+   "drained_s": 115.97410011291504,
+   "errors": {},
+   "outcome": "clean"
+  },
+  {
+   "job": "49821147",
+   "run": 2,
+   "mode": "res-learn",
+   "gpus": 1,
+   "pipelines": 4,
+   "workers": 8,
+   "rc": 0,
+   "wall_s": 130,
+   "tasks_started": 5,
+   "tasks_done": 3,
+   "peak_concurrent": 2,
+   "peak_per_gpu": 1,
+   "pipelines_lost": 2,
+   "ooms": 0,
+   "drained_s": 120.8586974143982,
+   "errors": {
+    "RuntimeError": 2
+   },
+   "outcome": "2 lost"
+  },
+  {
+   "job": "49881976",
+   "run": 1,
+   "mode": "res-node",
+   "gpus": 4,
+   "pipelines": 32,
+   "workers": 48,
+   "rc": 124,
+   "wall_s": 913,
+   "tasks_started": 32,
+   "tasks_done": 32,
+   "peak_concurrent": 32,
+   "peak_per_gpu": 8,
+   "pipelines_lost": null,
+   "ooms": null,
+   "drained_s": null,
+   "errors": {},
+   "outcome": "stalled (timeout)"
+  },
+  {
+   "job": "49881976",
+   "run": 2,
+   "mode": "res-learn",
+   "gpus": 4,
+   "pipelines": 32,
+   "workers": 48,
+   "rc": 0,
+   "wall_s": 309,
+   "tasks_started": 84,
+   "tasks_done": 84,
+   "peak_concurrent": 20,
+   "peak_per_gpu": 7,
+   "pipelines_lost": 12,
+   "ooms": 0,
+   "drained_s": 297.4692339897156,
+   "errors": {
+    "TypeError": 12
+   },
+   "outcome": "12 lost"
+  },
+  {
+   "job": "49885043",
+   "run": 1,
+   "mode": "res-node",
+   "gpus": 1,
+   "pipelines": 8,
+   "workers": 16,
+   "rc": 0,
+   "wall_s": 183,
+   "tasks_started": 25,
+   "tasks_done": 25,
+   "peak_concurrent": 8,
+   "peak_per_gpu": 8,
+   "pipelines_lost": 0,
+   "ooms": 0,
+   "drained_s": 169.8993203639984,
+   "errors": {},
+   "outcome": "clean"
+  },
+  {
+   "job": "49885184",
+   "run": 1,
+   "mode": "res-node",
+   "gpus": 4,
+   "pipelines": 32,
+   "workers": 48,
+   "rc": 0,
+   "wall_s": 317,
+   "tasks_started": 99,
+   "tasks_done": 99,
+   "peak_concurrent": 15,
+   "peak_per_gpu": 6,
+   "pipelines_lost": 17,
+   "ooms": 0,
+   "drained_s": 267.81741738319397,
+   "errors": {
+    "TypeError": 14,
+    "RuntimeError": 3
+   },
+   "outcome": "17 lost"
+  },
+  {
+   "job": "49886638",
+   "run": 1,
+   "mode": "res-node",
+   "gpus": 4,
+   "pipelines": 32,
+   "workers": 48,
+   "rc": 124,
+   "wall_s": 432,
+   "tasks_started": 64,
+   "tasks_done": 64,
+   "peak_concurrent": 32,
+   "peak_per_gpu": 8,
+   "pipelines_lost": null,
+   "ooms": null,
+   "drained_s": null,
+   "errors": {},
+   "outcome": "stalled (timeout)"
+  },
+  {
+   "job": "49886638",
+   "run": 2,
+   "mode": "res-node",
+   "gpus": 4,
+   "pipelines": 32,
+   "workers": 20,
+   "rc": 0,
+   "wall_s": 246,
+   "tasks_started": 82,
+   "tasks_done": 82,
+   "peak_concurrent": 20,
+   "peak_per_gpu": 5,
+   "pipelines_lost": 0,
+   "ooms": 0,
+   "drained_s": 235.39770317077637,
+   "errors": {},
+   "outcome": "clean"
+  },
+  {
+   "job": "49897532",
+   "run": 1,
+   "mode": "res-node",
+   "gpus": 4,
+   "pipelines": 32,
+   "workers": 32,
+   "rc": 0,
+   "wall_s": 237,
+   "tasks_started": 126,
+   "tasks_done": 126,
+   "peak_concurrent": 32,
+   "peak_per_gpu": 8,
+   "pipelines_lost": 0,
+   "ooms": 0,
+   "drained_s": 209.93581438064575,
+   "errors": {},
+   "outcome": "clean"
+  },
+  {
+   "job": "49897532",
+   "run": 2,
+   "mode": "res-node",
+   "gpus": 4,
+   "pipelines": 32,
+   "workers": 24,
+   "rc": 0,
+   "wall_s": 252,
+   "tasks_started": 86,
+   "tasks_done": 86,
+   "peak_concurrent": 24,
+   "peak_per_gpu": 6,
+   "pipelines_lost": 0,
+   "ooms": 0,
+   "drained_s": 244.03314971923828,
+   "errors": {},
+   "outcome": "clean"
+  },
+  {
+   "job": "49897532",
+   "run": 3,
+   "mode": "res-node",
+   "gpus": 4,
+   "pipelines": 32,
+   "workers": 28,
+   "rc": 0,
+   "wall_s": 229,
+   "tasks_started": 107,
+   "tasks_done": 107,
+   "peak_concurrent": 28,
+   "peak_per_gpu": 7,
+   "pipelines_lost": 0,
+   "ooms": 0,
+   "drained_s": 221.24969959259033,
+   "errors": {},
+   "outcome": "clean"
+  }
+ ],
+ "su": [
+  {
+   "job": "49819808",
+   "partition": "GPU-shared",
+   "nodes": 1,
+   "elapsed_min": 13.5,
+   "kind": "GPU",
+   "su": 0.2
+  },
+  {
+   "job": "49819809",
+   "partition": "RM",
+   "nodes": 2,
+   "elapsed_min": 13.5,
+   "kind": "RM",
+   "su": 57.6
+  },
+  {
+   "job": "49820709",
+   "partition": "RM",
+   "nodes": 2,
+   "elapsed_min": 1.7,
+   "kind": "RM",
+   "su": 7.2
+  },
+  {
+   "job": "49821146",
+   "partition": "RM",
+   "nodes": 2,
+   "elapsed_min": 2.2,
+   "kind": "RM",
+   "su": 9.6
+  },
+  {
+   "job": "49821147",
+   "partition": "GPU-shared",
+   "nodes": 1,
+   "elapsed_min": 5.7,
+   "kind": "GPU",
+   "su": 0.1
+  },
+  {
+   "job": "50006591",
+   "partition": "RM",
+   "nodes": 4,
+   "elapsed_min": 31.4,
+   "kind": "RM",
+   "su": 267.7
+  },
+  {
+   "job": "50006592",
+   "partition": "RM",
+   "nodes": 2,
+   "elapsed_min": 8.0,
+   "kind": "RM",
+   "su": 34.3
+  },
+  {
+   "job": "50006593",
+   "partition": "RM",
+   "nodes": 2,
+   "elapsed_min": 7.7,
+   "kind": "RM",
+   "su": 33.0
+  },
+  {
+   "job": "50006594",
+   "partition": "RM",
+   "nodes": 2,
+   "elapsed_min": 7.8,
+   "kind": "RM",
+   "su": 33.1
+  },
+  {
+   "job": "50006595",
+   "partition": "RM",
+   "nodes": 4,
+   "elapsed_min": 23.0,
+   "kind": "RM",
+   "su": 196.1
+  },
+  {
+   "job": "50006596",
+   "partition": "RM",
+   "nodes": 4,
+   "elapsed_min": 9.2,
+   "kind": "RM",
+   "su": 78.4
+  },
+  {
+   "job": "50006597",
+   "partition": "RM",
+   "nodes": 4,
+   "elapsed_min": 9.1,
+   "kind": "RM",
+   "su": 77.5
+  },
+  {
+   "job": "50006598",
+   "partition": "RM-shared",
+   "nodes": 1,
+   "elapsed_min": 1.5,
+   "kind": "RM",
+   "su": 0.1
+  },
+  {
+   "job": "50006599",
+   "partition": "RM-shared",
+   "nodes": 1,
+   "elapsed_min": 2.8,
+   "kind": "RM",
+   "su": 0.2
+  },
+  {
+   "job": "50006600",
+   "partition": "RM-shared",
+   "nodes": 1,
+   "elapsed_min": 1.2,
+   "kind": "RM",
+   "su": 0.1
+  },
+  {
+   "job": "50006601",
+   "partition": "RM-shared",
+   "nodes": 1,
+   "elapsed_min": 1.9,
+   "kind": "RM",
+   "su": 0.1
+  },
+  {
+   "job": "50006602",
+   "partition": "RM-shared",
+   "nodes": 1,
+   "elapsed_min": 1.4,
+   "kind": "RM",
+   "su": 0.4
+  },
+  {
+   "job": "50006603",
+   "partition": "RM-shared",
+   "nodes": 1,
+   "elapsed_min": 1.6,
+   "kind": "RM",
+   "su": 0.4
+  },
+  {
+   "job": "50006604",
+   "partition": "RM-shared",
+   "nodes": 1,
+   "elapsed_min": 1.3,
+   "kind": "RM",
+   "su": 0.3
+  },
+  {
+   "job": "50006605",
+   "partition": "RM-shared",
+   "nodes": 1,
+   "elapsed_min": 1.4,
+   "kind": "RM",
+   "su": 0.4
+  },
+  {
+   "job": "50008020",
+   "partition": "RM",
+   "nodes": 1,
+   "elapsed_min": 12.3,
+   "kind": "RM",
+   "su": 26.3
+  },
+  {
+   "job": "50018097",
+   "partition": "RM",
+   "nodes": 1,
+   "elapsed_min": 12.5,
+   "kind": "RM",
+   "su": 26.7
+  },
+  {
+   "job": "50076655",
+   "partition": "RM",
+   "nodes": 1,
+   "elapsed_min": 12.6,
+   "kind": "RM",
+   "su": 26.9
+  },
+  {
+   "job": "49881976",
+   "partition": "GPU-shared",
+   "nodes": 1,
+   "elapsed_min": 21.5,
+   "kind": "GPU",
+   "su": 1.4
+  },
+  {
+   "job": "49885043",
+   "partition": "GPU-shared",
+   "nodes": 1,
+   "elapsed_min": 4.1,
+   "kind": "GPU",
+   "su": 0.1
+  },
+  {
+   "job": "49885184",
+   "partition": "GPU-shared",
+   "nodes": 1,
+   "elapsed_min": 6.3,
+   "kind": "GPU",
+   "su": 0.4
+  },
+  {
+   "job": "49886638",
+   "partition": "GPU-shared",
+   "nodes": 1,
+   "elapsed_min": 12.6,
+   "kind": "GPU",
+   "su": 0.8
+  },
+  {
+   "job": "49897532",
+   "partition": "GPU-shared",
+   "nodes": 1,
+   "elapsed_min": 13.1,
+   "kind": "GPU",
+   "su": 0.9
+  }
+ ]
+}
