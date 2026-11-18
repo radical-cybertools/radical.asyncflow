@@ -182,6 +182,10 @@ At the end of your async main:
 await flow.shutdown()
 ```
 
+The engine shuts down once. Calling `shutdown()` again, or a signal arriving during it, waits for that same shutdown, so it is safe to call from several places (a `finally`, a signal, a supervisor). Cancelling the caller stops only its wait; the shutdown continues.
+
+`flow.shutdown(skip_execution_backend=True)` keeps the backends running for another engine; later `shutdown()` calls do not change that, so shut a kept backend down with its own `shutdown()`.
+
 ---
 
 ## Logging & Debugging

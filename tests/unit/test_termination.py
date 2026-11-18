@@ -202,8 +202,9 @@ class TestGracefulShutdown:
 
         results = await asyncio.gather(*shutdown_tasks, return_exceptions=True)
 
-        # Assert: All shutdown calls completed without errors
+        # Assert: All shutdown calls completed without errors, all joining one shutdown
         assert engine._shutdown_event.is_set()
+        assert engine._shutdown_task.done() and engine._shutdown_skips_backends
         for result in results:
             assert not isinstance(result, Exception), f"Shutdown failed with: {result}"
 
