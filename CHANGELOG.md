@@ -11,6 +11,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **A cancelled executable task stops its process** — cancelling an executable task on
+  `LocalExecutionBackend` reported `CANCELLED` while its command ran on to the end,
+  with whatever it was using. The backend now sends SIGTERM to the command and the
+  processes it started, and SIGKILL to what is left after `term_grace` seconds (5 by
+  default), and reports `CANCELED` once they have stopped, so a future can take up to
+  that long to end. Each command runs in its own session, because killing a shell alone
+  leaves its children running: a signal sent to the process group of the workflow, such
+  as Ctrl-C in a terminal, no longer reaches commands directly. `shutdown()` and
+  `asyncio.run()` stop them instead. `shutdown()` now waits for the commands, and a
+  repeated `cancel_task()` no longer reports the task twice.
 - **Cancelling a running task cancels it on its own backend** (#118) — with several
   backends, `cancel()` on a running task sent the cancel to the default backend, so a
   task routed elsewhere with `backend=` kept running and its future resolved only when

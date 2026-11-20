@@ -175,6 +175,7 @@ Always shut down the flow explicitly when finished:
 - Releases resources (e.g., thread pools, processes).
 - Ensures a clean exit.
 - Cancels every task and block that has not finished, including a task whose decorated function is still running and a dependent still waiting for its dependencies: awaiting their futures raises `asyncio.CancelledError`. A task or block called after `shutdown()` is cancelled instead of run.
+- Stops the commands of cancelled executable tasks. On `LocalExecutionBackend` a command and the processes it started get SIGTERM, then SIGKILL if they are still running after `backend.term_grace` seconds (5 by default). This also applies to a task you cancel yourself, and its future ends once its command has stopped.
 
 At the end of your async main:
 
