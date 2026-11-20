@@ -244,3 +244,37 @@ async def test_telemetry_is_the_latest_manager(tmp_path):
     await engine.shutdown()
     await second.stop()
     await first.stop()
+
+
+class CompletesLater(NoopExecutionBackend):
+    """Keeps submitted tasks; the test reports their completion when it chooses."""
+
+    def __init__(self):
+        super().__init__()
+        self.submitted = []
+
+    async def submit_tasks(self, tasks):
+        self.submitted.extend(tasks)
+
+
+async def test_a_task_not_done_at_the_call_is_cancelled_even_if_it_was_completing():
+    # The task's completion is already queued on the loop when shutdown() is called
+    # (as a thread-pool backend's would be): shutdown() must cancel it at the call,
+    # not one loop turn later, when that completion has already resolved it.
+    backend = CompletesLater()
+    engine = await WorkflowEngine.create(backend=backend)
+
+    @engine.function_task
+    async def task():
+        return 1
+
+    fut = task()
+    for _ in range(100):
+        if backend.submitted:
+            break
+        await asyncio.sleep(0.01)
+    (submitted,) = backend.submitted
+    submitted["return_value"] = "late"
+    asyncio.get_running_loop().call_soon(backend._callback_func, submitted, "DONE")
+    await engine.shutdown()
+    assert fut.cancelled()

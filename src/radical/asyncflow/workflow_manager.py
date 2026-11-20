@@ -516,7 +516,7 @@ class WorkflowEngine:
                 "initiating graceful shutdown"
             )
 
-        self._start_shutdown()
+        self._request_shutdown()
 
     @classmethod
     async def create(
@@ -2164,6 +2164,9 @@ class WorkflowEngine:
         a signal or an engine error started it (those start it without waiting). A
         call after it has finished returns at once.
 
+        Every task and block that has not finished when the shutdown starts is
+        cancelled right away, inside the call, so none can still complete in between.
+
         The first call's ``skip_execution_backend`` decides. A later call with a
         different value is logged and ignored: backends kept by
         ``skip_execution_backend=True`` stay running, and are shut down with their own
@@ -2190,12 +2193,15 @@ class WorkflowEngine:
                 "shutdown() must run on the engine's event loop; from another thread "
                 "use asyncio.run_coroutine_threadsafe(engine.shutdown(), engine.loop)"
             )
-        await asyncio.shield(self._start_shutdown(skip_execution_backend))
+        await asyncio.shield(self._request_shutdown(skip_execution_backend))
 
-    def _start_shutdown(self, skip_execution_backend: bool = False) -> asyncio.Task:
-        """Start the shutdown, or return the one running or finished.
+    def _request_shutdown(self, skip_execution_backend: bool = False) -> asyncio.Task:
+        """Start the shutdown once and return its task; never waits.
 
-        A failed or cancelled shutdown is started again.
+        The first request cancels the components at once (_cancel_components()) and
+        starts _shutdown_backends() as the shutdown task. Later requests return that
+        task; a failed or cancelled one is started again. Used by shutdown(), the signal
+        handler and the run loop's error path.
         """
         task = self._shutdown_task
         if task is None:
@@ -2210,33 +2216,20 @@ class WorkflowEngine:
         if task is None or (
             task.done() and (task.cancelled() or task.exception() is not None)
         ):
+            self._cancel_components()
             task = asyncio.create_task(
-                self._shutdown(self._shutdown_skips_backends),
+                self._shutdown_backends(self._shutdown_skips_backends),
                 name=f"{self.uid}.shutdown",
             )
             task.add_done_callback(_log_shutdown_failure)
             self._shutdown_task = task
         return task
 
-    async def _shutdown(self, skip_execution_backend: bool) -> None:
-        """Run the shutdown once (started by _start_shutdown()).
+    def _cancel_components(self) -> None:
+        """Cancel every unfinished task, block and registration, and the run loop.
 
-        This method performs the following steps:
-            1. Sets the shutdown event to signal components to exit
-            2. Cancels background tasks responsible for running and
-            submitting workflows.
-            3. Waits for the cancellation and completion of these tasks,
-            with a timeout of 5 seconds.
-            4. Cancel workflow tasks, including those that have not
-            registered yet.
-            5. Logs a warning if the tasks do not complete within the timeout
-            period.
-            6. Shuts down the backend using an executor to avoid blocking the
-            event loop.
-
-        Args:
-            skip_execution_backend (bool): If True, skips the shutdown of the
-                execution backend.
+        Runs in the caller of _request_shutdown(), before it yields to the loop, so no
+        component that is unfinished when shutdown() is called can still complete.
         """
         logger.info("Initiating shutdown")
         # Signal components to exit
@@ -2265,6 +2258,17 @@ class WorkflowEngine:
             logger.debug(f"Shutting down run component")
             self._run_task.cancel()
 
+    async def _shutdown_backends(self, skip_execution_backend: bool) -> None:
+        """The shutdown task: wait for the run loop to stop, then shut the backends down.
+
+        Started once by _request_shutdown(), after _cancel_components(). It waits up to
+        5 seconds for the cancelled run loop, then shuts down every backend unless
+        ``skip_execution_backend``.
+
+        Args:
+            skip_execution_backend (bool): If True, skips the shutdown of the
+                execution backend.
+        """
         # Wait for internal components shutdown to complete
         try:
             await asyncio.wait_for(self._run_task, timeout=5.0)
