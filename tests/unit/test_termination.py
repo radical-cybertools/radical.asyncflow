@@ -125,30 +125,17 @@ class TestGracefulShutdown:
     @pytest.mark.asyncio
     async def test_signal_handler_triggers_shutdown(self, engine):
         """Test 3: Signal handlers properly trigger graceful shutdown."""
-        # Arrange: Track shutdown calls
-        shutdown_called = asyncio.Event()
-        original_shutdown = engine.shutdown
-
-        async def mock_shutdown(*args, **kwargs):
-            shutdown_called.set()
-            # Call the original but skip backend shutdown to avoid issues
-            return await original_shutdown(skip_execution_backend=True)
-
-        # Replace the shutdown method temporarily
-        engine.shutdown = mock_shutdown
-
-        # Act: Simulate signal reception by calling the handler directly
+        # Act: Simulate signal reception by calling the handler directly; it starts
+        # the shutdown and returns without waiting for it
         await engine._handle_shutdown_signal(signal.SIGTERM)
 
-        # Wait for shutdown to be called with timeout
-        try:
-            await asyncio.wait_for(shutdown_called.wait(), timeout=2.0)
-        except TimeoutError:
-            pytest.fail("Shutdown was not called within timeout period")
-
         # Assert: Shutdown was triggered
-        assert shutdown_called.is_set()
+        assert engine.is_shutting_down
+
+        # A shutdown() call joins the one the signal started
+        await asyncio.wait_for(engine.shutdown(), timeout=2.0)
         assert engine._shutdown_event.is_set()
+        engine.backend.shutdown.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_shutdown_timeout_handling(self, engine):
@@ -202,8 +189,9 @@ class TestGracefulShutdown:
 
         results = await asyncio.gather(*shutdown_tasks, return_exceptions=True)
 
-        # Assert: All shutdown calls completed without errors
+        # Assert: All shutdown calls completed without errors, all joining one shutdown
         assert engine._shutdown_event.is_set()
+        assert engine._shutdown_task.done() and engine._shutdown_skips_backends
         for result in results:
             assert not isinstance(result, Exception), f"Shutdown failed with: {result}"
 
