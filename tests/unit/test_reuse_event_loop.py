@@ -25,22 +25,43 @@ async def _engine(**kwargs):
     return backend, await WorkflowEngine.create(backend=backend)
 
 
+def _loop_recorder():
+    """A task that records its running loop, and the list it records into.
+
+    The list keeps every loop alive, so loops compare by identity: comparing their
+    ``id()`` would not do, as CPython gives a freed loop's id to the next object.
+    """
+    seen = []
+
+    async def record_loop():
+        seen.append(asyncio.get_running_loop())
+        return len(seen)
+
+    return seen, record_loop
+
+
 async def test_default_runs_each_task_on_a_new_loop():
+    seen, record_loop = _loop_recorder()
     backend, flow = await _engine()
     try:
-        task = flow.function_task(_loop_id)
-        first, second = await task(), await task()
-        assert first != second  # asyncio.run: a loop per task
+        task = flow.function_task(record_loop)
+        await task()
+        await task()
+        assert len(seen) == 2
+        assert seen[0] is not seen[1]  # asyncio.run: a loop per task
     finally:
         await flow.shutdown()
 
 
 async def test_reuse_runs_a_thread_s_tasks_on_one_loop():
+    seen, record_loop = _loop_recorder()
     backend, flow = await _engine(reuse_event_loop=True)
     try:
-        task = flow.function_task(_loop_id)
-        first, second = await task(), await task()
-        assert first == second  # one worker thread, one loop
+        task = flow.function_task(record_loop)
+        await task()
+        await task()
+        assert len(seen) == 2
+        assert seen[0] is seen[1]  # one worker thread, one loop
     finally:
         await flow.shutdown()
 
@@ -94,8 +115,8 @@ async def test_reuse_reports_an_error_a_left_task_raised():
         await flow.shutdown()
 
 
-async def test_reuse_survives_a_task_that_closes_its_loop():
-    async def closes_its_loop():
+async def test_reuse_survives_a_task_that_stops_its_loop():
+    async def stops_its_loop():
         loop = asyncio.get_running_loop()
         loop.call_soon(loop.stop)  # stops the loop under run_until_complete
         await asyncio.sleep(0.01)
@@ -104,8 +125,10 @@ async def test_reuse_survives_a_task_that_closes_its_loop():
     backend, flow = await _engine(reuse_event_loop=True)
     try:
         with pytest.raises(RuntimeError):
-            await flow.function_task(closes_its_loop)()
-        assert isinstance(await flow.function_task(_loop_id)(), int)  # a new loop
+            await flow.function_task(stops_its_loop)()
+        assert isinstance(
+            await flow.function_task(_loop_id)(), int
+        )  # the next task runs
     finally:
         await flow.shutdown()
 
