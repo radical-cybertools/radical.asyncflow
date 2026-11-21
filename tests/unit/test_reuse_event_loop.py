@@ -153,28 +153,35 @@ async def test_reuse_with_processes_keeps_asyncio_run():
 
 
 async def test_reuse_is_not_slowed_by_live_tasks():
-    """With many Tasks alive in the process, a task costs about the same as without."""
+    """With many Tasks alive in the process, a worker's call on its own loop costs about
+    what it costs without them; ``asyncio.run`` walks them all."""
     import time
 
     async def noop():
         return None
 
+    def timed(run, n=200):
+        t = time.perf_counter()
+        for _ in range(n):
+            run(noop, (), {})
+        return time.perf_counter() - t
+
     stop = asyncio.Event()
     holders = [asyncio.ensure_future(stop.wait()) for _ in range(20_000)]
+    backend = await LocalExecutionBackend(
+        ThreadPoolExecutor(max_workers=1), reuse_event_loop=True
+    )
     try:
-        timings = {}
-        for reuse in (False, True):
-            backend, flow = await _engine(reuse_event_loop=reuse)
-            try:
-                task = flow.function_task(noop)
-                await task()
-                t = time.perf_counter()
-                for _ in range(50):
-                    await task()
-                timings[reuse] = time.perf_counter() - t
-            finally:
-                await flow.shutdown()
-        assert timings[True] < timings[False] / 2, timings
+        await asyncio.sleep(0)
+        loop = asyncio.get_running_loop()
+        per_task = await loop.run_in_executor(
+            backend.executor, timed, LocalExecutionBackend._run_in_thread
+        )
+        reused = await loop.run_in_executor(
+            backend.executor, timed, backend._run_on_thread_loop
+        )
+        assert reused < per_task / 3, (reused, per_task)
     finally:
         stop.set()
         await asyncio.gather(*holders)
+        await backend.shutdown()

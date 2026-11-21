@@ -10,6 +10,8 @@ from typing import Any
 
 import cloudpickle
 
+from ._thread_loops import ThreadLoops
+
 logger = logging.getLogger(__name__)
 
 
@@ -193,7 +195,19 @@ class LocalExecutionBackend:
     term_grace: float = 5.0
     kill_wait: float = 1.0
 
-    def __init__(self, executor: Executor = None, name: str = "default"):
+    def __init__(
+        self,
+        executor: Executor = None,
+        name: str = "default",
+        reuse_event_loop: bool = False,
+    ):
+        """``reuse_event_loop``: on a thread pool, run async function tasks on one event
+        loop per worker thread instead of ``asyncio.run`` per task (see
+        ``radical.asyncflow._thread_loops``).
+
+        Off by default. A process pool ignores
+        it: its workers keep ``asyncio.run``.
+        """
         if not executor:
             executor = ThreadPoolExecutor()
             logger.info(
@@ -212,6 +226,13 @@ class LocalExecutionBackend:
 
         self.name = name
         self.executor = executor
+        self.reuse_event_loop = reuse_event_loop
+        # one loop per worker thread, if asked for, on a thread pool only
+        self._thread_loops: ThreadLoops | None = (
+            ThreadLoops()
+            if reuse_event_loop and not isinstance(executor, ProcessPoolExecutor)
+            else None
+        )
         self.tasks: dict[str, asyncio.Task] = {}
         self._callback_func: Callable = lambda t, s: None
         self._initialized = False
@@ -298,6 +319,10 @@ class LocalExecutionBackend:
         """Execute async function in isolated executor process."""
         return asyncio.run(func(*args, **kwargs))
 
+    def _run_on_thread_loop(self, func, args, kwargs):
+        """Execute async function on the worker thread's own event loop."""
+        return self._thread_loops.run(func(*args, **kwargs))
+
     async def _execute_function(self, task: dict) -> tuple[dict, str]:
         """Execute async function task in Process/Thread PoolExecutor."""
         func = task["function"]
@@ -308,6 +333,8 @@ class LocalExecutionBackend:
         if isinstance(self.executor, ProcessPoolExecutor):
             func = cloudpickle.dumps(func)
             exec_wrapper = self._run_in_process
+        elif self._thread_loops is not None:
+            exec_wrapper = self._run_on_thread_loop
         else:
             exec_wrapper = self._run_in_thread
 
@@ -491,6 +518,9 @@ class LocalExecutionBackend:
         # Set backend state to SHUTDOWN
         await self.cancel_all_tasks()
         self.executor.shutdown(wait=True)
+        if self._thread_loops is not None:
+            # the worker threads have finished: close their loops, off this loop
+            await asyncio.to_thread(self._thread_loops.close)
         logger.info("Concurrent execution backend shutdown complete")
 
     def build_task(self, uid: str, task_desc: dict, task_specific_kwargs: dict) -> None:
