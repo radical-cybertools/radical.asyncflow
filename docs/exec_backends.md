@@ -59,6 +59,34 @@ from radical.asyncflow import LocalExecutionBackend
 backend = await LocalExecutionBackend(ThreadPoolExecutor())
 ```
 
+### Many short function tasks: one event loop per thread
+
+By default `LocalExecutionBackend` runs every `async def` function task on a thread pool
+with `asyncio.run`, which creates an event loop for the task and closes it at the end.
+That clean-up looks for the tasks the function left running by walking every asyncio
+task of the process, so a function task costs more the more asyncio tasks are alive:
+about 0.1 ms with none, about 1 ms with 10,000, about 8 ms with 100,000 (Python 3.12).
+A workflow with thousands of tasks in flight, or many short ones, can spend most of its
+time there.
+
+`reuse_event_loop=True` keeps one event loop per worker thread instead:
+
+```python
+backend = await LocalExecutionBackend(ThreadPoolExecutor(), reuse_event_loop=True)
+```
+
+After each task the backend still cancels the tasks the function left running and
+reports their errors, as `asyncio.run` does, without the walk. What changes:
+
+- async generators a task left open are closed when garbage-collected, during a later
+  task on that thread, not when the task ends;
+- the loop's default executor (`asyncio.to_thread`) lives until the backend shuts down;
+- an object bound to an event loop that a task keeps beyond its end (an async HTTP
+  client, a connection pool) stays usable by later tasks on the same thread only.
+
+A process pool ignores the option: its workers hold few asyncio tasks, so `asyncio.run`
+costs little there.
+
 ### HPC Execution with RadicalExecutionBackend
 
 ```python
