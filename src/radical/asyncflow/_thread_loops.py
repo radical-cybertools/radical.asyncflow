@@ -31,11 +31,14 @@ after the worker threads have finished.
 from __future__ import annotations
 
 import asyncio
+import logging
 import threading
 from collections.abc import Coroutine
 from typing import Any
 
 __all__ = ["ThreadLoops"]
+
+logger = logging.getLogger(__name__)
 
 
 class ThreadLoops:
@@ -118,8 +121,8 @@ class ThreadLoops:
             try:
                 loop.run_until_complete(loop.shutdown_asyncgens())
                 loop.run_until_complete(loop.shutdown_default_executor())
-            except Exception:  # noqa: BLE001 - closing must go on for the others
-                pass
+            except Exception as exc:  # noqa: BLE001 - closing must go on for the others
+                logger.debug("closing a worker thread's event loop: %r", exc)
             finally:
                 loop.close()
         with self._lock:
