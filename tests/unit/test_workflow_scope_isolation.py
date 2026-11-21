@@ -22,12 +22,11 @@ async def test_workflow_scope_does_not_leak_to_sibling_engine():
         async def task2(x):
             return x
 
-        await task1(1)
-        await task2(2)
-        await asyncio.sleep(0.05)
+        fut1, fut2 = task1(1), task2(2)
+        await fut1
+        await fut2
 
-    desc1 = next(iter(engine1.components.values()))["description"]
-    desc2 = next(iter(engine2.components.values()))["description"]
+    desc1, desc2 = fut1.task, fut2.task
 
     assert desc1["workflow_id"] == "wf-A", "engine1 task must carry the workflow_id"
     assert desc2["workflow_id"] is None, "engine2 task must NOT inherit engine1's scope"
@@ -70,19 +69,17 @@ async def test_workflow_scope_resets_after_exit():
         async def inside(x):
             return x
 
-        await inside(1)
-        await asyncio.sleep(0.05)
+        futs = [inside(1)]
+        await futs[0]
 
     @engine.function_task
     async def outside(x):
         return x
 
-    await outside(2)
-    await asyncio.sleep(0.05)
+    futs.append(outside(2))
+    await futs[1]
 
-    comps = list(engine.components.values())
-    assert len(comps) == 2
-    wids = {c["description"]["name"]: c["description"]["workflow_id"] for c in comps}
+    wids = {f.task["name"]: f.task["workflow_id"] for f in futs}
     assert wids["inside"] == "wf-C"
     assert wids["outside"] is None
 
@@ -103,11 +100,10 @@ async def test_explicit_workflow_id_is_recorded():
     async def tagged_task(x):
         return x
 
-    tagged_task(1, workflow_id="my-wf")
-    await asyncio.sleep(0.05)
+    fut = tagged_task(1, workflow_id="my-wf")
+    await fut
 
-    comp = next(iter(engine.components.values()))
-    assert comp["description"]["workflow_id"] == "my-wf"
+    assert fut.task["workflow_id"] == "my-wf"
 
     await engine.shutdown()
 
@@ -143,11 +139,10 @@ async def test_explicit_workflow_id_overrides_context_var():
         async def ctx_task(x):
             return x
 
-        ctx_task(1, workflow_id="explicit-wf")
-        await asyncio.sleep(0.05)
+        fut = ctx_task(1, workflow_id="explicit-wf")
+        await fut
 
-    comp = next(iter(engine.components.values()))
-    assert comp["description"]["workflow_id"] == "explicit-wf"
+    assert fut.task["workflow_id"] == "explicit-wf"
 
     await engine.shutdown()
 
@@ -164,10 +159,9 @@ async def test_workflow_id_falls_back_to_context_var():
         async def scoped_task(x):
             return x
 
-        scoped_task(1)
-        await asyncio.sleep(0.05)
+        fut = scoped_task(1)
+        await fut
 
-    comp = next(iter(engine.components.values()))
-    assert comp["description"]["workflow_id"] == "scope-wf"
+    assert fut.task["workflow_id"] == "scope-wf"
 
     await engine.shutdown()

@@ -165,10 +165,16 @@ records[fut.uid] = "my own record"  # readable before any await
 await fut
 ```
 
-`future.uid` is the component's key in `flow.components` and the `task_id` of its telemetry
-events. A task's span carries it as `task_id`; a block's span carries it as
+`future.uid` is the component's key in `flow.components` while it is registered, and the
+`task_id` of its telemetry events. A task's span carries it as `task_id`; a block's span carries it as
 `asyncflow.workflow_id`. Use it to link your own records, such as an agent's tool calls, to what
 AsyncFlow reports.
+
+!!! note
+    A finished component is released: the engine drops it from `flow.components` once its
+    dependents were notified, so a long-lived engine keeps no record per finished task (only one
+    bit per uid, to recognise a late report about a released task). Its future
+    keeps the description (`future.task` or `future.block`) and still works as a dependency.
 
 !!! note
     uids are unique across all engines in a process. The counter is shared and never reset, so

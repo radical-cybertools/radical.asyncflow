@@ -14,13 +14,11 @@ async def test_register_function_task():
     async def dummy_task(x):
         return x + 1
 
-    await dummy_task(1)
+    fut = dummy_task(1)
+    await fut
+    desc = fut.task
 
-    comp_vals = [t["description"]["name"] for t in engine.components.values()]
-
-    assert "dummy_task" in comp_vals
-
-    desc = next(iter(engine.components.values()))["description"]
+    assert desc["name"] == "dummy_task"
 
     assert desc["executable"] is None
     assert desc["function"] is not None
@@ -90,7 +88,8 @@ async def test_register_component_adds_block_entry():
             comp_fut=asyncio.Future(), comp_type=TASK, comp_desc=comp_desc
         )
 
-        return await task_future
+        await task_future
+        return comp_desc["uid"]
 
     comp_desc = {
         "uid": engine._assign_uid(prefix=BLOCK),
@@ -112,11 +111,11 @@ async def test_register_component_adds_block_entry():
     # block gets registered first
     assert BLOCK in block_uid
 
-    await block_future
+    task_uid = await block_future
 
     # now the block is unpacked test if
-    # the task is registered
-    assert len(engine.components) == 2
+    # the task was registered (it may be released already)
+    assert task_uid in engine.components or engine._is_released(task_uid)
 
 
 @pytest.mark.asyncio
@@ -129,9 +128,9 @@ async def test_dynamic_task_backend_specific_kwargs():
     async def dummy_task(task_description=task_resources):
         return "dummy return value"
 
-    await dummy_task(task_description={"gpus_per_rank": 2})
-
-    first_value_desc = next(iter(engine.components.values()))["description"]
+    fut = dummy_task(task_description={"gpus_per_rank": 2})
+    await fut
+    first_value_desc = fut.task
 
     assert first_value_desc["task_backend_specific_kwargs"] == {
         "ranks": 8,
