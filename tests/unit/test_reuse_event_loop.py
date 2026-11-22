@@ -395,10 +395,14 @@ async def test_shutdown_can_be_called_again():
     assert loops and all(lp.is_closed() for lp in loops)
 
 
-async def test_closing_the_loops_on_an_event_loop_is_refused():
+async def test_the_loops_cannot_be_run_or_closed_on_an_event_loop():
     backend, flow = await _engine(reuse_event_loop=True)
     try:
         await flow.function_task(_loop_id)()
+        coro = _loop_id()
+        with pytest.raises(RuntimeError):
+            backend._thread_loops.run(coro)  # as asyncio.run refuses
+        coro.close()
         with pytest.raises(RuntimeError):
             backend._thread_loops.close()  # it would block, and skip the clean-up
         assert not any(lp.is_closed() for lp in backend._thread_loops.loops())

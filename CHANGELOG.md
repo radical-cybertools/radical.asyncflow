@@ -35,9 +35,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   errors, as `asyncio.run` does, without the walk. On a probe of concurrent chains of 5
   function tasks, 5,000 chains took 2 s instead of 53 s, and 10,000 took 5 s instead
   of about 225 s. Off by default;
-  a process pool ignores it. Async generators a task leaves open, the loop's default
-  executor and loop-bound objects a task keeps now outlive the task (see "Execution
-  Backends").
+  a process pool ignores it. Async generators and timers a task leaves open, the
+  loop's default executor and loop-bound objects a task keeps now outlive the task (see
+  "Execution Backends").
 - **`WorkflowEngine.is_shutting_down`** — True once `shutdown()` has been called (by
   the caller, a signal or an engine error), and still True after it has finished.
 - **`WorkflowEngine.telemetry`** — the `TelemetryManager` from the latest
