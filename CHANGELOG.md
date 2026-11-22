@@ -26,6 +26,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **`LocalExecutionBackend(reuse_event_loop=True)`: one event loop per worker thread** —
+  every `async def` function task on a thread pool ran with `asyncio.run`, whose
+  clean-up walks every asyncio task of the process (`asyncio.all_tasks()` in Python
+  3.12), so a task cost more the more tasks were alive: about 1 ms with 10,000 alive,
+  8 ms with 100,000. With the option each worker thread keeps one loop, and after each
+  task the backend cancels the tasks the function left running and reports their
+  errors, as `asyncio.run` does, without the walk. On a probe of concurrent chains of 5
+  function tasks, 5,000 chains took 2 s instead of 53 s, and 10,000 took 5 s instead
+  of about 225 s. Off by default;
+  a process pool ignores it. Async generators and timers a task leaves open, the
+  loop's default executor and loop-bound objects a task keeps now outlive the task (see
+  "Execution Backends").
 - **`WorkflowEngine.is_shutting_down`** — True once `shutdown()` has been called (by
   the caller, a signal or an engine error), and still True after it has finished.
 - **`WorkflowEngine.telemetry`** — the `TelemetryManager` from the latest
