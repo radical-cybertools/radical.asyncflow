@@ -69,8 +69,7 @@ async def test_kept_futures_do_not_keep_the_backends_handlers():
 
 @pytest.mark.asyncio
 async def test_a_dropped_chain_is_freed():
-    """Once the caller lets go of a finished chain x = step(x), the engine keeps none
-    of it.
+    """A finished chain x = step(x) that the caller lets go of is freed.
 
     Each description reaches the ones before it through its dependencies, so any
     reference left to one link, such as a run loop variable, keeps the whole chain.
