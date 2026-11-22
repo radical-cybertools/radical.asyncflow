@@ -8,6 +8,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **Breaking: a finished task leaves the engine's records** — once a task or block has
+  finished and its dependents were notified, the engine drops it from
+  `flow.components`, `flow.dependencies` and `flow.resolved`, and
+  `LocalExecutionBackend` drops it from `tasks`. A long-lived engine no longer grows
+  with every task it ran, and on Python 3.11 to 3.13 a function task no longer costs
+  more than the one before it: 50,000 trivial tasks took about 0.3 ms each instead of
+  0.6 ms growing to 3.9 ms. What remains per finished task is one bit, which tells a
+  late backend report about a released task from one about an unknown task. A finished
+  task's description stays on its future (`future.task` or `future.block`), and the
+  future still works as a dependency; read the future, not `flow.components`, once a
+  task has finished. Services stay registered.
 - **`shutdown()` runs once, and every call joins it** — the engine's shutdown is now
   one stored task. A second `shutdown()` call during a shutdown waits for it and
   returns when it has finished, instead of running the whole sequence again (which
