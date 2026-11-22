@@ -435,6 +435,9 @@ class LocalExecutionBackend:
         finally:
             # a finished task is the engine's to keep, not the backend's
             self.tasks.pop(task["uid"], None)
+            # Nor its handler: the description is the caller's future.task, and a
+            # handler kept alive there makes every later asyncio.run slower
+            task.pop("future", None)
 
     async def submit_tasks(self, tasks: list[dict[str, Any]]) -> list[asyncio.Task]:
         """Submit tasks for execution."""
@@ -453,7 +456,9 @@ class LocalExecutionBackend:
                 coro.close()
                 raise
             submitted_tasks.append(future)
-            task["future"] = future
+            # an eager handler may have finished inside create_task
+            if not future.done():
+                task["future"] = future
 
         return submitted_tasks
 

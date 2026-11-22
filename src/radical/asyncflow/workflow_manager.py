@@ -1780,8 +1780,16 @@ class WorkflowEngine:
                 if completed_components:
                     self._component_change_event.set()
 
+                # Drop this pass's references to components before waiting. A
+                # description reaches the descriptions of its dependencies, so one
+                # left in a variable keeps a whole chain alive while the loop waits.
+                submitted = bool(to_submit)
+                to_submit = comp_desc = dependencies = dep_futures = fut = None
+                failed_deps = cancelled_deps = chained_exception = None
+                dep_desc = data_dep = explicit_files_to_stage = None
+
                 # If nothing is ready/running, wait for changes or shutdown
-                if not self._ready_queue and not to_submit and not completed_components:
+                if not self._ready_queue and not submitted and not completed_components:
                     try:
                         # Create tasks for event waiting
                         event_task = asyncio.create_task(
