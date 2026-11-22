@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- **`shutdown()` runs once, and every call joins it** — the engine's shutdown is now
+  one stored task. A second `shutdown()` call during a shutdown waits for it and
+  returns when it has finished, instead of running the whole sequence again (which
+  shut the backends down a second time). A signal or an engine error during a shutdown
+  does not start a second one. A call after the shutdown has finished returns at once.
+  Cancelling a caller, or wrapping it in `asyncio.timeout()`, stops only that caller's
+  wait; the shutdown itself continues, so it is never left half-done. If the shutdown
+  fails or is cancelled, every caller waiting for it gets that outcome, it is logged at
+  ERROR, and the next call starts it again. A retry after a failure calls every
+  backend's `shutdown()` again. `shutdown()` must run on the engine's event loop; a call from
+  another loop raises `RuntimeError` instead of breaking the engine.
+- **Breaking:** the first call's `skip_execution_backend` decides. After
+  `shutdown(skip_execution_backend=True)`, a later `shutdown()` no longer shuts the
+  backends down; it is logged and ignored. Shut a kept backend down with its own
+  `shutdown()`.
+
 ### Added
 
 - **`LocalExecutionBackend(reuse_event_loop=True)`: one event loop per worker thread** —
@@ -20,7 +38,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   a process pool ignores it. Async generators a task leaves open, the loop's default
   executor and loop-bound objects a task keeps now outlive the task (see "Execution
   Backends").
-
+- **`WorkflowEngine.is_shutting_down`** — True once `shutdown()` has been called (by
+  the caller, a signal or an engine error), and still True after it has finished.
+- **`WorkflowEngine.telemetry`** — the `TelemetryManager` from the latest
+  `start_telemetry()` call, or `None`. It is the manager the engine emits its events
+  into.
 
 ## [0.7.0] 2026-11-10
 
