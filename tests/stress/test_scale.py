@@ -6,6 +6,9 @@ They run nightly and on pull requests labelled ``stress``, under both task facto
 """
 
 import asyncio
+import gc
+import time
+import weakref
 
 import pytest
 
@@ -49,6 +52,45 @@ async def test_executable_to_function_chains(chains, length, tmp_path):
 
     results = await asyncio.wait_for(asyncio.gather(*tails), timeout=120)
     assert results == [length + 1] * chains
+    await flow.shutdown()
+
+
+async def test_kept_futures_keep_the_cost_per_task_flat(tmp_path):
+    """A caller that keeps every future does not make later tasks slower.
+
+    On Python 3.11 to 3.13 each function task on a thread pool runs with asyncio.run,
+    whose clean-up walks every Task alive in the process. A finished handler Task that a
+    kept future still reached made each task cost more than the one before: about four
+    times as much after 20,000 tasks.
+    """
+    backend = await LocalExecutionBackend()
+    handlers = []
+    submit_tasks = backend.submit_tasks
+
+    async def recording(tasks):
+        submitted = await submit_tasks(tasks)
+        handlers.extend(weakref.ref(task) for task in submitted)
+        return submitted
+
+    backend.submit_tasks = recording
+    flow = await WorkflowEngine.create(backend=backend, work_dir=str(tmp_path))
+
+    @flow.function_task
+    async def work(x):
+        return x
+
+    kept, cpu = [], []
+    for _ in range(20):
+        start = time.process_time()
+        futs = [work(i) for i in range(1000)]
+        assert await asyncio.wait_for(asyncio.gather(*futs), 60) == list(range(1000))
+        cpu.append(time.process_time() - start)
+        kept.extend(futs)
+
+    # The last thousand tasks cost about as much as the first thousand.
+    assert min(cpu[-3:]) < 2 * max(cpu[:3]), [round(c, 3) for c in cpu]
+    gc.collect()
+    assert not [ref for ref in handlers if ref() is not None]
     await flow.shutdown()
 
 

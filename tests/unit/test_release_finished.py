@@ -24,6 +24,161 @@ async def _released(engine, uid, timeout=5.0):
         await asyncio.sleep(0.01)
 
 
+def _record_handlers(backend) -> list:
+    """Weak references to the handler Tasks *backend* creates, as it submits them."""
+    handlers = []
+    submit_tasks = backend.submit_tasks
+
+    async def recording(tasks):
+        submitted = await submit_tasks(tasks)
+        handlers.extend(weakref.ref(task) for task in submitted)
+        return submitted
+
+    backend.submit_tasks = recording
+    return handlers
+
+
+@pytest.mark.asyncio
+async def test_kept_futures_do_not_keep_the_backends_handlers():
+    """A caller that keeps its futures keeps their descriptions, not the backend's
+    handler Tasks.
+
+    On Python 3.11 to 3.13, asyncio.run walks every Task alive in the process, so a
+    handler that a kept future still reached made every later function task slower.
+    """
+    backend = await LocalExecutionBackend()
+    handlers = _record_handlers(backend)
+    engine = await WorkflowEngine.create(backend=backend)
+    try:
+
+        @engine.function_task
+        async def work(x):
+            return x
+
+        futs = [work(i) for i in range(300)]
+        assert await asyncio.wait_for(asyncio.gather(*futs), 10) == list(range(300))
+        await _released(engine, futs[-1].task["uid"])
+        gc.collect()
+
+        assert len(handlers) == 300
+        assert not [h for h in handlers if h() is not None]
+        assert not [f.uid for f in futs if "future" in f.task]
+    finally:
+        await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_a_dropped_chain_is_freed():
+    """Once the caller lets go of a finished chain x = step(x), the engine keeps none
+    of it.
+
+    Each description reaches the ones before it through its dependencies, so any
+    reference left to one link, such as a run loop variable, keeps the whole chain.
+    """
+    engine = await WorkflowEngine.create(backend=await LocalExecutionBackend())
+    try:
+
+        class Payload:
+            pass
+
+        @engine.function_task
+        async def first(payload):
+            return 0
+
+        @engine.function_task
+        async def step(x):
+            return x + 1
+
+        payload = Payload()
+        ref = weakref.ref(payload)
+        x = first(payload)
+        del payload
+        for _ in range(20):
+            x = step(x)
+            await asyncio.wait_for(x, 5)
+        assert x.result() == 20
+        uid = x.task["uid"]
+        del x
+        await _released(engine, uid)
+        await asyncio.sleep(0.05)  # the run loop finishes its pass and goes idle
+        gc.collect()
+        assert ref() is None
+    finally:
+        await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_dependents_leave_no_dependency_records():
+    """A fan-in and a chain leave nothing in the dependency records once released."""
+    engine = await WorkflowEngine.create(backend=await LocalExecutionBackend())
+    try:
+
+        @engine.function_task
+        async def work(x):
+            return x
+
+        @engine.function_task
+        async def add(a, b):
+            return a + b
+
+        @engine.function_task
+        async def inc(x):
+            return x + 1
+
+        leaves = [work(i) for i in range(100)]
+        sums = [add(a, b) for a, b in zip(leaves[::2], leaves[1::2], strict=True)]
+        x = work(0)
+        for _ in range(50):
+            x = inc(x)
+        results = await asyncio.wait_for(asyncio.gather(*sums, x), 10)
+        assert results == [2 * i + 1 for i in range(0, 100, 2)] + [50]
+        for fut in (*leaves, *sums, x):
+            await _released(engine, fut.uid)
+
+        assert not engine.dependencies
+        assert not engine._dependency_futures
+        assert not engine._dependency_count
+        assert not engine._dependents_map
+    finally:
+        await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_a_task_cancelled_during_its_submit_leaves_no_telemetry_timing():
+    """A task cancelled while the backend accepts it is released before the backend
+    reports on it, and the report is then ignored: the release drops its telemetry
+    timing entries."""
+    pytest.importorskip("rhapsody.telemetry", reason="RHAPSODY telemetry not installed")
+
+    class SlowSubmit(LocalExecutionBackend):
+        async def submit_tasks(self, tasks):
+            await asyncio.sleep(0.05)  # the caller cancels meanwhile
+            return await super().submit_tasks(tasks)
+
+    engine = await WorkflowEngine.create(backend=await SlowSubmit())
+    telemetry = await engine.start_telemetry()
+    try:
+
+        @engine.function_task
+        async def work():
+            await asyncio.sleep(0.3)  # reports after the release
+            return 1
+
+        fut = work()
+        while fut.uid not in engine._task_submit_times:
+            await asyncio.sleep(0.005)
+        fut.cancel()
+        await _released(engine, fut.uid)
+        await asyncio.sleep(0.5)  # the backend's late report arrives, and is ignored
+
+        assert fut.cancelled()
+        assert fut.uid not in engine._task_submit_times
+        assert fut.uid not in engine._task_start_times
+    finally:
+        await telemetry.stop()
+        await engine.shutdown()
+
+
 @pytest.mark.asyncio
 async def test_many_tasks_keep_the_engine_bounded():
     backend = await LocalExecutionBackend()
@@ -62,8 +217,7 @@ async def test_many_tasks_keep_the_engine_bounded():
         uid = fut.task["uid"]
         del payload, fut
         await _released(engine, uid)
-        # the run loop's locals hold its latest batch until the next one
-        await work(0)
+        await asyncio.sleep(0.05)  # the run loop finishes its pass and goes idle
         gc.collect()
         assert ref() is None
     finally:
@@ -87,7 +241,7 @@ async def test_released_future_still_works_as_a_dependency():
         await first
         await _released(engine, first.task["uid"])
 
-        assert await consume(first) == 21
+        assert await asyncio.wait_for(consume(first), 5) == 21
     finally:
         await engine.shutdown()
 
@@ -111,7 +265,7 @@ async def test_released_failed_dependency_still_fails_its_dependent():
         await _released(engine, first.task["uid"])
 
         with pytest.raises(DependencyFailureError):
-            await consume(first)
+            await asyncio.wait_for(consume(first), 5)
     finally:
         await engine.shutdown()
 
