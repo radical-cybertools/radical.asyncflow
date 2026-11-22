@@ -16,7 +16,7 @@ from contextvars import ContextVar
 from functools import wraps
 from itertools import count
 from pathlib import Path
-from typing import Any, AsyncIterator, Callable, Optional, Union
+from typing import TYPE_CHECKING, Any, AsyncIterator, Callable, Optional, Union
 
 import typeguard
 
@@ -26,6 +26,9 @@ from .data import InputFile, OutputFile
 from .errors import DependencyFailureError
 from .utils import get_next_uid
 from .utils import get_event_loop_or_raise
+
+if TYPE_CHECKING:
+    from rhapsody.telemetry.manager import TelemetryManager
 
 TASK = "task"
 BLOCK = "block"
@@ -40,6 +43,25 @@ def _uid_number(uid: str) -> Optional[int]:
     """The counter value in a uid like 'task.000042' (see get_next_uid)."""
     num = uid.rpartition(".")[2]
     return int(num) if num.isdecimal() else None
+
+
+def _log_shutdown_failure(task: asyncio.Task) -> None:
+    """Log a failed or cancelled shutdown, even if nobody is waiting for it.
+
+    A shutdown started by a signal or an engine error has no caller to receive its
+    outcome, so this log line can be the only trace of backends left running.
+    """
+    if task.cancelled():
+        logger.error(
+            "Engine shutdown was cancelled; backends may still be running. "
+            "Call shutdown() again to retry."
+        )
+    elif task.exception() is not None:
+        logger.error(
+            "Engine shutdown failed; backends may still be running. "
+            "Call shutdown() again to retry.",
+            exc_info=task.exception(),
+        )
 
 
 class _ComponentFuture(asyncio.Future):
@@ -241,6 +263,9 @@ class WorkflowEngine:
         # Initialize async task references (will be set in _start_async_components)
         self._run_task = None
         self._shutdown_event = asyncio.Event()  # Added shutdown signal
+        # The one shutdown every shutdown() call joins, and its first call's argument
+        self._shutdown_task: asyncio.Task | None = None
+        self._shutdown_skips_backends = False
 
         # Telemetry (opt-in via start_telemetry(), None = disabled, zero cost)
         self._telemetry = None
@@ -255,6 +280,23 @@ class WorkflowEngine:
     def backend(self):
         """Return the default execution backend."""
         return self._backends[self._default_backend_name]
+
+    @property
+    def is_shutting_down(self) -> bool:
+        """True once shutdown() has been called (by the caller, a signal or an engine
+        error).
+
+        It stays True after the shutdown has finished: an engine is never restarted.
+        """
+        return self._shutdown_task is not None or self._shutdown_event.is_set()
+
+    @property
+    def telemetry(self) -> TelemetryManager | None:
+        """The TelemetryManager from the latest start_telemetry() call, or None.
+
+        This is the manager the engine emits its events into.
+        """
+        return self._telemetry
 
     def _attach_backend(self, backend) -> None:
         """Attach a backend to this engine, setting its work directory.
@@ -472,19 +514,25 @@ class WorkflowEngine:
     ):
         """Handle received signals by initiating a graceful shutdown.
 
+        This starts the shutdown, or finds the one already running, and returns at
+        once: nobody awaits a signal's task, and the run loop's error path calls this
+        from the run task, which the shutdown itself waits for. A failure is logged by
+        the shutdown task.
+
         Args:
             sig: The signal received (e.g., SIGHUP, SIGTERM, SIGINT)
         """
-        if self._shutdown_event.is_set():
-            logger.info(f"Shutdown process already started")
-            return
+        if self.is_shutting_down:
+            logger.info(
+                f"Received {source} signal ({sig.name}); shutdown already started"
+            )
+        else:
+            logger.info(
+                f"Received {source} shutdown signal ({sig.name}), "
+                "initiating graceful shutdown"
+            )
 
-        logger.info(
-            f"Received {source} shutdown signal ({sig.name}), "
-            "initiating graceful shutdown"
-        )
-
-        await self.shutdown()
+        self._request_shutdown()
 
     @classmethod
     async def create(
@@ -2204,33 +2252,79 @@ class WorkflowEngine:
                 )
 
     async def shutdown(self, skip_execution_backend: bool = False) -> None:
-        """Internal implementation of asynchronous shutdown for the workflow manager.
+        """Shut the engine down, or wait for the shutdown already running.
 
-        This method performs the following steps:
-            1. Sets the shutdown event to signal components to exit
-            2. Cancels background tasks responsible for running and
-            submitting workflows.
-            3. Waits for the cancellation and completion of these tasks,
-            with a timeout of 5 seconds.
-            4. Cancel workflow tasks, including those that have not
-            registered yet.
-            5. Logs a warning if the tasks do not complete within the timeout
-            period.
-            6. Shuts down the backend using an executor to avoid blocking the
-            event loop.
+        The engine shuts down once. The first call starts the shutdown; every later
+        call waits for that same shutdown and returns when it has finished, also when
+        a signal or an engine error started it (those start it without waiting). A
+        call after it has finished returns at once.
+
+        Every task and block that has not finished when the shutdown starts is
+        cancelled right away, inside the call, so none can still complete in between.
+
+        The first call's ``skip_execution_backend`` decides. A later call with a
+        different value is logged and ignored: backends kept by
+        ``skip_execution_backend=True`` stay running, and are shut down with their own
+        ``shutdown()``.
+
+        Cancelling a caller stops only that caller's wait (it gets
+        ``asyncio.CancelledError``); the shutdown itself continues. If the shutdown
+        fails or is cancelled, every caller waiting for it gets that outcome, it is
+        logged at ERROR, and the next call starts it again. If other code cancels the
+        shutdown itself, the waiters get ``asyncio.CancelledError`` although they were
+        not cancelled (``asyncio.current_task().cancelling() == 0``).
 
         Args:
             skip_execution_backend (bool): If True, skips the shutdown of the
-                execution backend.
-
-        Returns:
-            None
+                execution backends (first call only).
 
         Raises:
-            asyncio.TimeoutError: If the background tasks do not complete
-                within the timeout period.
-            asyncio.CancelledError: If the shutdown is cancelled before
-                completion.
+            RuntimeError: If called from an event loop other than the engine's. From
+                another thread use
+                ``asyncio.run_coroutine_threadsafe(engine.shutdown(), engine.loop)``.
+        """
+        if asyncio.get_running_loop() is not self.loop:
+            raise RuntimeError(
+                "shutdown() must run on the engine's event loop; from another thread "
+                "use asyncio.run_coroutine_threadsafe(engine.shutdown(), engine.loop)"
+            )
+        await asyncio.shield(self._request_shutdown(skip_execution_backend))
+
+    def _request_shutdown(self, skip_execution_backend: bool = False) -> asyncio.Task:
+        """Start the shutdown once and return its task; never waits.
+
+        The first request cancels the components at once (_cancel_components()) and
+        starts _shutdown_backends() as the shutdown task. Later requests return that
+        task; a failed or cancelled one is started again. Used by shutdown(), the signal
+        handler and the run loop's error path.
+        """
+        task = self._shutdown_task
+        if task is None:
+            self._shutdown_skips_backends = skip_execution_backend
+        elif skip_execution_backend != self._shutdown_skips_backends:
+            logger.info(
+                "Shutdown already requested with skip_execution_backend=%s; "
+                "ignoring %s",
+                self._shutdown_skips_backends,
+                skip_execution_backend,
+            )
+        if task is None or (
+            task.done() and (task.cancelled() or task.exception() is not None)
+        ):
+            self._cancel_components()
+            task = asyncio.create_task(
+                self._shutdown_backends(self._shutdown_skips_backends),
+                name=f"{self.uid}.shutdown",
+            )
+            task.add_done_callback(_log_shutdown_failure)
+            self._shutdown_task = task
+        return task
+
+    def _cancel_components(self) -> None:
+        """Cancel every unfinished task, block and registration, and the run loop.
+
+        Runs in the caller of _request_shutdown(), before it yields to the loop, so no
+        component that is unfinished when shutdown() is called can still complete.
         """
         logger.info("Initiating shutdown")
         # Signal components to exit
@@ -2259,6 +2353,17 @@ class WorkflowEngine:
             logger.debug(f"Shutting down run component")
             self._run_task.cancel()
 
+    async def _shutdown_backends(self, skip_execution_backend: bool) -> None:
+        """The shutdown task: wait for the run loop to stop, then shut the backends down.
+
+        Started once by _request_shutdown(), after _cancel_components(). It waits up to
+        5 seconds for the cancelled run loop, then shuts down every backend unless
+        ``skip_execution_backend``.
+
+        Args:
+            skip_execution_backend (bool): If True, skips the shutdown of the
+                execution backend.
+        """
         # Wait for internal components shutdown to complete
         try:
             await asyncio.wait_for(self._run_task, timeout=5.0)
