@@ -13,7 +13,7 @@ import uuid
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager, nullcontext
 from contextvars import ContextVar
-from functools import partial, wraps
+from functools import wraps
 from itertools import count
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, AsyncIterator, Callable, Optional, Union
@@ -41,6 +41,9 @@ logger = logging.getLogger(__name__)
 # Seconds the run loop prepares ready components before it submits them and lets other
 # coroutines run: a generation of thousands was prepared in one go.
 _PREPARE_SLICE = 0.02
+# Seconds between the run loop's checks of every running component's future, for an end
+# that came through none of the engine's own paths (see _record_finished)
+_SWEEP_INTERVAL = 1.0
 
 
 def _log_shutdown_failure(task: asyncio.Task) -> None:
@@ -224,9 +227,10 @@ class WorkflowEngine:
 
         # Optimization: Track component state changes
         self._ready_queue = deque()
-        # Running components whose futures are done, in the order they finished, queued
-        # by a done callback for the run loop's next pass (see _running_done)
+        # Components whose futures are done, in the order they finished, for the run
+        # loop's next pass (see _record_finished), and when it last checked them all
         self._finished: deque[str] = deque()
+        self._next_sweep = 0.0
         self._dependents_map = defaultdict(set)
         self._dependency_count = {}
         self._component_change_event = asyncio.Event()
@@ -1690,7 +1694,10 @@ class WorkflowEngine:
                         self._watch_running(comp_uid)
 
                 # The running components that finished since the last pass, in the
-                # order they finished: not a check of every running one
+                # order they finished: not a check of every running one, except once
+                # in a while (_sweep_running)
+                if time.monotonic() >= self._next_sweep:
+                    self._sweep_running()
                 completed_components = []
                 finished = self._finished
                 while finished:
@@ -1749,26 +1756,46 @@ class WorkflowEngine:
                 await self._handle_shutdown_signal(signal.SIGUSR1, source="internal")
                 break
 
-    def _watch_running(self, uid: str) -> None:
-        """Have the run loop handle the end of a running component, once it ends.
+    def _record_finished(self, uid: str) -> None:
+        """A component's future is done: the run loop handles its end at its next pass.
 
-        A function of its own, so that the run loop keeps no reference to the
-        component's record while it waits.
-        """
-        comp = self.components.get(uid)
-        if comp is not None:
-            # called soon, on the loop, if the future is done already
-            comp["future"].add_done_callback(partial(self._running_done, uid))
-
-    def _running_done(self, uid: str, fut: asyncio.Future) -> None:
-        """A running component's future is done: its end is handled at the next pass.
-
-        A done callback, in the order the futures finish, whether the backend reported
-        the end, the engine failed or cancelled the component, or a block ended. It
-        wakes the loop, which no longer checks every running component to find them.
+        Called where the engine ends a component (its success, failure and cancellation
+        handlers, a block's done callback), in the order components end, and it wakes the
+        loop: the loop no longer checks every running component to find them. A
+        component that is not running is dropped at the pass.
         """
         self._finished.append(uid)
         self._component_change_event.set()
+
+    def _watch_running(self, uid: str) -> None:
+        """Make sure the end of a component just submitted reaches the run loop.
+
+        A component can end before it is in `running`: during its batch's submit, a
+        cancel ends it here, not on the backend. A service's future is set by its backend
+        when the service is ready, not by the engine. A method of its own, so that the
+        run loop keeps no reference to the component's record while it waits.
+        """
+        comp = self.components.get(uid)
+        if comp is None:
+            return
+        fut = comp["future"]
+        if fut.done():
+            self._record_finished(uid)
+        elif comp["description"].get("is_service"):
+            fut.add_done_callback(lambda _, uid=uid: self._record_finished(uid))
+
+    def _sweep_running(self) -> None:
+        """Check every running component's future, at most once per _SWEEP_INTERVAL.
+
+        A safety net for a future set outside the engine's own paths, such as by a
+        backend that sets it itself: the loop then still sees the end within a second.
+        """
+        self._next_sweep = time.monotonic() + _SWEEP_INTERVAL
+        components = self.components
+        for uid in self.running:
+            comp = components.get(uid)
+            if comp is not None and comp["future"].done():
+                self._finished.append(uid)
 
     async def submit(self, objects: list) -> None:
         """Manages asynchronous submission of tasks/blocks to the execution backend.
@@ -1889,6 +1916,7 @@ class WorkflowEngine:
             # Wire cancellation: if block_fut is cancelled externally after submission,
             # propagate to the asyncio.Task.
             def _on_block_fut_done(f, task=t, b_uid=block_uid):
+                self._record_finished(b_uid)  # however the block ended
                 members = self._block_members.pop(b_uid, None)
                 if f.cancelled():
                     task.cancel()
@@ -1972,6 +2000,7 @@ class WorkflowEngine:
             else:
                 component_fut.set_result(component["stdout"])
             component_fut.state = "DONE"
+            self._record_finished(component["uid"])
         else:
             logger.warning(
                 "Attempted to handle an already finished component "
@@ -2033,6 +2062,7 @@ class WorkflowEngine:
 
         component_fut.set_exception(exception)
         component_fut.state = "FAILED"
+        self._record_finished(component["uid"])
 
     def handle_component_cancellation(
         self, component: dict, component_fut: asyncio.Future
@@ -2047,6 +2077,8 @@ class WorkflowEngine:
         cancel = getattr(component_fut, "_cancel_locally", component_fut.cancel)
         result = cancel()
         component_fut.state = "CANCELLED"
+        if component_fut.done():
+            self._record_finished(component["uid"])
         return result
 
     @typeguard.typechecked
