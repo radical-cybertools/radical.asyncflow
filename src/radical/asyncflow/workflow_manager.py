@@ -13,7 +13,7 @@ import uuid
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager, nullcontext
 from contextvars import ContextVar
-from functools import wraps
+from functools import partial, wraps
 from itertools import count
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, AsyncIterator, Callable, Optional, Union
@@ -37,6 +37,10 @@ EXECUTABLE = "executable"
 PROMPT = "prompt"
 
 logger = logging.getLogger(__name__)
+
+# Seconds the run loop prepares ready components before it submits them and lets other
+# coroutines run: a generation of thousands was prepared in one go.
+_PREPARE_SLICE = 0.02
 
 
 def _log_shutdown_failure(task: asyncio.Task) -> None:
@@ -220,6 +224,9 @@ class WorkflowEngine:
 
         # Optimization: Track component state changes
         self._ready_queue = deque()
+        # Running components whose futures are done, in the order they finished, queued
+        # by a done callback for the run loop's next pass (see _running_done)
+        self._finished: deque[str] = deque()
         self._dependents_map = defaultdict(set)
         self._dependency_count = {}
         self._component_change_event = asyncio.Event()
@@ -1374,6 +1381,7 @@ class WorkflowEngine:
         self._block_asyncio_tasks.clear()
         self.resolved.clear()
         self.running.clear()
+        self._finished.clear()
         self._task_submit_times.clear()
         self._task_start_times.clear()
 
@@ -1494,8 +1502,12 @@ class WorkflowEngine:
             try:
                 to_submit = []
 
-                # Process ready components
+                # Process ready components, for _PREPARE_SLICE at most: the rest goes
+                # in the next pass, after this slice is submitted
+                slice_end = time.monotonic() + _PREPARE_SLICE
                 while self._ready_queue and not self._shutdown_event.is_set():
+                    if to_submit and time.monotonic() >= slice_end:
+                        break
                     comp_uid = self._ready_queue.popleft()
 
                     # Skip if already processed
@@ -1675,13 +1687,22 @@ class WorkflowEngine:
                         comp_uid = comp_desc["uid"]
                         self.running.add(comp_uid)
                         self.resolved.add(comp_uid)
+                        comp = self.components.get(comp_uid)
+                        if comp is not None:
+                            # called at once (on the loop) if it is done already
+                            comp["future"].add_done_callback(
+                                partial(self._running_done, comp_uid)
+                            )
 
-                # Check for completed components and update dependency tracking
+                # The running components that finished since the last pass, in the
+                # order they finished: not a check of every running one
                 completed_components = []
-                for comp_uid in list(self.running):
-                    if self.components[comp_uid]["future"].done():
-                        completed_components.append(comp_uid)
+                finished = self._finished
+                while finished:
+                    comp_uid = finished.popleft()
+                    if comp_uid in self.running:
                         self.running.discard(comp_uid)
+                        completed_components.append(comp_uid)
 
                 # Notify dependents of completed components
                 for comp_uid in completed_components:
@@ -1720,6 +1741,8 @@ class WorkflowEngine:
                             if not task.done():
                                 task.cancel()
                         raise
+                elif self._ready_queue:
+                    await asyncio.sleep(0)  # more to prepare: let the others run first
                 else:
                     await asyncio.sleep(0.01)
 
@@ -1730,6 +1753,16 @@ class WorkflowEngine:
                 logger.exception(f"Error in run loop: {e}")
                 await self._handle_shutdown_signal(signal.SIGUSR1, source="internal")
                 break
+
+    def _running_done(self, uid: str, fut: asyncio.Future) -> None:
+        """A running component's future is done: its end is handled at the next pass.
+
+        A done callback, in the order the futures finish, whether the backend reported
+        the end, the engine failed or cancelled the component, or a block ended. It
+        wakes the loop, which no longer checks every running component to find them.
+        """
+        self._finished.append(uid)
+        self._component_change_event.set()
 
     async def submit(self, objects: list) -> None:
         """Manages asynchronous submission of tasks/blocks to the execution backend.
