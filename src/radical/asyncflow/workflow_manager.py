@@ -1687,12 +1687,7 @@ class WorkflowEngine:
                         comp_uid = comp_desc["uid"]
                         self.running.add(comp_uid)
                         self.resolved.add(comp_uid)
-                        comp = self.components.get(comp_uid)
-                        if comp is not None:
-                            # called at once (on the loop) if it is done already
-                            comp["future"].add_done_callback(
-                                partial(self._running_done, comp_uid)
-                            )
+                        self._watch_running(comp_uid)
 
                 # The running components that finished since the last pass, in the
                 # order they finished: not a check of every running one
@@ -1753,6 +1748,17 @@ class WorkflowEngine:
                 logger.exception(f"Error in run loop: {e}")
                 await self._handle_shutdown_signal(signal.SIGUSR1, source="internal")
                 break
+
+    def _watch_running(self, uid: str) -> None:
+        """Have the run loop handle the end of a running component, once it ends.
+
+        A function of its own, so that the run loop keeps no reference to the
+        component's record while it waits.
+        """
+        comp = self.components.get(uid)
+        if comp is not None:
+            # called soon, on the loop, if the future is done already
+            comp["future"].add_done_callback(partial(self._running_done, uid))
 
     def _running_done(self, uid: str, fut: asyncio.Future) -> None:
         """A running component's future is done: its end is handled at the next pass.
