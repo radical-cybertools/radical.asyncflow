@@ -12,8 +12,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   components by checking the future of every running one on every pass, about a hundred
   passes a second while anything happens. With tens of thousands of tasks in flight that
   check was most of the loop's time, and a run's time grew with the square of its tasks.
-  Now a done callback on each running component's future queues it, and a pass handles
-  only those, in the order they finished. An idle loop now releases the dependents of a
+  Now the engine records each component's end where it ends it (its success, failure
+  and cancellation handlers, a block's done callback), and a pass handles only those, in
+  the order they ended; a check of every running future, at most once a second, stays as
+  a safety net. An idle loop now releases the dependents of a
   component as soon as it ends, instead of at its next one-second timeout. The loop also
   prepares ready components for 20 ms at most before it submits them and lets other
   coroutines run, instead of preparing a whole generation in one go.
