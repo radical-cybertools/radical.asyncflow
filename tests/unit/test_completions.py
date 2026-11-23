@@ -250,3 +250,59 @@ async def test_a_large_generation_is_prepared_in_slices_that_let_the_loop_run(
         backend.finish(uid, i)
     assert await asyncio.gather(*futures) == list(range(100))
     await engine.shutdown()
+
+
+class YieldingBackend(HoldingBackend):
+    """Lets the loop run while it submits, as a backend that sends in slices does."""
+
+    async def submit_tasks(self, tasks):
+        await asyncio.sleep(0.05)
+        await super().submit_tasks(tasks)
+
+
+@pytest.mark.asyncio
+async def test_a_task_cancelled_while_its_batch_is_submitted_releases_its_dependents():
+    """Not running yet, it is cancelled here, not by the backend."""
+    backend = YieldingBackend()
+    engine = await WorkflowEngine.create(backend=backend)
+
+    @engine.function_task
+    async def work(i):
+        return i
+
+    @engine.function_task
+    async def after(x):
+        return x
+
+    a = work(1)
+    c = after(a)
+    await asyncio.sleep(0.02)  # the batch with `a` is being submitted
+    a.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(c, 5)
+    await until(lambda: a.uid not in engine.running)
+    await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_a_running_future_finished_outside_the_engine_is_still_seen():
+    """A backend that sets a future itself is not reported: a check of every running
+    future, at most once a second, still finds it."""
+    engine, backend = await _engine()
+
+    @engine.function_task
+    async def work(i):
+        return i
+
+    @engine.function_task
+    async def after(x):
+        return x
+
+    a = work(1)
+    await until(lambda: a.uid in backend.parked)
+    c = after(a)
+    asyncio.Future.set_result(a, 7)  # neither the backend's report nor the engine
+    await until(lambda: c.uid in backend.parked, timeout=3)
+    backend.finish(c.uid, 7)
+    assert await c == 7
+    await engine.shutdown()
