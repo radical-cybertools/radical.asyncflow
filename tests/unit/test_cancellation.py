@@ -25,14 +25,16 @@ def _pending_future(engine, uid):
 
 
 class GatedBackend(NoopExecutionBackend):
-    """Holds submit_tasks open until `gate` is set."""
+    """Holds submit_tasks open until `gate` is set; records the uids it is given."""
 
     def __init__(self):
         super().__init__()
         self.entered = asyncio.Event()
         self.gate = asyncio.Event()
+        self.submitted = []
 
     async def submit_tasks(self, tasks):
+        self.submitted.extend(task["uid"] for task in tasks)
         self.entered.set()
         await self.gate.wait()
         await super().submit_tasks(tasks)
@@ -182,7 +184,8 @@ async def test_block_cancel_stops_execution():
 @pytest.mark.asyncio
 async def test_block_cancelled_during_submit_never_starts():
     """A block cancelled while the tasks of its batch are being submitted must not run
-    its body, and what depends on it must still be released."""
+    its body, so a task the body calls never reaches the backend, and what depends on
+    the block must still be released."""
     backend = GatedBackend()
     engine = await WorkflowEngine.create(backend=backend)
     started = []
@@ -191,9 +194,14 @@ async def test_block_cancelled_during_submit_never_starts():
     async def task():
         return 1
 
+    @engine.function_task
+    async def member():
+        return 2
+
     @engine.block
     async def block():
         started.append("body")
+        member()  # not awaited, so only the block's cancel can stop it
 
     @engine.function_task
     async def dependent(value):
@@ -210,6 +218,7 @@ async def test_block_cancelled_during_submit_never_starts():
     await asyncio.wait_for(asyncio.wait([task_fut, dependent_fut]), timeout=5)
 
     assert started == []
+    assert backend.submitted == [task_fut.uid]
     assert block_fut.cancelled()
     assert block_fut.state == "CANCELLED"
     assert dependent_fut.cancelled()
