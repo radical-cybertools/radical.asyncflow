@@ -306,3 +306,29 @@ async def test_a_running_future_finished_outside_the_engine_is_still_seen():
     backend.finish(c.uid, 7)
     assert await c == 7
     await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_the_safety_check_costs_at_most_about_one_percent_of_the_loop(
+    monkeypatch,
+):
+    """With 160,000 tasks in flight, checking them all took about 100 ms: once a second,
+    a tenth of the loop.
+
+    The next check waits at least a hundred times as long as the last one took, and at
+    least a second.
+    """
+    from radical.asyncflow import workflow_manager
+
+    engine, backend = await _engine()
+    clock = iter([100.0, 100.05])  # the check takes 50 ms
+    monkeypatch.setattr(workflow_manager.time, "monotonic", lambda: next(clock))
+    engine._sweep_running()
+    monkeypatch.undo()
+    assert engine._next_sweep == pytest.approx(100.05 + 100 * 0.05)
+    clock = iter([200.0, 200.001])  # a cheap check: at least a second
+    monkeypatch.setattr(workflow_manager.time, "monotonic", lambda: next(clock))
+    engine._sweep_running()
+    monkeypatch.undo()
+    assert engine._next_sweep == pytest.approx(200.001 + 1.0)
+    await engine.shutdown()
