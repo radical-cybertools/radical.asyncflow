@@ -144,6 +144,14 @@ class _ComponentFuture(asyncio.Future):
             accepted = await backend.cancel_task(self.uid)
         except Exception as e:
             logger.warning("Cancelling %s on its backend failed: %r", self.uid, e)
+        else:
+            if accepted is False and self.cancelled():
+                # Cancelled during submit: the future says CANCELLED, so say it here
+                logger.info(
+                    "Backend refused to cancel %s, which was cancelled during submit:"
+                    " it may still run",
+                    self.uid,
+                )
         finally:
             if accepted is False:
                 self._cancel_sent = False
@@ -2134,7 +2142,9 @@ class WorkflowEngine:
             # implicit: when a coroutine that awaits the future
             # is scheduled and started by the event loop, that's
             # when the "work" is running.
-            task_fut.state = "RUNNING"
+            # A task cancelled during submit keeps its CANCELLED state.
+            if not task_fut.done():
+                task_fut.state = "RUNNING"
             if self._telemetry is not None:
                 now = time.time()
                 self._task_start_times[uid] = now

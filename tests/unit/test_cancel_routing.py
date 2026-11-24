@@ -330,6 +330,47 @@ async def test_cancel_during_submit_is_sent_when_submit_returns(routed):
         assert gated.cancelled == [fut.uid]
         assert other.cancelled == []
         assert not gated.parked
+        # the RUNNING the backend reported after the cancel did not change it
+        assert fut.state == "CANCELLED"
+
+
+@pytest.mark.parametrize("in_block", [False, True])
+async def test_cancel_during_submit_is_sent_for_each_task_of_a_batch(in_block):
+    gated, other = GatedBackend("gated"), ParkingBackend("other")
+    engine = await WorkflowEngine.create(backend=[other, gated])
+    try:
+
+        @engine.function_task(backend="gated")
+        async def slow():
+            return 1
+
+        futs = []
+
+        @engine.block
+        async def blk():
+            futs.extend(slow() for _ in range(5))
+            return await asyncio.gather(*futs)
+
+        if in_block:
+            b = blk()
+        else:
+            futs.extend(slow() for _ in range(5))
+        await asyncio.wait_for(gated.submitting.wait(), timeout=10)
+        assert len(gated.parked) == 5  # one batch
+        if in_block:
+            b.cancel()
+        else:
+            for f in futs:
+                f.cancel()
+        gated.gate.set()
+        await _until(lambda: gated.cancelled)
+        await asyncio.sleep(0.02)
+        assert sorted(gated.cancelled) == sorted(f.uid for f in futs)
+        assert not gated.parked
+        assert all(f.cancelled() for f in futs)
+    finally:
+        gated.gate.set()
+        await engine.shutdown()
 
 
 async def test_cancel_during_submit_cancels_dependents():
@@ -386,8 +427,17 @@ async def test_failed_cancel_during_submit_is_logged(caplog):
         with caplog.at_level(logging.WARNING):
             gated.gate.set()
             await _until(lambda: gated.cancelled)
-            await asyncio.sleep(0)  # the send's done callback
         assert "on its backend failed" in caplog.text
+
+
+async def test_refused_cancel_during_submit_is_logged(caplog):
+    async with _submitting(refuse=1) as (_, gated, _, fut):
+        assert fut.cancel() is True
+        with caplog.at_level(logging.INFO, logger="radical.asyncflow.workflow_manager"):
+            gated.gate.set()
+            await _until(lambda: gated.cancelled)
+        assert "refused to cancel" in caplog.text
+        assert fut.uid in gated.parked  # it runs on
 
 
 async def test_block_cancel_during_member_submit():
