@@ -175,12 +175,17 @@ Always shut down the flow explicitly when finished:
 - Releases resources (e.g., thread pools, processes).
 - Ensures a clean exit.
 - Cancels every task and block that has not finished, including a task whose decorated function is still running and a dependent still waiting for its dependencies: awaiting their futures raises `asyncio.CancelledError`. A task or block called after `shutdown()` is cancelled instead of run.
+- Stops the commands of cancelled executable tasks. On `LocalExecutionBackend` a command and the processes it started get SIGTERM, then SIGKILL if they are still running after `backend.term_grace` seconds (5 by default). This also applies to a task you cancel yourself, and its future ends once its command has stopped.
 
 At the end of your async main:
 
 ```python
 await flow.shutdown()
 ```
+
+The engine shuts down once. Calling `shutdown()` again waits for the shutdown already running, so it is safe to call from several places (a `finally`, a supervisor). A signal during it does not start a second one. Cancelling the caller stops only its wait; the shutdown continues.
+
+`flow.shutdown(skip_execution_backend=True)` keeps the backends running for another engine; later `shutdown()` calls do not change that, so shut a kept backend down with its own `shutdown()`.
 
 ---
 
