@@ -6,8 +6,46 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- **`shutdown()` runs once, and every call joins it** — the engine's shutdown is now
+  one stored task. A second `shutdown()` call during a shutdown waits for it and
+  returns when it has finished, instead of running the whole sequence again (which
+  shut the backends down a second time). A signal or an engine error during a shutdown
+  does not start a second one. A call after the shutdown has finished returns at once.
+  Cancelling a caller, or wrapping it in `asyncio.timeout()`, stops only that caller's
+  wait; the shutdown itself continues, so it is never left half-done. If the shutdown
+  fails or is cancelled, every caller waiting for it gets that outcome, it is logged at
+  ERROR, and the next call starts it again. A retry after a failure calls every
+  backend's `shutdown()` again. `shutdown()` must run on the engine's event loop; a call from
+  another loop raises `RuntimeError` instead of breaking the engine.
+- **Breaking:** the first call's `skip_execution_backend` decides. After
+  `shutdown(skip_execution_backend=True)`, a later `shutdown()` no longer shuts the
+  backends down; it is logged and ignored. Shut a kept backend down with its own
+  `shutdown()`.
+
+### Added
+
+- **`WorkflowEngine.is_shutting_down`** — True once `shutdown()` has been called (by
+  the caller, a signal or an engine error), and still True after it has finished.
+- **`WorkflowEngine.telemetry`** — the `TelemetryManager` from the latest
+  `start_telemetry()` call, or `None`. It is the manager the engine emits its events
+  into.
+
+## [0.7.0] 2026-11-10
+
 ### Fixed
 
+- **A cancelled executable task stops its process** — cancelling an executable task on
+  `LocalExecutionBackend` reported `CANCELLED` while its command ran on to the end,
+  with whatever it was using. The backend now sends SIGTERM to the command and the
+  processes it started, and SIGKILL to what is left after `term_grace` seconds (5 by
+  default), and reports `CANCELED` once they have stopped, so a future can take up to
+  that long to end. Each command runs in its own session, because killing a shell alone
+  leaves its children running: a signal sent to the process group of the workflow, such
+  as Ctrl-C in a terminal, no longer reaches commands directly. `shutdown()` and
+  `asyncio.run()` stop them instead. `shutdown()` now waits for the commands, and a
+  repeated `cancel_task()` no longer reports the task twice.
 - **Cancelling a running task cancels it on its own backend** (#118) — with several
   backends, `cancel()` on a running task sent the cancel to the default backend, so a
   task routed elsewhere with `backend=` kept running and its future resolved only when
