@@ -433,11 +433,21 @@ class LocalExecutionBackend:
             logger.exception(f"Error handling task {task.get('uid')}: {e}")
             raise
         finally:
-            # a finished task is the engine's to keep, not the backend's
-            self.tasks.pop(task["uid"], None)
-            # Nor its handler: the description is the caller's future.task, and a
-            # handler kept alive there makes every later asyncio.run slower
-            task.pop("future", None)
+            self._release(task, asyncio.current_task())
+
+    def _release(self, task: dict, handler: asyncio.Task) -> None:
+        """Forget a task that has ended, and take its handler out of its description.
+
+        A finished task is the engine's to keep, not the backend's. Nor is its handler:
+        the description is the caller's future.task, and a handler kept alive there
+        makes every later asyncio.run slower. A later run of the task, or another task
+        with its uid, has taken its place and stays.
+        """
+        if task.get("future") is not handler:
+            return
+        del task["future"]
+        if self.tasks.get(task["uid"]) is task:
+            del self.tasks[task["uid"]]
 
     async def submit_tasks(self, tasks: list[dict[str, Any]]) -> list[asyncio.Task]:
         """Submit tasks for execution."""
@@ -445,20 +455,18 @@ class LocalExecutionBackend:
         submitted_tasks = []
 
         for task in tasks:
-            # Before create_task: an eager task factory runs a task that does
-            # not suspend to the end inside it, and its handler removes it
-            self.tasks[task["uid"]] = task
             coro = self._handle_task(task)
             try:
                 future = asyncio.create_task(coro)
             except BaseException:
-                self.tasks.pop(task["uid"], None)
                 coro.close()
                 raise
             submitted_tasks.append(future)
-            # an eager handler may have finished inside create_task
-            if not future.done():
-                task["future"] = future
+            if future.done():
+                continue  # an eager handler finished inside create_task
+
+            self.tasks[task["uid"]] = task
+            task["future"] = future
 
         return submitted_tasks
 
@@ -484,6 +492,8 @@ class LocalExecutionBackend:
                 await asyncio.wait([future])
                 # Set state on the task object itself before callback
                 self._callback_func(task, "CANCELED")
+                # Cancelled before it started, a handler never ran its own release
+                self._release(task, future)
                 return True
         return False
 
@@ -494,11 +504,13 @@ class LocalExecutionBackend:
         for task in self.tasks.values():
             future = task["future"]
             if future.cancel():
-                cancelling.append(future)
+                cancelling.append((task, future))
             cancelled_count += 1
         self.tasks.clear()
         if cancelling:
-            await asyncio.wait(cancelling)
+            await asyncio.wait([future for _, future in cancelling])
+            for task, future in cancelling:
+                self._release(task, future)
         return cancelled_count
 
     async def shutdown(self) -> None:

@@ -68,6 +68,29 @@ async def test_kept_futures_do_not_keep_the_backends_handlers():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("cancel_all", [False, True])
+async def test_a_task_cancelled_before_it_starts_is_released(cancel_all):
+    """A handler cancelled before its first step never runs its own cleanup."""
+    backend = await LocalExecutionBackend()
+    backend.register_callback(lambda task, state: None)
+
+    async def work():
+        await asyncio.sleep(10)
+
+    task = {"uid": "task.000001", "function": work, "args": (), "kwargs": {}}
+    try:
+        await backend.submit_tasks([task])  # no await before the cancel
+        if cancel_all:
+            assert await backend.cancel_all_tasks() == 1
+        else:
+            assert await backend.cancel_task(task["uid"])
+        assert backend.tasks == {}
+        assert "future" not in task
+    finally:
+        await backend.shutdown()
+
+
+@pytest.mark.asyncio
 async def test_a_dropped_chain_is_freed():
     """A finished chain x = step(x) that the caller lets go of is freed.
 
