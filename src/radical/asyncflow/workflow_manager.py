@@ -41,9 +41,12 @@ logger = logging.getLogger(__name__)
 # Seconds the run loop prepares ready components before it submits them and lets other
 # coroutines run: a generation of thousands was prepared in one go.
 _PREPARE_SLICE = 0.02
-# Seconds between the run loop's checks of every running component's future, for an end
-# that came through none of the engine's own paths (see _record_finished)
+# The run loop's check of every running component's future, for an end that came through
+# none of the engine's own paths (see _record_finished): at least _SWEEP_INTERVAL seconds
+# apart, and _SWEEP_SPACING times as long as the last check took, so it costs about 1% of
+# the loop at most (160,000 running took about 100 ms a check)
 _SWEEP_INTERVAL = 1.0
+_SWEEP_SPACING = 100
 
 
 def _log_shutdown_failure(task: asyncio.Task) -> None:
@@ -1785,17 +1788,22 @@ class WorkflowEngine:
             fut.add_done_callback(lambda _, uid=uid: self._record_finished(uid))
 
     def _sweep_running(self) -> None:
-        """Check every running component's future, at most once per _SWEEP_INTERVAL.
+        """Check every running component's future, now and then.
 
         A safety net for a future set outside the engine's own paths, such as by a
-        backend that sets it itself: the loop then still sees the end within a second.
+        backend that sets it itself: the loop then still sees the end, within a second
+        with a few thousand components running, within about ten with 160,000. The next
+        check waits at least _SWEEP_INTERVAL, and _SWEEP_SPACING times as long as this one
+        took, so the checks cost about 1% of the loop at most.
         """
-        self._next_sweep = time.monotonic() + _SWEEP_INTERVAL
+        start = time.monotonic()
         components = self.components
         for uid in self.running:
             comp = components.get(uid)
             if comp is not None and comp["future"].done():
                 self._finished.append(uid)
+        end = time.monotonic()
+        self._next_sweep = end + max(_SWEEP_INTERVAL, _SWEEP_SPACING * (end - start))
 
     async def submit(self, objects: list) -> None:
         """Manages asynchronous submission of tasks/blocks to the execution backend.
