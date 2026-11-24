@@ -14,8 +14,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   check was most of the loop's time, and a run's time grew with the square of its tasks.
   Now the engine records each component's end where it ends it (its success, failure
   and cancellation handlers, a block's done callback), and a pass handles only those, in
-  the order they ended; a check of every running future, at most once a second, stays as
-  a safety net. An idle loop now releases the dependents of a
+  the order they ended; a check of every running future stays as a safety net, spaced so
+  that it costs about 1% of the loop at most. An idle loop now releases the dependents of a
   component as soon as it ends, instead of at its next one-second timeout. The loop also
   prepares ready components for 20 ms at most before it submits them and lets other
   coroutines run, instead of preparing a whole generation in one go.
