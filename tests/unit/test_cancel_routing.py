@@ -4,6 +4,7 @@ import logging
 import pytest
 
 from radical.asyncflow import NoopExecutionBackend, WorkflowEngine
+from radical.asyncflow.workflow_manager import _BLOCK_CANCELLED
 
 
 class ParkingBackend(NoopExecutionBackend):
@@ -65,6 +66,16 @@ class TooLateBackend(ParkingBackend):
         self.cancelled.append(uid)
         self.finish(uid)
         return False
+
+
+class TooLateFailingBackend(ParkingBackend):
+    """The task finishes as its cancel arrives, and cancel_task raises, as a backend
+    does for a task it has forgotten."""
+
+    async def cancel_task(self, uid):
+        self.cancelled.append(uid)
+        self.finish(uid)
+        raise ValueError(f"Task {uid} not found")
 
 
 async def _settle(*futs):
@@ -364,6 +375,21 @@ async def test_block_body_stops_in_a_task_it_awaits():
     assert "helper_resumed" not in holder
 
 
+async def test_block_body_stops_in_a_gather_of_helpers():
+    async def helper(fut, holder, key):
+        await fut
+        holder[key] = True
+
+    holder = await _cancel_block_on_uncancellable_member(
+        RefusingBackend("r"),
+        wait=lambda fut, holder: asyncio.gather(
+            helper(fut, holder, "a_resumed"), helper(fut, holder, "b_resumed")
+        ),
+    )
+    _assert_body_stopped(holder)
+    assert "a_resumed" not in holder and "b_resumed" not in holder
+
+
 async def test_refused_member_of_a_cancelled_block_can_be_cancelled_again():
     backend = ParkingBackend("p", refuse=99)
     engine = await WorkflowEngine.create(backend=backend)
@@ -456,8 +482,24 @@ async def test_refused_cancel_is_logged(caplog):
     assert f"Backend refused to cancel {fut.uid}" in caplog.text
 
 
-async def test_cancel_of_a_task_that_just_finished_is_not_logged(caplog):
+@pytest.mark.parametrize("backend_class", [TooLateBackend, TooLateFailingBackend])
+async def test_cancel_of_a_task_that_just_finished_is_not_logged(caplog, backend_class):
     with caplog.at_level(logging.WARNING, "radical.asyncflow.workflow_manager"):
-        fut = await _cancel_running_task(TooLateBackend("t"))
+        fut = await _cancel_running_task(backend_class("t"))
     assert fut.state == "DONE"
     assert "refused" not in caplog.text
+    assert "failed" not in caplog.text
+
+
+async def test_a_msg_with_the_block_cancel_text_is_an_ordinary_cancel():
+    backend = RefusingBackend("r")
+    engine, fut = await _running(backend)
+    try:
+        msg = " ".join(["block", "cancelled"])
+        assert msg == _BLOCK_CANCELLED and msg is not _BLOCK_CANCELLED
+        assert fut.cancel(msg) is True  # sent, as any cancel of a running task
+        backend.finish(fut.uid)
+        await _settle(fut)
+        assert fut.state == "DONE"
+    finally:
+        await engine.shutdown()

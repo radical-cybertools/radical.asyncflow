@@ -38,9 +38,6 @@ PROMPT = "prompt"
 
 logger = logging.getLogger(__name__)
 
-# The msg of the Task.cancel() that stops the body of a cancelled block
-_BLOCK_CANCELLED = "block cancelled"
-
 
 def _log_shutdown_failure(task: asyncio.Task) -> None:
     """Log a failed or cancelled shutdown, even if nobody is waiting for it.
@@ -59,6 +56,13 @@ def _log_shutdown_failure(task: asyncio.Task) -> None:
             "Call shutdown() again to retry.",
             exc_info=task.exception(),
         )
+
+
+# The msg of the Task.cancel() that stops the body of a cancelled block. cancel()
+# compares it by identity on purpose: a caller's own msg with the same text is an
+# ordinary cancel. A body that passes this one on, as in other.cancel(*exc.args),
+# gets False from a running task instead of True; the cancel is still sent.
+_BLOCK_CANCELLED = "block cancelled"
 
 
 class _ComponentFuture(asyncio.Future):
@@ -150,7 +154,10 @@ class _ComponentFuture(asyncio.Future):
         try:
             accepted = await backend.cancel_task(self.uid)
         except Exception as e:
-            logger.warning("Cancelling %s on its backend failed: %r", self.uid, e)
+            # Too late if the task has ended: a backend may then have forgotten it
+            # and raise, as RHAPSODY's Dragon backend does.
+            level = logging.DEBUG if self.done() else logging.WARNING
+            logger.log(level, "Cancelling %s on its backend failed: %r", self.uid, e)
         else:
             if accepted is False and not self.done():  # refused, not too late
                 logger.warning("Backend refused to cancel %s", self.uid)
