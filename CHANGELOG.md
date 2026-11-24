@@ -18,7 +18,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   late backend report about a released task from one about an unknown task. A finished
   task's description stays on its future (`future.task` or `future.block`), and the
   future still works as a dependency; read the future, not `flow.components`, once a
-  task has finished. Services stay registered.
+  task has finished. `metadata["dependencies"]` in that description then holds only the
+  `uid` and `name` of each dependency, so the newest future of a chain `x = step(x)` does
+  not keep the tasks before it. Services stay registered. A task cancelled while its
+  submit is in flight emits `TaskCanceled` when it is released; a later backend report on
+  it is ignored.
 - **`shutdown()` runs once, and every call joins it** — the engine's shutdown is now
   one stored task. A second `shutdown()` call during a shutdown waits for it and
   returns when it has finished, instead of running the whole sequence again (which

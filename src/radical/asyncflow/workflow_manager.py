@@ -1451,11 +1451,17 @@ class WorkflowEngine:
             comp = self.components.get(uid)
             if comp is None or comp["description"].get("is_service"):
                 continue
-            if not comp["future"].done():  # not expected: release it when done
-                comp["future"].add_done_callback(
-                    lambda _, uid=uid: self._to_release.append(uid)
-                )
-                continue
+            # a backend that still reports on it (a task cancelled during
+            # submit) is ignored from now on, so its terminal event goes out here
+            self._emit_unreported_end(uid, comp)
+            # the caller's future keeps the description: it names its dependencies,
+            # without keeping theirs in turn
+            metadata = comp["description"]["metadata"]
+            if metadata["dependencies"]:
+                metadata["dependencies"] = [
+                    {"uid": dep["uid"], "name": dep["name"]}
+                    for dep in metadata["dependencies"]
+                ]
             del self.components[uid]
             self.dependencies.pop(uid, None)
             self._dependency_futures.pop(uid, None)
@@ -1463,10 +1469,6 @@ class WorkflowEngine:
             self.running.discard(uid)
             self._dependency_count.pop(uid, None)
             self._dependents_map.pop(uid, None)
-            # a backend that still reports on it (a task cancelled during
-            # submit) is ignored from now on
-            self._task_submit_times.pop(uid, None)
-            self._task_start_times.pop(uid, None)
             idx = self._uid_index(uid)
             if idx is not None:
                 byte, bit = divmod(idx, 8)
@@ -1475,6 +1477,39 @@ class WorkflowEngine:
                         bytes(byte + 1 - len(self._released_uids))
                     )
                 self._released_uids[byte] |= 1 << bit
+
+    def _emit_unreported_end(self, uid: str, comp: dict) -> None:
+        """Emit the terminal telemetry event of a submitted task that ended without a
+        backend report, such as one cancelled while its submit was in flight.
+
+        A report that was handled has removed the task's submit time.
+        """
+        submitted = self._task_submit_times.pop(uid, None)
+        started = self._task_start_times.pop(uid, submitted)
+        if submitted is None:
+            return
+        fut, desc = comp["future"], comp["description"]
+        extra = {}
+        if fut.cancelled():
+            event = "TaskCanceled"
+        elif fut.exception() is not None:
+            event = "TaskFailed"
+            extra["error_type"] = "unknown"
+        else:
+            event = "TaskCompleted"
+        now = time.time()
+        self._emit(
+            event,
+            task_id=uid,
+            workflow_id=desc.get("workflow_id"),
+            event_time=now,
+            duration_seconds=now - started,
+            attributes={
+                "executable": desc["_tel_executable"],
+                "task_type": desc["_tel_task_type"],
+            },
+            **extra,
+        )
 
     def _uid_index(self, uid: str) -> Optional[int]:
         """The bit of *uid* in _released_uids, None if it is not this engine's."""

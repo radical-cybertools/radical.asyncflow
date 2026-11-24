@@ -12,7 +12,11 @@ import weakref
 
 import pytest
 
-from radical.asyncflow import LocalExecutionBackend, WorkflowEngine
+from radical.asyncflow import (
+    LocalExecutionBackend,
+    NoopExecutionBackend,
+    WorkflowEngine,
+)
 from radical.asyncflow.errors import DependencyFailureError
 
 
@@ -198,6 +202,164 @@ async def test_a_task_cancelled_during_its_submit_leaves_no_telemetry_timing():
         assert fut.uid not in engine._task_start_times
     finally:
         await telemetry.stop()
+        await engine.shutdown()
+
+
+class _HeldBackend(NoopExecutionBackend):
+    """Parks tasks as RUNNING, and takes its time to return from submit_tasks."""
+
+    def __init__(self, name, submit_time=0.0):
+        super().__init__(name=name)
+        self.submit_time = submit_time
+        self.parked = {}
+
+    async def submit_tasks(self, tasks):
+        for task in tasks:
+            self.parked[task["uid"]] = task
+            self._callback_func(task, "RUNNING")
+        await asyncio.sleep(self.submit_time)
+
+    def report(self, uid, state):
+        self._callback_func({**self.parked[uid], "return_value": 1}, state)
+
+
+def _record_events(engine, monkeypatch):
+    events = []
+
+    def emit(event_name, *, task_id, **kwargs):
+        events.append((event_name, task_id, kwargs))
+
+    # any object will do, so the test runs without RHAPSODY's TelemetryManager
+    monkeypatch.setattr(engine, "_telemetry", object())
+    monkeypatch.setattr(engine, "_emit", emit)
+    return events
+
+
+def _ends(events, uid):
+    terminal = ("TaskCompleted", "TaskFailed", "TaskCanceled")
+    return [name for name, task_id, _ in events if task_id == uid and name in terminal]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("report", ["DONE", "FAILED", "CANCELED"])
+@pytest.mark.parametrize("late", [False, True])
+@pytest.mark.parametrize("several", [False, True])
+async def test_a_task_cancelled_during_its_submit_emits_one_terminal_event(
+    monkeypatch, several, late, report
+):
+    """The backend's late report on a released task is ignored, so the release emits the
+    terminal event; an early report emits it itself.
+
+    With several backends, a slow submit to one leaves the tasks that already run on
+    another in this state.
+    """
+    if several:
+        backend, slow = _HeldBackend("fast"), _HeldBackend("slow", 0.2)
+        engine = await WorkflowEngine.create(backend=[backend, slow])
+    else:
+        backend = _HeldBackend("only", 0.2)
+        engine = await WorkflowEngine.create(backend=backend)
+    events = _record_events(engine, monkeypatch)
+    try:
+
+        @engine.function_task
+        async def work():
+            return 1
+
+        @engine.function_task(backend="slow" if several else None)
+        async def other():
+            return 1
+
+        fut = work()
+        if several:
+            other()
+        deadline = asyncio.get_running_loop().time() + 5
+        while fut.uid not in backend.parked:
+            assert asyncio.get_running_loop().time() < deadline
+            await asyncio.sleep(0.005)
+        fut.cancel()
+        assert fut.cancelled()
+        if not late:
+            backend.report(fut.uid, report)
+        await _released(engine, fut.uid)
+        if late:
+            backend.report(fut.uid, report)
+
+        ends = _ends(events, fut.uid)
+        assert len(ends) == 1
+        if late:
+            assert ends == ["TaskCanceled"]
+        assert fut.uid not in engine._task_submit_times
+        assert fut.uid not in engine._task_start_times
+    finally:
+        await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_a_reported_end_is_emitted_once(monkeypatch):
+    """The release adds no event for a task whose end the backend reported, nor for one
+    that was never submitted."""
+    backend = _HeldBackend("only")
+    engine = await WorkflowEngine.create(backend=backend)
+    events = _record_events(engine, monkeypatch)
+    try:
+
+        @engine.function_task
+        async def work(*args):
+            return 1
+
+        done, failed = work(), work()
+        dependent = work(failed)
+        while not {done.uid, failed.uid} <= engine.running:
+            await asyncio.sleep(0.005)
+        backend.report(done.uid, "DONE")
+        backend.parked[failed.uid]["exception"] = ValueError("boom")
+        backend.report(failed.uid, "FAILED")
+        with pytest.raises(DependencyFailureError):
+            await asyncio.wait_for(dependent, 5)
+        for fut in (done, failed, dependent):
+            await _released(engine, fut.uid)
+
+        assert _ends(events, done.uid) == ["TaskCompleted"]
+        assert _ends(events, failed.uid) == ["TaskFailed"]
+        assert _ends(events, dependent.uid) == []
+    finally:
+        await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_a_kept_future_names_its_dependencies_without_keeping_them():
+    """A caller that keeps only the newest future of a chain x = step(x) does not keep
+    the arguments of the earlier tasks; the description still names its dependencies."""
+    engine = await WorkflowEngine.create(backend=await LocalExecutionBackend())
+    try:
+
+        class Payload:
+            pass
+
+        @engine.function_task
+        async def first(payload):
+            return 0
+
+        @engine.function_task
+        async def step(x):
+            return x + 1
+
+        payload = Payload()
+        ref = weakref.ref(payload)
+        x = first(payload)
+        del payload
+        for _ in range(5):
+            previous = x.uid
+            x = step(x)
+            await asyncio.wait_for(x, 5)
+        await _released(engine, x.uid)
+        await asyncio.sleep(0.05)  # the run loop finishes its pass and goes idle
+        gc.collect()
+
+        assert ref() is None
+        assert x.task["metadata"]["dependencies"] == [{"uid": previous, "name": "step"}]
+    finally:
         await engine.shutdown()
 
 
