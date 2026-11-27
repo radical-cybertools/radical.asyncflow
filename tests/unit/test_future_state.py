@@ -12,6 +12,13 @@ async def _make_engine():
     return await WorkflowEngine.create(backend=NoopExecutionBackend())
 
 
+class _HoldingBackend(NoopExecutionBackend):
+    """Accepts tasks and never reports on them."""
+
+    async def submit_tasks(self, tasks):
+        pass
+
+
 @pytest.mark.asyncio
 async def test_future_state_is_pending_on_creation():
     """A freshly returned future must have state == 'PENDING'."""
@@ -47,7 +54,7 @@ async def test_future_state_transitions_to_done():
 @pytest.mark.asyncio
 async def test_future_state_transitions_to_running():
     """task_callbacks(RUNNING) must set state == 'RUNNING' on the future."""
-    engine = await _make_engine()
+    engine = await WorkflowEngine.create(backend=_HoldingBackend())
 
     @engine.function_task
     async def some_task():
@@ -58,11 +65,32 @@ async def test_future_state_transitions_to_running():
 
     comp = next(iter(engine.components.values()))
     task_fut = comp["future"]
+    assert not task_fut.done()
 
     # Simulate the backend emitting a RUNNING transition
     engine.task_callbacks(comp["description"], "RUNNING")
 
     assert task_fut.state == "RUNNING"
+
+    await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_late_running_report_keeps_the_final_state():
+    """A RUNNING report for a finished task leaves its state alone."""
+    engine = await _make_engine()
+
+    @engine.function_task
+    async def some_task():
+        return "ok"
+
+    fut = some_task()
+    await asyncio.sleep(0.05)
+    assert fut.state == "DONE"
+
+    engine.task_callbacks(engine.components[fut.uid]["description"], "RUNNING")
+
+    assert fut.state == "DONE"
 
     await engine.shutdown()
 

@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Cancelling a task while it is being submitted reaches its backend** — a task
+  enters `running` only when `submit` returns, so a `cancel()` before that cancelled
+  the future alone: `cancel_task` was never called and the task ran on. With several
+  backends `submit` always suspends, so any run routing tasks with `backend=` could
+  hit this. The future is still cancelled at once, and its backend is now told when
+  `submit` returns, unless it has reported the task finished by then.
+
 ### Changed
 
 - **`shutdown()` runs once, and every call joins it** — the engine's shutdown is now
