@@ -58,6 +58,13 @@ def _log_shutdown_failure(task: asyncio.Task) -> None:
         )
 
 
+# The msg of the Task.cancel() that stops the body of a cancelled block. cancel()
+# compares it by identity on purpose: a caller's own msg with the same text is an
+# ordinary cancel. A body that passes this one on, as in other.cancel(*exc.args),
+# gets False from a running task instead of True; the cancel is still sent.
+_BLOCK_CANCELLED = "block cancelled"
+
+
 class _ComponentFuture(asyncio.Future):
     """Future of a task or block, as returned when it is called.
 
@@ -71,19 +78,34 @@ class _ComponentFuture(asyncio.Future):
     # Set while a backend cancel is in flight or has been accepted; see cancel()
     _cancel_sent = False
 
-    def cancel(self, *args, **kwargs):
+    def cancel(self, msg=None):
         """Cancels the component, on the execution backend if it runs there.
 
         A task running on the backend is cancelled there, and the backend reports
         the cancellation through `task_callbacks`. Any other component is cancelled
         here. One that has not registered also has its registration cancelled, so
         it never registers and an executable or prompt task's body stops.
+
+        Returns True if the component was cancelled or the backend was asked to. As
+        with `Task.cancel()`, that is a request: the backend may refuse it, and a
+        task awaiting this future then resumes when it ends. A cancelled block's body
+        does not.
         """
+        if msg is _BLOCK_CANCELLED:
+            # From the task of a cancelled block, directly or through what its body
+            # awaits. That body must stop whatever the backend answers, and True
+            # would leave it to this future to end cancelled. So this answers only
+            # for what has happened: on False, Task.cancel() cancels the task itself,
+            # and it raises CancelledError here when this future ends, however it
+            # ends.
+            self.cancel()
+            return self.cancelled()
+
         engine = self._engine
         if not self.done() and hasattr(self, TASK) and self.uid in engine.running:
             # NOTE: Returning True means cancellation was requested/scheduled,
             # but not guaranteed.
-            # This follows asyncio.Future.cancel() behavior, which is best-effort.
+            # This follows asyncio.Task.cancel() behavior, which is best-effort.
             # Actual cancellation is handled asynchronously by the backend and
             # delivered to the WorkflowEngine via callbacks only.
             # Sent once: a block cancel cascades to its members, and a running
@@ -112,7 +134,7 @@ class _ComponentFuture(asyncio.Future):
             return True
 
         logger.info(f"Cancellation requested for {self.uid} (pending) locally")
-        if not self._cancel_locally(*args, **kwargs):
+        if not self._cancel_locally(msg):
             return False
         registration = getattr(self, "_registration", None)
         if registration is not None:
@@ -132,7 +154,13 @@ class _ComponentFuture(asyncio.Future):
         try:
             accepted = await backend.cancel_task(self.uid)
         except Exception as e:
-            logger.warning("Cancelling %s on its backend failed: %r", self.uid, e)
+            # Too late if the task has ended: a backend may then have forgotten it
+            # and raise, as RHAPSODY's Dragon backend does.
+            level = logging.DEBUG if self.done() else logging.WARNING
+            logger.log(level, "Cancelling %s on its backend failed: %r", self.uid, e)
+        else:
+            if accepted is False and not self.done():  # refused, not too late
+                logger.warning("Backend refused to cancel %s", self.uid)
         finally:
             if accepted is False:
                 self._cancel_sent = False
@@ -1850,7 +1878,7 @@ class WorkflowEngine:
             def _on_block_fut_done(f, task=t, b_uid=block_uid):
                 members = self._block_members.pop(b_uid, None)
                 if f.cancelled():
-                    task.cancel()
+                    task.cancel(_BLOCK_CANCELLED)
                     f.state = "CANCELLED"
                     if members:
                         for member_uid in members:

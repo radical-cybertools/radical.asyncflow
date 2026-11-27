@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **The body of a cancelled block stops when a member cannot be cancelled** — a backend
+  can refuse to cancel a running task, or fail to. When it did for a task that a
+  cancelled block's body was awaiting, the block was `CANCELLED` but its body carried
+  on past the `await` once the task ended, or got the task's own exception. The body
+  now gets `asyncio.CancelledError` at that `await` when the task ends, however it
+  ends. This also holds for a task from outside the block, and when the body awaits
+  the task through `wait_for`, `gather` or another task. A plain asyncio task on the
+  way is then cancelled for everyone awaiting it, as an accepted cancel would do. Code
+  the body runs in a `TaskGroup` child, or on Python 3.11 in a coroutine passed to
+  `wait_for`, is still cancelled the plain asyncio way: it carries on once the task
+  ends, and can start new tasks under the cancelled block. The task keeps running and
+  its future reports how it really ended. A refusal is now logged as a warning, and
+  `cancel()` on the task retries it; the engine does not retry on its own. A refusal
+  or a failure for a task that has just ended is not a warning. What `cancel()`
+  returns to its callers is unchanged.
+
 ### Changed
 
 - **`shutdown()` runs once, and every call joins it** — the engine's shutdown is now
