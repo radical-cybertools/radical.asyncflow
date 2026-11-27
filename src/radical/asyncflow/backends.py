@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import signal
 from collections.abc import Callable
 from concurrent.futures import Executor, ProcessPoolExecutor, ThreadPoolExecutor
 from typing import Any
@@ -179,12 +180,18 @@ class LocalExecutionBackend:
         is_attached: True once registered with a WorkflowEngine or Session.
         attached_to: Ordered list of engine/session UIDs this backend has been
             attached to (most recent last).
+        term_grace: Seconds a cancelled command has to exit after SIGTERM, before
+            SIGKILL.
+        kill_wait: Seconds to wait for a command to finish after SIGKILL.
     """
 
     # Tasks share the local filesystem, so there is no data to link between them
     # and the engine never calls the data-linking hooks.
     supports_implicit_data_linking = False
     supports_explicit_data_linking = False
+
+    term_grace: float = 5.0
+    kill_wait: float = 1.0
 
     def __init__(self, executor: Executor = None, name: str = "default"):
         if not executor:
@@ -325,23 +332,36 @@ class LocalExecutionBackend:
         backend_kwargs = task.get("task_backend_specific_kwargs", {})
         execute_in_shell = backend_kwargs.get("shell", True)
 
+        # Each command leads its own process group, so that _stop_process can reach
+        # the processes it starts
         if execute_in_shell:
             # Shell mode: join executable and arguments into single command string
             cmd = " ".join([executable] + arguments)
-            process = await asyncio.create_subprocess_shell(
+            start = asyncio.create_subprocess_shell(
                 cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                start_new_session=True,
             )
         else:
             # Exec mode: pass executable and arguments separately (no shell)
-            process = await asyncio.create_subprocess_exec(
+            start = asyncio.create_subprocess_exec(
                 executable,
                 *arguments,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                start_new_session=True,
             )
-        stdout, stderr = await process.communicate()
+
+        # Shielded because asyncio answers a cancel during the start by killing the
+        # shell alone, which leaves the children it has already started
+        starting = asyncio.ensure_future(start)
+        try:
+            process = await asyncio.shield(starting)
+            stdout, stderr = await process.communicate()
+        except asyncio.CancelledError:
+            await self._stop_process(starting)
+            raise
 
         task.update(
             {
@@ -353,6 +373,55 @@ class LocalExecutionBackend:
 
         state = "DONE" if task["exit_code"] == 0 else "FAILED"
         return task, state
+
+    @staticmethod
+    def _signal_group(pgid: int, sig: int) -> bool:
+        """Signals a process group.
+
+        Returns:
+            bool: False if no process is left in the group.
+        """
+        try:
+            os.killpg(pgid, sig)
+        except (ProcessLookupError, PermissionError):
+            # macOS answers PermissionError for a group of zombies
+            return False
+        return True
+
+    async def _stop_process(self, starting: asyncio.Future) -> None:
+        """Stops a cancelled command and the processes it started.
+
+        Killing the command alone is not enough: the children of a shell run on, and
+        keep its output pipes open. SIGTERM goes to the whole group first, which lets it
+        clean up and lets a launcher such as mpirun or srun stop its remote ranks.
+        SIGKILL ends what is left after `term_grace` seconds, or at a second cancel.
+
+        Args:
+            starting: The future of the subprocess, which may not have started yet.
+        """
+        try:
+            process = await starting
+        except Exception:
+            return  # It never started
+
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + self.term_grace
+        try:
+            self._signal_group(process.pid, signal.SIGTERM)
+            while self._signal_group(process.pid, 0) and loop.time() < deadline:
+                await asyncio.sleep(0.02)
+        except asyncio.CancelledError:
+            pass  # A second cancel ends the grace period
+        self._signal_group(process.pid, signal.SIGKILL)
+
+        # Reading the pipes to their end lets asyncio reap the process and close them
+        try:
+            await asyncio.wait_for(process.communicate(), self.kill_wait)
+        except TimeoutError:
+            logger.warning(
+                f"Process {process.pid} was killed but did not finish: it is stuck, or "
+                "a process that left its group holds its output"
+            )
 
     async def _handle_task(self, task: dict) -> None:
         """Handle task execution with callback."""
@@ -391,20 +460,30 @@ class LocalExecutionBackend:
         if uid in self.tasks:
             task = self.tasks[uid]
             future = task["future"]
+            if future and future.cancelling():
+                # The call that cancelled it reports it
+                return not future.done()
             if future and future.cancel():
+                # A cancelled command stops before the task ends, so CANCELED means
+                # that it has stopped
+                await asyncio.wait([future])
                 # Set state on the task object itself before callback
                 self._callback_func(task, "CANCELED")
                 return True
         return False
 
     async def cancel_all_tasks(self) -> int:
-        """Cancel all running tasks."""
+        """Cancel all running tasks, and wait for their commands to stop."""
         cancelled_count = 0
+        cancelling = []
         for task in self.tasks.values():
             future = task["future"]
-            future.cancel()
+            if future.cancel():
+                cancelling.append(future)
             cancelled_count += 1
         self.tasks.clear()
+        if cancelling:
+            await asyncio.wait(cancelling)
         return cancelled_count
 
     async def shutdown(self) -> None:

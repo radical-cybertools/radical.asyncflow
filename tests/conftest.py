@@ -150,10 +150,13 @@ def engine_invariants(request, monkeypatch):
         engines.append(self)
 
     async def tracked_shutdown(self, skip_execution_backend=False):
-        if skip_execution_backend:
-            kept.add(self)
         futures = held_futures(self)
-        await shutdown(self, skip_execution_backend)
+        try:
+            await shutdown(self, skip_execution_backend)
+        finally:
+            # the first call's argument decides; later calls only join that shutdown
+            if self._shutdown_skips_backends:
+                kept.add(self)
         unfinished[self] = [fut for fut in futures if not fut.done()]
 
     monkeypatch.setattr(WorkflowEngine, "__init__", tracked_init)
