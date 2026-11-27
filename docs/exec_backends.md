@@ -158,7 +158,7 @@ decoded string. `work_dir` and `uid` are set on `WorkflowEngine.create()`; files
 
 !!! note "Backend support"
     `capture_stdio` is honoured by all RHAPSODY backends (`ConcurrentExecutionBackend`,
-    `DaskExecutionBackend`, `DragonExecutionBackendV3`). The built-in `LocalExecutionBackend`
+    `DaskExecutionBackend`, `DragonExecutionBackend`). The built-in `LocalExecutionBackend`
     does not support it — use a RHAPSODY backend for file-based I/O.
 
 !!! note "Function tasks"
@@ -174,10 +174,16 @@ Both `@flow.executable_task` and `@flow.function_task` can do that by passing `t
 
 ```python
 @flow.function_task
-async def mpi_func(task_description={"process_templates": [(8, {})], "pmi": "pmix"}):
+async def mpi_func(
+    task_description={"process_templates": [(8, {})], "pmi": "pmix", "timeout": 600},
+):
     """
     multi-rank task that executes on N ranks in parallel.
     """
+    import os
+
+    from mpi4py import MPI
+
     # Initialize MPI communicator
     comm = MPI.COMM_WORLD
     rank = comm.Get_rank()
@@ -190,13 +196,24 @@ async def mpi_func(task_description={"process_templates": [(8, {})], "pmi": "pmi
     local_value = rank * 2
     total_sum = comm.allreduce(local_value, op=MPI.SUM)
 
-    # Only rank 0 prints or returns results
+    # Only rank 0 writes the result; the task's return value is not passed back
     if rank == 0:
         print(f"[Task1] Total sum across {size} ranks = {total_sum}")
-        return {"sum": total_sum}
-    else:
-        return None
+        with open("mpi_func_sum.txt", "w") as f:
+            f.write(f"{total_sum}\n")
+
+
+exit_codes = await mpi_func()  # [0, 0, 0, 0, 0, 0, 0, 0]
+with open("mpi_func_sum.txt") as f:
+    total_sum = int(f.read())
 ```
+
+!!! warning "Function tasks with a process template"
+    On `DragonExecutionBackend`, a function task with a `process_template` or
+    `process_templates` runs in separate Dragon processes, and its future resolves to
+    their **exit codes**, not to the function's return value: `0` for one process and a
+    list such as `[0, 0]` for two ranks. Write results to a file (or another shared store)
+    as above. Only a function task with no template returns its value.
 
 !!! note
     Specifying `task_description` keys and values depends on the corresponding `ExecutionBackend used`. The example above reflects the usage of `DragonExecutionBackend` from RHAPSODY.
@@ -244,7 +261,7 @@ await flow.shutdown()
 
 ??? "HPC execution log"
     ```text
-    DragonExecutionBackend started
+    Dragon backend fully initialized and ready
     Starting workflow 0 at 1752775108.50
     Starting workflow 1 at 1752775108.50
     Starting workflow 2 at 1752775108.50
@@ -255,9 +272,9 @@ await flow.shutdown()
     Workflow 2 completed at 1752775110.27
     Workflow 3 completed at 1752775110.28
     Workflow 4 completed at 1752775110.29
-    DragonExecutionBackend: All tasks completed, cleaning up resources
 
     Total time running asynchronously is: 1.79
+    Dragon backend shutdown complete
     ```
 
 ## HPC vs Local Development: Key Differences
@@ -318,6 +335,9 @@ gpu0 = Policy(
 
 @flow.function_task
 async def train(task_description={"process_template": {"policy": gpu0}}): ...
+
+
+exit_code = await train()  # 0: a templated function task resolves to its exit code
 ```
 
 See RHAPSODY's [Resource Specification Guide](https://radical-cybertools.github.io/rhapsody/getting-started/resource-specification/) for PMI, `libpmix.so` and GPU-affinity details.

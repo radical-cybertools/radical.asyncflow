@@ -1,8 +1,8 @@
 """
-Dragon V3 Example: Batch Processing
+Dragon Example: Batch Processing
 
 Demonstrates:
-- DragonExecutionBackendV3 with batch processing
+- DragonExecutionBackend with batch processing
 - executable_task and function_task decorators
 - process_template for single-process tasks
 - process_templates for multi-process parallel jobs
@@ -16,7 +16,7 @@ AsyncFlow integration: https://radical-cybertools.github.io/rhapsody/integration
 import asyncio
 import logging
 
-from rhapsody.backends import DragonExecutionBackendV3
+from rhapsody.backends import DragonExecutionBackend
 
 from radical.asyncflow import WorkflowEngine
 from radical.asyncflow.logging import init_default_logger
@@ -30,7 +30,7 @@ async def main():
     # Set Dragon as multiprocessing backend
     mp.set_start_method("dragon")
 
-    backend = await DragonExecutionBackendV3()
+    backend = await DragonExecutionBackend()
     init_default_logger(logging.INFO)
 
     # Create workflow engine
@@ -72,7 +72,7 @@ async def main():
         return socket.gethostname()
 
     print("=" * 60)
-    print("Dragon V3: Batch Processing Example")
+    print("Dragon: Batch Processing Example")
     print("=" * 60)
 
     # Execute all task types concurrently

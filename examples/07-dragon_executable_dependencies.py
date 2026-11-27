@@ -33,19 +33,20 @@ async def main():
 
     task1_resources = {"process_template": {}}
     task2_resources = {"process_template": {}}
-    task3_resources = {"process_templates": [(2, {})]}
+    # echo is not an MPI program, so skip PMI setup for the 2-process task
+    task3_resources = {"process_templates": [(2, {})], "pmi": "none"}
 
     @flow.executable_task
     async def task1(task_description=task1_resources):
-        return '/bin/echo "I got executed at" && /bin/date'
+        return "/bin/bash -c 'echo I got executed at; date'"
 
     @flow.executable_task
     async def task2(task1, task_description=task2_resources):
-        return '/bin/echo "I got executed at" && /bin/date'
+        return "/bin/bash -c 'echo I got executed at; date'"
 
     @flow.executable_task
     async def task3(task1, task2, task_description=task3_resources):
-        return '/bin/echo "I got executed at" && /bin/date'
+        return "/bin/bash -c 'echo I got executed at; date'"
 
     async def run_wf(wf_id):
         logger.info(f"Starting workflow {wf_id} at {time.time()}")
