@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **A block cancelled before it starts stays unstarted** — a block in a batch with
+  tasks, cancelled while the backend took those tasks, or cancelled by another block
+  of its batch, still ran its body: to its first `await`, or past it under an eager
+  task factory, because the future's done callback cancels the block's `asyncio.Task`
+  only after that task's first step. A task that the body called without awaiting it
+  could then reach the backend and never be cancelled, so real work ran for a block
+  reported `CANCELLED`. The block now checks its future before it calls the body.
+  What depends on the block is released as before.
+
 ### Changed
 
 - **`shutdown()` runs once, and every call joins it** — the engine's shutdown is now
