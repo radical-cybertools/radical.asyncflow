@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+
+## [0.8.0] 2026-11-28
+
 ### Changed
 
 - **`shutdown()` runs once, and every call joins it** — the engine's shutdown is now
@@ -32,8 +35,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `start_telemetry()` call, or `None`. It is the manager the engine emits its events
   into.
 
-## [0.7.0] 2026-11-10
-
 ### Fixed
 
 - **A cancelled executable task stops its process** — cancelling an executable task on
@@ -46,6 +47,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   as Ctrl-C in a terminal, no longer reaches commands directly. `shutdown()` and
   `asyncio.run()` stop them instead. `shutdown()` now waits for the commands, and a
   repeated `cancel_task()` no longer reports the task twice.
+
+## [0.7.0] 2026-11-10
+
+### Fixed
+
 - **Cancelling a running task cancels it on its own backend** (#118) — with several
   backends, `cancel()` on a running task sent the cancel to the default backend, so a
   task routed elsewhere with `backend=` kept running and its future resolved only when
