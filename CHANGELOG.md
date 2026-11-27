@@ -8,6 +8,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **The run loop handles each completion once** — it found finished components by
+  checking the future of every running one on every pass, about a hundred passes a second
+  while anything happens. With tens of thousands of tasks in flight that check was most
+  of the loop's time, and a run's time grew with the square of its tasks. Now the engine
+  records each component's end where it ends it (its success, failure and cancellation
+  handlers, also when they find the future already set, and a block's done callback),
+  and a pass handles only those, in the order they ended; a check of every running
+  future stays as a safety net, spaced so that it costs about 1% of the loop at most. A
+  completion now wakes an idle loop, which released the dependents at its next
+  one-second timeout; a busy loop still handles it at its next pass, up to 10 ms later,
+  as before. A backend that reports from its own thread wakes the loop through
+  `call_soon_threadsafe`. The loop also prepares ready components for 20 ms at most,
+  also when they fail or are cancelled because of a dependency, before it submits them
+  and lets other coroutines run, instead of handling a whole generation in one go.
+
 - **`shutdown()` runs once, and every call joins it** — the engine's shutdown is now
   one stored task. A second `shutdown()` call during a shutdown waits for it and
   returns when it has finished, instead of running the whole sequence again (which
