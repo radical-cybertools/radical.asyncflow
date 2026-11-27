@@ -15,7 +15,6 @@ AsyncFlow ships with the following **built-in** execution backends:
 
 For **HPC execution**, install [RHAPSODY](https://radical-cybertools.github.io/rhapsody/) (`pip install rhapsody-py`) which provides additional backends — see [Execution Backends & HPC Integration](exec_backends.md) for the full guide:
 
-- [Radical.Pilot](https://radicalpilot.readthedocs.io/en/stable/#) — distributed HPC execution
 - [Dask](https://docs.dask.org/en/stable/) — parallel computing with Dask distributed
 - Concurrent — extended thread/process pool execution
 - Dragon — high-performance distributed execution

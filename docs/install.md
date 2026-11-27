@@ -84,7 +84,7 @@ To run workflows on HPC clusters, supercomputers, or with Dask, install [RHAPSOD
 pip install rhapsody-py
 ```
 
-RHAPSODY provides HPC execution backends (`RadicalExecutionBackend`, `DaskExecutionBackend`, `DragonExecutionBackendV3`, etc.) that plug directly into AsyncFlow — see [Execution Backends & HPC Integration](exec_backends.md) for usage, configuration, and examples.
+RHAPSODY provides HPC execution backends (`DaskExecutionBackend`, `DragonExecutionBackend`, etc.) that plug directly into AsyncFlow — see [Execution Backends & HPC Integration](exec_backends.md) for usage, configuration, and examples.
 
 ---
 
