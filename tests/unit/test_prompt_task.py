@@ -1,7 +1,5 @@
 """Unit tests for prompt_task and multi-backend registry."""
 
-import asyncio
-
 import pytest
 
 from radical.asyncflow import NoopExecutionBackend, WorkflowEngine
@@ -30,11 +28,9 @@ async def test_prompt_task_registers_correctly():
     async def ask(question):
         return f"Answer: {question}"
 
-    await ask("What is 2+2?")
-    await asyncio.sleep(0.05)
-
-    assert len(engine.components) == 1
-    desc = next(iter(engine.components.values()))["description"]
+    fut = ask("What is 2+2?")
+    await fut
+    desc = fut.task
 
     assert desc["name"] == "ask"
     assert isinstance(desc[PROMPT], str)
@@ -159,10 +155,9 @@ async def test_target_backend_stored_in_comp_desc():
     async def compute_task():
         return 42
 
-    await compute_task()
-    await asyncio.sleep(0.05)
-
-    desc = next(iter(engine.components.values()))["description"]
+    fut = compute_task()
+    await fut
+    desc = fut.task
     assert desc["target_backend"] == "compute"
     await engine.shutdown()
 
@@ -176,10 +171,9 @@ async def test_no_target_backend_is_none():
     async def unrouted_task():
         return "ok"
 
-    await unrouted_task()
-    await asyncio.sleep(0.05)
-
-    desc = next(iter(engine.components.values()))["description"]
+    fut = unrouted_task()
+    await fut
+    desc = fut.task
     assert desc["target_backend"] is None
     await engine.shutdown()
 

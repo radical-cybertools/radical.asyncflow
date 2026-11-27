@@ -18,6 +18,14 @@ from radical.asyncflow import (
 )
 
 
+class _RecordingBackend(LocalExecutionBackend):
+    """Records the uids it was given: a backend releases finished tasks."""
+
+    async def submit_tasks(self, tasks):
+        self.ran = getattr(self, "ran", []) + [t["uid"] for t in tasks]
+        return await super().submit_tasks(tasks)
+
+
 class _HoldingBackend(NoopExecutionBackend):
     """Accepts tasks and leaves them running; the test reports their states."""
 
@@ -30,10 +38,10 @@ async def _run_on_two_backends():
     """Run tasks on two named backends.
 
     Returns the finished spans, the telemetry events, and the name of the backend that
-    ran each task, read from the backends' own task registries.
+    ran each task, as the backends recorded it.
     """
-    compute = await LocalExecutionBackend(name="compute")
-    ai = await LocalExecutionBackend(name="ai")
+    compute = await _RecordingBackend(name="compute")
+    ai = await _RecordingBackend(name="ai")
     # "compute" comes first, so it is the default backend
     engine = await WorkflowEngine.create(backend=[compute, ai])
     exporter = InMemorySpanExporter()
@@ -66,7 +74,7 @@ async def _run_on_two_backends():
     assert results[:2] == [1, 2]
     assert isinstance(results[2], ValueError)
 
-    ran_on = {uid: b.name for b in (compute, ai) for uid in b.tasks}
+    ran_on = {uid: b.name for b in (compute, ai) for uid in b.ran}
     await telemetry.stop()
     await engine.shutdown()
     return exporter.get_finished_spans(), events, ran_on

@@ -47,7 +47,14 @@ async def test_future_state_transitions_to_done():
 @pytest.mark.asyncio
 async def test_future_state_transitions_to_running():
     """task_callbacks(RUNNING) must set state == 'RUNNING' on the future."""
-    engine = await _make_engine()
+
+    # a backend that never completes: a finished task is released (and
+    # ignores later state reports)
+    class HoldingBackend(NoopExecutionBackend):
+        async def submit_tasks(self, tasks):
+            pass
+
+    engine = await WorkflowEngine.create(backend=HoldingBackend())
 
     @engine.function_task
     async def some_task():

@@ -157,6 +157,7 @@ async def test_completed_tasks_removed_from_block_members():
 async def test_block_cancellation_propagates_to_member_tasks():
     """All tasks registered inside a block before cancellation must be cancelled."""
     engine = await _make_local_engine()
+    members = []
 
     @engine.block
     async def my_block():
@@ -178,6 +179,7 @@ async def test_block_cancellation_propagates_to_member_tasks():
         f1 = t1()
         f2 = t2(f1)
         f3 = t3(f1, f2)
+        members.extend((f1, f2, f3))
         await f3
 
     block_fut = my_block()
@@ -187,9 +189,8 @@ async def test_block_cancellation_propagates_to_member_tasks():
     await asyncio.sleep(0.3)
 
     assert block_fut.cancelled()
-    task_comps = [c for c in engine.components.values() if c["type"] == "task"]
-    assert len(task_comps) == 3
-    assert all(c["future"].cancelled() for c in task_comps)
+    assert len(members) == 3
+    assert all(f.cancelled() for f in members)
 
     await engine.shutdown()
 
@@ -199,6 +200,7 @@ async def test_nested_block_cancellation_propagates():
     """Cancelling an outer block propagates recursively to inner blocks and their
     tasks."""
     engine = await _make_local_engine()
+    members = []
 
     @engine.block
     async def outer_block():
@@ -210,6 +212,7 @@ async def test_nested_block_cancellation_propagates():
                 return "never"
 
             f = deep_task()
+            members.append(f)
             await f
 
         ib = inner_block()
@@ -222,8 +225,8 @@ async def test_nested_block_cancellation_propagates():
     await asyncio.sleep(0.3)
 
     assert outer_fut.cancelled()
-    deep_comp = next(c for c in engine.components.values() if c["type"] == "task")
-    assert deep_comp["future"].cancelled()
+    (deep,) = members
+    assert deep.cancelled()
 
     await engine.shutdown()
 

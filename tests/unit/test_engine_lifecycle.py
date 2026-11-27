@@ -58,13 +58,22 @@ async def test_clear_internal_records_resets_resolved_and_running():
     async def work():
         return 42
 
-    work()
+    fut = work()
+    await fut
     await asyncio.sleep(0.1)
 
-    # Confirm something was processed (resolved is non-empty before shutdown)
-    assert len(engine.resolved) > 0
+    # Confirm something was processed (and released after it finished)
+    assert engine._is_released(fut.task["uid"])
+    # a finished task leaves nothing here, so give the clear something to clear
+    engine.resolved.add("task.x")
+    engine.running.add("task.y")
+    engine._to_release.append("task.z")
+    engine._dependency_futures["task.w"] = []
 
     await engine.shutdown()
+
+    assert not engine._is_released(fut.task["uid"])
+    assert not engine._to_release and not engine._dependency_futures
 
     assert len(engine.resolved) == 0
     assert len(engine.running) == 0
@@ -132,7 +141,9 @@ async def test_shutdown_of_one_engine_does_not_reset_another_engines_uids():
         )
 
     assert second.task["uid"] != first.task["uid"]
-    assert set(e1.components) == {first.task["uid"], second.task["uid"]}
+    # each uid has its own record: still registered, or released after it finished
+    for fut in (first, second):
+        assert fut.task["uid"] in e1.components or e1._is_released(fut.task["uid"])
 
     await e1.shutdown()
 
@@ -158,8 +169,9 @@ async def test_uids_are_unique_across_engines_and_shutdowns():
     async def t2():
         return 3
 
-    await asyncio.wait_for(asyncio.gather(t1(), b1(), t2()), timeout=5)
-    uids = [*e1.components, *e2.components]
+    futs = [t1(), b1(), t2()]
+    await asyncio.wait_for(asyncio.gather(*futs), timeout=5)
+    uids = [f.uid for f in futs]
     await e2.shutdown()
 
     e3 = await WorkflowEngine.create(dry_run=True)
@@ -168,8 +180,9 @@ async def test_uids_are_unique_across_engines_and_shutdowns():
     async def t3():
         return 4
 
-    await asyncio.wait_for(t3(), timeout=5)
-    uids += [*e3.components]
+    fut = t3()
+    await asyncio.wait_for(fut, timeout=5)
+    uids.append(fut.uid)
 
     assert len(set(uids)) == len(uids) == 4, uids
 
