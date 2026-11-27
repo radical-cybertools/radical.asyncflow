@@ -192,8 +192,11 @@ The engine shuts down once. Calling `shutdown()` again waits for the shutdown al
 ## Logging & Debugging
 
 Enable detailed logs to diagnose issues:
-```bash
-export RADICAL_LOG_LVL=DEBUG
+```python
+import logging
+from radical.asyncflow.logging import init_default_logger
+
+init_default_logger(logging.DEBUG)
 ```
 
 Logs show task dependencies, execution order, errors.

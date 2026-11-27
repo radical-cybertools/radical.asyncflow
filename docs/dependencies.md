@@ -149,7 +149,7 @@ c = consume(p, InputFile("out.txt"))  # depends on `p` and reads its file
 
 Whether files actually need to be **moved** depends on the execution backend:
 
-- **Backends that link data** run tasks in separate sandboxes, so the file must be linked or staged into the consumer's sandbox. `RadicalExecutionBackend` (RADICAL-Pilot) does this.
+- **Backends that link data** run tasks in separate sandboxes, so the file must be linked or staged into the consumer's sandbox. Such a backend declares the data-linking capabilities described in [Execution Backends](exec_backends.md#data-linking-capabilities); no built-in or RHAPSODY backend currently does.
 - **Shared-filesystem backends** (`LocalExecutionBackend`, `NoopExecutionBackend`, and RHAPSODY's Concurrent, Dragon and Dask backends) run all tasks on one filesystem: a file written by one task is visible to the next at the same path.
 
 With `implicit_data=True` (the default of `WorkflowEngine.create`), AsyncFlow additionally asks backends that support it to link the data of dependencies that declare no output files. On backends that don't support implicit linking, this option has no effect.

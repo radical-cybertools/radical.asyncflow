@@ -35,6 +35,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `start_telemetry()` call, or `None`. It is the manager the engine emits its events
   into.
 
+### Removed
+
+- **RADICAL-Pilot references** — RHAPSODY no longer ships `RadicalExecutionBackend`, so
+  every RADICAL-Pilot reference is removed from the README, docs and tutorial.
+  `examples/07-radical_execution_backend.py` is replaced by
+  `examples/07-dragon_executable_dependencies.py`, which runs the same executable-task
+  DAG on `DragonExecutionBackend`, and the HPC examples in the docs now use
+  `DragonExecutionBackend`. The backend data-linking hooks are unchanged.
+
+- **radical.utils leftovers** — the `WorkflowEngine` docstring no longer lists the
+  nonexistent `log` (`ru.Logger`) and `prof` (`ru.Profiler`) attributes, and
+  `docs/best_practice.md` replaces the unused `RADICAL_LOG_LVL` variable with
+  `init_default_logger(logging.DEBUG)`.
+
 ### Fixed
 
 - **A cancelled executable task stops its process** — cancelling an executable task on
@@ -47,6 +61,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   as Ctrl-C in a terminal, no longer reaches commands directly. `shutdown()` and
   `asyncio.run()` stop them instead. `shutdown()` now waits for the commands, and a
   repeated `cancel_task()` no longer reports the task twice.
+- **Dragon examples run on current RHAPSODY** — `examples/06-dragon_execution_backend.py`
+  imported `DragonExecutionBackendV3`, which RHAPSODY removed in 0.5.0, so it failed at
+  import; it now uses `DragonExecutionBackend`. Its function tasks with a process template
+  printed their exit codes as hostnames; the example now labels them as exit codes. Its
+  multi-process jobs set `"pmi": "none"`, as they are not MPI. Example 07's commands run
+  through `bash -c`, so `date` runs. The docs now say that, on Dragon, a function task
+  with a process template resolves to exit codes, not its return value, and the Dragon
+  install command is `pip install "rhapsody-py[dragon]"`.
 
 ## [0.7.0] 2026-11-10
 

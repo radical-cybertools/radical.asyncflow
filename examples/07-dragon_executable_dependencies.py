@@ -1,17 +1,22 @@
-"""RADICAL Execution Backend Example.
+"""Dragon Execution Backend Example: Executable Task Dependencies.
 
-Demonstrates HPC execution using RadicalExecutionBackend from RHAPSODY.
+Demonstrates HPC execution using DragonExecutionBackend from RHAPSODY:
+- executable tasks chained into a dependency graph (task1 -> task2 -> task3)
+- per-task resources via ``process_template`` / ``process_templates``
+- many workflows running concurrently on one backend
 
-Requires: pip install rhapsody-py
+Requires: pip install "rhapsody-py[dragon]"
+Run with: dragon examples/07-dragon_executable_dependencies.py
 RHAPSODY docs: https://radical-cybertools.github.io/rhapsody/
 AsyncFlow integration: https://radical-cybertools.github.io/rhapsody/integrations/#radical-asyncflow-integration
 """
 
 import asyncio
 import logging
+import multiprocessing as mp
 import time
 
-from rhapsody.backends import RadicalExecutionBackend
+from rhapsody.backends import DragonExecutionBackend
 
 from radical.asyncflow import WorkflowEngine
 from radical.asyncflow.logging import init_default_logger
@@ -23,24 +28,25 @@ async def main():
     init_default_logger(logging.INFO)
 
     # Create backend and workflow
-    backend = await RadicalExecutionBackend({"nodes": 1, "resource": "local.localhost"})
+    backend = await DragonExecutionBackend()
     flow = await WorkflowEngine.create(backend=backend)
 
-    task1_resources = {"ranks": 1, "gpus_per_rank": 1}
-    task2_resources = {"ranks": 1}
-    task3_resources = {"gpus_per_rank": 1}
+    task1_resources = {"process_template": {}}
+    task2_resources = {"process_template": {}}
+    # echo is not an MPI program, so skip PMI setup for the 2-process task
+    task3_resources = {"process_templates": [(2, {})], "pmi": "none"}
 
     @flow.executable_task
     async def task1(task_description=task1_resources):
-        return '/bin/echo "I got executed at" && /bin/date'
+        return "/bin/bash -c 'echo I got executed at; date'"
 
     @flow.executable_task
     async def task2(task1, task_description=task2_resources):
-        return '/bin/echo "I got executed at" && /bin/date'
+        return "/bin/bash -c 'echo I got executed at; date'"
 
     @flow.executable_task
     async def task3(task1, task2, task_description=task3_resources):
-        return '/bin/echo "I got executed at" && /bin/date'
+        return "/bin/bash -c 'echo I got executed at; date'"
 
     async def run_wf(wf_id):
         logger.info(f"Starting workflow {wf_id} at {time.time()}")
@@ -54,11 +60,11 @@ async def main():
     # Run workflows concurrently
     try:
         await asyncio.gather(*[run_wf(i) for i in range(10)])
-    except Exception:
-        raise
     finally:
         await flow.shutdown()
 
 
 if __name__ == "__main__":
+    # Set Dragon as multiprocessing backend
+    mp.set_start_method("dragon")
     asyncio.run(main())

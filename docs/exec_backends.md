@@ -29,9 +29,8 @@ pip install rhapsody-py
 
 RHAPSODY is a dedicated HPC execution layer that provides additional backends, all of which [integrate immediately with AsyncFlow](https://radical-cybertools.github.io/rhapsody/integrations/#radical-asyncflow-integration) — no changes to your workflow logic are needed:
 
-- `RadicalExecutionBackend` — distributed execution via [RADICAL-Pilot](https://radicalpilot.readthedocs.io/en/stable/#)
 - `DaskExecutionBackend` — parallel computing via [Dask](https://docs.dask.org/en/stable/)
-- `DragonExecutionBackendV3` — high-performance distributed execution
+- `DragonExecutionBackend` — high-performance distributed execution on HPC allocations via [Dragon](https://dragonhpc.github.io/dragon/)
 
 ## Data-Linking Capabilities
 
@@ -42,7 +41,7 @@ Each backend declares whether it moves data between tasks, through two class att
 | `supports_implicit_data_linking` | `link_implicit_data_deps(src_task, dst_task)` for each dependency that declares no output files (when `implicit_data=True`) |
 | `supports_explicit_data_linking` | `link_explicit_data_deps(...)` for each matching `OutputFile` → `InputFile`, and for external input files. The backend must return a descriptor containing at least `"target"`. |
 
-Both default to `False`, and AsyncFlow skips the corresponding hooks entirely for backends that don't declare them. Only `RadicalExecutionBackend` declares both; the built-in backends and RHAPSODY's other backends share a filesystem and declare neither. A backend object without these attributes is treated as one that does not link data.
+Both default to `False`, and AsyncFlow skips the corresponding hooks entirely for backends that don't declare them. No built-in or RHAPSODY backend currently declares either: they all share a filesystem between tasks. A backend object without these attributes is treated as one that does not link data.
 
 !!! note "Custom backends"
     Leave both attributes `False` if your tasks share a filesystem or your backend moves no files. Set one to `True` only if you implement the matching hook. The two are independent. See [Task Dependencies](dependencies.md#data-file-dependencies) for how file dependencies are declared.
@@ -59,13 +58,13 @@ from radical.asyncflow import LocalExecutionBackend
 backend = await LocalExecutionBackend(ThreadPoolExecutor())
 ```
 
-### HPC Execution with RadicalExecutionBackend
+### HPC Execution with DragonExecutionBackend
 
 ```python
-# HPC execution with Radical.Pilot (requires RHAPSODY)
-from rhapsody.backends import RadicalExecutionBackend
+# HPC execution with Dragon (requires RHAPSODY)
+from rhapsody.backends import DragonExecutionBackend
 
-backend = await RadicalExecutionBackend({"resource": "local.localhost"})
+backend = await DragonExecutionBackend()
 ```
 
 !!! success
@@ -73,32 +72,32 @@ backend = await RadicalExecutionBackend({"resource": "local.localhost"})
 
 ## Complete HPC Workflow Example
 
-Below is a complete example demonstrating how to execute workflows on HPC infrastructure using `RadicalExecutionBackend` from RHAPSODY.
+Below is a complete example demonstrating how to execute workflows on HPC infrastructure using `DragonExecutionBackend` from RHAPSODY.
 
 ### Setup for HPC Execution
 
 ```python
 import time
 import asyncio
-from rhapsody.backends import RadicalExecutionBackend
+import multiprocessing as mp
+from rhapsody.backends import DragonExecutionBackend
 from radical.asyncflow import WorkflowEngine
 
+mp.set_start_method("dragon")  # run the script with: dragon my_workflow.py
+
 # HPC backend configuration
-backend = await RadicalExecutionBackend(
-    {"nodes": 1, "resource": "local.localhost"}
-)  # (1)!
+backend = await DragonExecutionBackend(batch_kwargs={"num_nodes": 1})  # (1)!
 flow = await WorkflowEngine.create(backend=backend)
 ```
 
-1. Configure for HPC execution - can target supercomputers, GPU clusters, local resources
+1. Configure for HPC execution - the same backend runs on a laptop or across the nodes of an HPC allocation
 
 !!! tip
-    **HPC Resource Configuration**: The `resource` parameter can be configured for various HPC systems:
-    - `'local.localhost'` for local testing
-    - `'ornl.summit'` for Oak Ridge Summit supercomputer
-    - `'tacc.frontera'` for TACC Frontera system
-    - `'anl.theta'` for Argonne Theta system
-    - Custom configurations for your institutional clusters
+    **HPC Resource Configuration**: Dragon runs inside the allocation it is launched in:
+    - Start the script with the `dragon` launcher (`dragon my_workflow.py`), not `python`
+    - Tune the underlying Dragon `Batch` with `batch_kwargs` (for example `num_nodes`)
+    - Set per-task resources through `task_description` with `process_template` (one process) or `process_templates` (multi-process/MPI jobs)
+    - See RHAPSODY's [Resource Specification Guide](https://radical-cybertools.github.io/rhapsody/getting-started/resource-specification/) for every option
 
 ### Define Executable Tasks for HPC
 
@@ -159,7 +158,7 @@ decoded string. `work_dir` and `uid` are set on `WorkflowEngine.create()`; files
 
 !!! note "Backend support"
     `capture_stdio` is honoured by all RHAPSODY backends (`ConcurrentExecutionBackend`,
-    `DaskExecutionBackend`, `DragonExecutionBackendV3`). The built-in `LocalExecutionBackend`
+    `DaskExecutionBackend`, `DragonExecutionBackend`). The built-in `LocalExecutionBackend`
     does not support it — use a RHAPSODY backend for file-based I/O.
 
 !!! note "Function tasks"
@@ -175,10 +174,16 @@ Both `@flow.executable_task` and `@flow.function_task` can do that by passing `t
 
 ```python
 @flow.function_task
-async def mpi_func(task_description={"ranks": 8, "type": "mpi"}):
+async def mpi_func(
+    task_description={"process_templates": [(8, {})], "pmi": "pmix", "timeout": 600},
+):
     """
     multi-rank task that executes on N ranks in parallel.
     """
+    import os
+
+    from mpi4py import MPI
+
     # Initialize MPI communicator
     comm = MPI.COMM_WORLD
     rank = comm.Get_rank()
@@ -191,21 +196,32 @@ async def mpi_func(task_description={"ranks": 8, "type": "mpi"}):
     local_value = rank * 2
     total_sum = comm.allreduce(local_value, op=MPI.SUM)
 
-    # Only rank 0 prints or returns results
+    # Only rank 0 writes the result; the task's return value is not passed back
     if rank == 0:
         print(f"[Task1] Total sum across {size} ranks = {total_sum}")
-        return {"sum": total_sum}
-    else:
-        return None
+        with open("mpi_func_sum.txt", "w") as f:
+            f.write(f"{total_sum}\n")
+
+
+exit_codes = await mpi_func()  # [0, 0, 0, 0, 0, 0, 0, 0]
+with open("mpi_func_sum.txt") as f:
+    total_sum = int(f.read())
 ```
 
+!!! warning "Function tasks with a process template"
+    On `DragonExecutionBackend`, a function task with a `process_template` or
+    `process_templates` runs in separate Dragon processes, and its future resolves to
+    their **exit codes**, not to the function's return value: `0` for one process and a
+    list such as `[0, 0]` for two ranks. Write results to a file (or another shared store)
+    as above. Only a function task with no template returns its value.
+
 !!! note
-    Specifying `task_description` keys and values depends on the corresponding `ExecutionBackend used`. The example above reflects the usage of `RadicalExecutionBackend` from RHAPSODY.
+    Specifying `task_description` keys and values depends on the corresponding `ExecutionBackend used`. The example above reflects the usage of `DragonExecutionBackend` from RHAPSODY.
     For more information about what each task accepts as a resource parameters, please refer
     to the corresponding runtime system (`ExecutionBackend`) documentation.
 
 !!! note
-    If the same `task_description` key (for example, `'ranks'`) is specified both during task definition and again at invocation time, the most recent value — provided at invocation — will take precedence and override the previous one.
+    If the same `task_description` key (for example, `'process_templates'`) is specified both during task definition and again at invocation time, the most recent value — provided at invocation — will take precedence and override the previous one.
 
 
 ### Define Workflow with Dependencies
@@ -245,7 +261,7 @@ await flow.shutdown()
 
 ??? "HPC execution log"
     ```text
-    RadicalExecutionBackend started
+    Dragon backend fully initialized and ready
     Starting workflow 0 at 1752775108.50
     Starting workflow 1 at 1752775108.50
     Starting workflow 2 at 1752775108.50
@@ -256,57 +272,75 @@ await flow.shutdown()
     Workflow 2 completed at 1752775110.27
     Workflow 3 completed at 1752775110.28
     Workflow 4 completed at 1752775110.29
-    RadicalExecutionBackend: All tasks completed, cleaning up resources
 
     Total time running asynchronously is: 1.79
+    Dragon backend shutdown complete
     ```
 
 ## HPC vs Local Development: Key Differences
 
-| Aspect | LocalExecutionBackend | RadicalExecutionBackend (RHAPSODY) |
-|--------|----------------------|-------------------------------------|
+| Aspect | LocalExecutionBackend | DragonExecutionBackend (RHAPSODY) |
+|--------|----------------------|------------------------------------|
 | **Scale** | Single machine, limited cores | Thousands of nodes, massive parallelism |
 | **Memory** | Local system RAM | Distributed memory across nodes |
 | **Storage** | Local filesystem | High-performance parallel filesystems |
 | **Task Type** | Python functions | Shell executables, compiled programs |
 | **Use Case** | Development, testing | Production HPC workloads |
-| **Install** | Built-in | `pip install rhapsody-py` |
+| **Install** | Built-in | `pip install "rhapsody-py[dragon]"` |
 
 ## Advanced HPC Configurations
 
-### GPU Cluster Configuration
+Request the nodes from your batch scheduler (for example `salloc -N 100`), then start the
+workflow inside the allocation with `dragon my_workflow.py`.
+
+### Large-Scale Multi-Node Configuration
 
 ```python
-from rhapsody.backends import RadicalExecutionBackend
+from rhapsody.backends import DragonExecutionBackend
 
-# Configure for GPU-accelerated computing
-backend = await RadicalExecutionBackend(
-    {
-        "resource": "ornl.summit",
-        "queue": "gpu",
-        "nodes": 100,
-        "gpus_per_node": 6,
-        "walltime": 120,  # minutes
+# Spread tasks across the nodes of the allocation
+backend = await DragonExecutionBackend(
+    batch_kwargs={
+        "num_nodes": 100,
+        "scheduler_workers": 16,
     }
 )
 ```
 
-### Large-Scale CPU Configuration
+### MPI Configuration
 
 ```python
-from rhapsody.backends import RadicalExecutionBackend
+from rhapsody.backends import DragonExecutionBackend
 
-# Configure for massive CPU parallelism
-backend = await RadicalExecutionBackend(
-    {
-        "resource": "tacc.frontera",
-        "queue": "normal",
-        "nodes": 1000,
-        "cores_per_node": 56,
-        "walltime": 240,  # minutes
-    }
-)
+# Default PMI for every multi-process (MPI) job
+backend = await DragonExecutionBackend(pmi="pmix")
+
+
+@flow.executable_task
+async def simulation(task_description={"process_templates": [(256, {})]}):
+    return "./simulate --steps 10000"
 ```
+
+### GPU Placement
+
+Pin processes to GPUs with Dragon's `Policy`, passed in each task's `process_template`:
+
+```python
+from dragon.infrastructure.policy import Policy
+
+gpu0 = Policy(
+    placement=Policy.Placement.HOST_NAME, host_name="node001", gpu_affinity=[0]
+)
+
+
+@flow.function_task
+async def train(task_description={"process_template": {"policy": gpu0}}): ...
+
+
+exit_code = await train()  # 0: a templated function task resolves to its exit code
+```
+
+See RHAPSODY's [Resource Specification Guide](https://radical-cybertools.github.io/rhapsody/getting-started/resource-specification/) for PMI, `libpmix.so` and GPU-affinity details.
 
 !!! warning
     **Resource Management**: Always call `await flow.shutdown()` to properly release HPC resources and prevent job queue issues.

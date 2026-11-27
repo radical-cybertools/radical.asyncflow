@@ -135,7 +135,7 @@ You now know how to:
 ## Next Steps
 
 - Learn how to run multiple workflows concurrently.
-- For HPC execution, install [RHAPSODY](https://radical-cybertools.github.io/rhapsody/) and explore backends like `DaskExecutionBackend` or `RadicalExecutionBackend` — see [Execution Backends & HPC Integration](exec_backends.md) to get started.
+- For HPC execution, install [RHAPSODY](https://radical-cybertools.github.io/rhapsody/) and explore backends like `DaskExecutionBackend` or `DragonExecutionBackend` — see [Execution Backends & HPC Integration](exec_backends.md) to get started.
 - Integrate with HPC schedulers.
 
 ---
