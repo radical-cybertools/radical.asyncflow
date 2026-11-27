@@ -8,7 +8,12 @@ Demonstrates:
 - process_templates for multi-process parallel jobs
 - Native function execution (no task_description)
 
-Requires: pip install rhapsody-py
+A function task with a process template runs in separate Dragon processes, and its
+future resolves to their exit codes, not to the function's return value. Only a
+native function task (no template) returns its value.
+
+Requires: pip install "rhapsody-py[dragon]"
+Run with: dragon examples/06-dragon_execution_backend.py
 RHAPSODY docs: https://radical-cybertools.github.io/rhapsody/
 AsyncFlow integration: https://radical-cybertools.github.io/rhapsody/integrations/#radical-asyncflow-integration
 """
@@ -38,7 +43,8 @@ async def main():
 
     # Resource descriptions
     single_process = {"process_template": {}}
-    parallel_processes = {"process_templates": [(2, {}), (2, {})]}
+    # The processes are not MPI programs, so skip PMI setup
+    parallel_processes = {"process_templates": [(2, {}), (2, {})], "pmi": "none"}
 
     # Single-process executable task
     @flow.executable_task
@@ -50,19 +56,19 @@ async def main():
     async def parallel_executable(*args, task_description=parallel_processes):
         return "/bin/bash -c 'echo $HOSTNAME'"
 
-    # Single-process function task
+    # Single-process function task: resolves to the process exit code
     @flow.function_task
     async def single_function(task_description=single_process):
         import socket
 
-        return socket.gethostname()
+        print(f"single_function on {socket.gethostname()}")
 
-    # Parallel-process function task
+    # Parallel-process function task: resolves to one exit code per process
     @flow.function_task
     async def parallel_function(task_description=parallel_processes):
         import socket
 
-        return socket.gethostname()
+        print(f"parallel_function on {socket.gethostname()}")
 
     # Native function (no task_description)
     @flow.function_task
@@ -84,9 +90,17 @@ async def main():
         native_function(),
     )
 
+    labels = [
+        "single_executable (stdout)",
+        "parallel_executable (stdout)",
+        "single_function (exit code)",
+        "parallel_function (exit codes)",
+        "native_function (return value)",
+    ]
+
     print("\nResults:")
-    for i, result in enumerate(results, 1):
-        print(f"  {i}. {result}")
+    for label, result in zip(labels, results, strict=True):
+        print(f"  {label}: {result}")
 
     await flow.shutdown()
 

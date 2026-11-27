@@ -37,6 +37,8 @@ These examples require [RHAPSODY](https://radical-cybertools.github.io/rhapsody/
 ```bash
 pip install rhapsody-py
 python examples/05-dask_execution_backend.py
+
+pip install "rhapsody-py[dragon]"
 dragon examples/06-dragon_execution_backend.py
 dragon examples/07-dragon_executable_dependencies.py
 ```

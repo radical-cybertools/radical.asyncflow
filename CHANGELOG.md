@@ -46,6 +46,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `docs/best_practice.md` replaces the unused `RADICAL_LOG_LVL` variable with
   `init_default_logger(logging.DEBUG)`.
 
+### Fixed
+
+- **Dragon examples run on current RHAPSODY** — `examples/06-dragon_execution_backend.py`
+  imported `DragonExecutionBackendV3`, which RHAPSODY removed in 0.5.0, so it failed at
+  import; it now uses `DragonExecutionBackend`. Its function tasks with a process template
+  printed their exit codes as hostnames; the example now labels them as exit codes. Its
+  multi-process jobs set `"pmi": "none"`, as they are not MPI. Example 07's commands run
+  through `bash -c`, so `date` runs. The docs now say that, on Dragon, a function task
+  with a process template resolves to exit codes, not its return value, and the Dragon
+  install command is `pip install "rhapsody-py[dragon]"`.
+
 ## [0.7.0] 2026-11-10
 
 ### Fixed
